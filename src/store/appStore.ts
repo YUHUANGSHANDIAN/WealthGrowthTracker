@@ -1,0 +1,506 @@
+import { create } from 'zustand';
+import type {
+  Channel,
+  ChartSettings,
+  CoinRainConfig,
+  CountdownData,
+  CountdownProgressPoint,
+  CurrentWealthLevel,
+  CustomSortRule,
+  FinancialReport,
+  GoalAchievementStatus,
+  HistoryPoint,
+  ReportType,
+  SortHistory,
+  SubChannel,
+  TimeRangeHistory,
+} from '../types';
+import { STORAGE_KEYS } from '../constants/storageKeys';
+import {
+  defaultChannels,
+  defaultChartSettings,
+  defaultCoinRainConfig,
+  defaultCountdownData,
+  defaultHistory,
+  defaultSortRules,
+} from '../constants/defaults';
+import {
+  addChildChannel,
+  makeChannel,
+  makeSubChannel,
+  normalizeChannelAmounts,
+  removeChannel,
+  removeChildChannel,
+  setLeafAmount,
+  toggleChannelExpanded,
+  totalAssets,
+  updateChannel,
+  updateSubChannel,
+} from '../utils/channels';
+import { round2 } from '../utils/money';
+import { todayString } from '../utils/date';
+import { randomId, uuid } from '../utils/id';
+import { storageService } from '../services/storage';
+import {
+  buildBackup,
+  parseBackup,
+  type BackupSource,
+  type ImportedData,
+} from '../services/export';
+import { saveTextFile, backupFilename } from '../services/export/download';
+import { generateReport, toggleReportArchive } from '../features/reports/generate';
+
+export type ToastKind = 'success' | 'error' | 'info';
+export interface Toast {
+  id: string;
+  kind: ToastKind;
+  message: string;
+}
+
+interface AppState {
+  // 运行时状态
+  hydrated: boolean;
+  toasts: Toast[];
+  coinRainActive: boolean;
+
+  // 业务数据（持久化）
+  channels: Channel[];
+  history: HistoryPoint[];
+  reports: FinancialReport[];
+  sortRules: CustomSortRule[];
+  sortHistory: SortHistory;
+  chartSettings: ChartSettings;
+  countdown: CountdownData;
+  countdownOpacity: number;
+  coinRainConfig: CoinRainConfig;
+  goalAchieved: GoalAchievementStatus;
+  timeRangeHistory: TimeRangeHistory;
+  countdownProgressHistory: CountdownProgressPoint[];
+  currentWealthLevel: CurrentWealthLevel;
+  wealthTrackerHistory: HistoryPoint[];
+
+  // 数据管理弹窗状态
+  importModalOpen: boolean;
+
+  // ---- 生命周期 ----
+  hydrate: () => Promise<void>;
+
+  // ---- 通用 ----
+  pushToast: (message: string, kind?: ToastKind) => void;
+  dismissToast: (id: string) => void;
+  setImportModalOpen: (open: boolean) => void;
+
+  // ---- 渠道 ----
+  addParentChannel: (name: string, emoji: string, color: string) => void;
+  updateParentChannel: (id: string, patch: Partial<Pick<Channel, 'name' | 'emoji' | 'color'>>) => void;
+  deleteParentChannel: (id: string) => void;
+  toggleChannel: (id: string) => void;
+  addSubChannel: (parentId: string, name: string, emoji: string, color: string) => void;
+  updateSubChannelInfo: (
+    parentId: string,
+    childId: string,
+    patch: Partial<Pick<SubChannel, 'name' | 'emoji' | 'color'>>,
+  ) => void;
+  deleteSubChannel: (parentId: string, childId: string) => void;
+  setAmount: (target: { parentId: string; childId?: string }, amount: number) => void;
+
+  // ---- 历史 ----
+  addHistoryPoint: (date: string, totalAmount: number) => void;
+  updateHistoryPoint: (date: string, totalAmount: number) => void;
+  deleteHistoryPoint: (date: string) => void;
+  deleteHistoryPoints: (dates: string[]) => void;
+
+  // ---- 报告 ----
+  generateReportNow: (reportType: ReportType, referenceDate?: string) => FinancialReport;
+  archiveReport: (id: string, note?: string) => void;
+  deleteReport: (id: string) => void;
+  deleteReports: (ids: string[]) => void;
+
+  // ---- 排序 ----
+  addSortRule: (rule: Omit<CustomSortRule, 'id' | 'createdAt'>) => void;
+  deleteSortRule: (id: string) => void;
+  recordSortHistory: (key: string, label: string) => void;
+  clearSortHistory: () => void;
+
+  // ---- 倒计时 / 目标 ----
+  setCountdown: (countdown: CountdownData) => void;
+  setCountdownOpacity: (opacity: number) => void;
+  markGoalAchieved: () => void;
+  resetGoal: () => void;
+
+  // ---- 金币雨 / 图表 ----
+  setCoinRainConfig: (config: CoinRainConfig) => void;
+  setChartSettings: (settings: ChartSettings) => void;
+  triggerCoinRain: () => void;
+  stopCoinRain: () => void;
+
+  // ---- 导入导出 ----
+  exportData: () => Promise<void>;
+  importData: (jsonText: string) => Promise<{ ok: boolean; message: string }>;
+}
+
+const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
+  {
+    key: STORAGE_KEYS.wealthTrackerData,
+    pick: (s) => ({ channels: s.channels, history: s.history }),
+  },
+  { key: STORAGE_KEYS.financialReports, pick: (s) => s.reports },
+  { key: STORAGE_KEYS.customSortRules, pick: (s) => ({ rules: s.sortRules.filter((r) => !r.isSystem) }) },
+  { key: STORAGE_KEYS.sortHistory, pick: (s) => s.sortHistory },
+  { key: STORAGE_KEYS.chartSettings, pick: (s) => s.chartSettings },
+  { key: STORAGE_KEYS.countdownData, pick: (s) => s.countdown },
+  { key: STORAGE_KEYS.countdownOpacity, pick: (s) => s.countdownOpacity },
+  { key: STORAGE_KEYS.coinRainConfig, pick: (s) => s.coinRainConfig },
+  { key: STORAGE_KEYS.goalAchievementStatus, pick: (s) => s.goalAchieved },
+  { key: STORAGE_KEYS.timeRangeHistory, pick: (s) => s.timeRangeHistory },
+  { key: STORAGE_KEYS.countdownProgressHistory, pick: (s) => s.countdownProgressHistory },
+  { key: STORAGE_KEYS.currentWealthLevel, pick: (s) => s.currentWealthLevel },
+  { key: STORAGE_KEYS.wealthTrackerHistory, pick: (s) => s.wealthTrackerHistory },
+];
+
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function schedulePersist(get: () => AppState): void {
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(async () => {
+    const s = get();
+    if (!s.hydrated) return;
+    for (const { key, pick } of PERSIST_KEYS) {
+      await storageService.setJSON(key, pick(s));
+    }
+  }, 300);
+}
+
+/** 渠道金额变更后，同步今天的历史点（保持趋势最新）。 */
+function afterChannelChange(s: Pick<AppState, 'channels' | 'history'>): {
+  channels: Channel[];
+  history: HistoryPoint[];
+} {
+  const channels = normalizeChannelAmounts(s.channels);
+  const total = totalAssets(channels);
+  const today = todayString();
+  let history = s.history;
+  const existing = history.find((h) => h.date === today);
+  if (existing) {
+    history = history.map((h) => (h.date === today ? { ...h, totalAmount: total } : h));
+  } else {
+    history = [...history, { date: today, totalAmount: total }];
+  }
+  return { channels, history };
+}
+
+export const useAppStore = create<AppState>()((set, get) => {
+  const persist = () => schedulePersist(get);
+
+  return {
+    hydrated: false,
+    toasts: [],
+    coinRainActive: false,
+
+    channels: [],
+    history: [],
+    reports: [],
+    sortRules: [],
+    sortHistory: { history: [] },
+    chartSettings: defaultChartSettings(),
+    countdown: defaultCountdownData(),
+    countdownOpacity: 1,
+    coinRainConfig: defaultCoinRainConfig(),
+    goalAchieved: { hasAchievedGoal: false },
+    timeRangeHistory: { records: [] },
+    countdownProgressHistory: [],
+    currentWealthLevel: { level: '' },
+    wealthTrackerHistory: [],
+
+    importModalOpen: false,
+
+    // ---------------------------------------------------------------------
+    async hydrate() {
+      const [
+        wtd,
+        reports,
+        rules,
+        sortHistory,
+        chartSettings,
+        countdown,
+        opacity,
+        coinRain,
+        goal,
+        timeRange,
+        progressHistory,
+        level,
+        linkedHistory,
+      ] = await Promise.all([
+        storageService.getJSON<{ channels: Channel[]; history: HistoryPoint[] }>(STORAGE_KEYS.wealthTrackerData),
+        storageService.getJSON<FinancialReport[]>(STORAGE_KEYS.financialReports),
+        storageService.getJSON<{ rules: CustomSortRule[] }>(STORAGE_KEYS.customSortRules),
+        storageService.getJSON<SortHistory>(STORAGE_KEYS.sortHistory),
+        storageService.getJSON<ChartSettings>(STORAGE_KEYS.chartSettings),
+        storageService.getJSON<CountdownData>(STORAGE_KEYS.countdownData),
+        storageService.getRaw(STORAGE_KEYS.countdownOpacity),
+        storageService.getJSON<CoinRainConfig>(STORAGE_KEYS.coinRainConfig),
+        storageService.getJSON<GoalAchievementStatus>(STORAGE_KEYS.goalAchievementStatus),
+        storageService.getJSON<TimeRangeHistory>(STORAGE_KEYS.timeRangeHistory),
+        storageService.getJSON<CountdownProgressPoint[]>(STORAGE_KEYS.countdownProgressHistory),
+        storageService.getJSON<CurrentWealthLevel>(STORAGE_KEYS.currentWealthLevel),
+        storageService.getJSON<HistoryPoint[]>(STORAGE_KEYS.wealthTrackerHistory),
+      ]);
+
+      const isFirstRun = !wtd;
+      const channels = wtd?.channels?.length ? wtd.channels : defaultChannels();
+      const history = wtd?.history?.length ? wtd.history : defaultHistory();
+
+      // 系统规则始终可用，叠加用户自定义规则（只持久化用户规则，系统规则随版本生成）。
+      const userRules = rules?.rules?.filter((r) => !r.isSystem) ?? [];
+      const allRules = [...defaultSortRules(), ...userRules];
+
+      set({
+        channels: normalizeChannelAmounts(channels),
+        history,
+        reports: reports ?? [],
+        sortRules: allRules,
+        sortHistory: sortHistory ?? { history: [] },
+        chartSettings: chartSettings ?? defaultChartSettings(),
+        countdown: countdown ?? defaultCountdownData(),
+        countdownOpacity: opacity != null ? Number(opacity) || 1 : 1,
+        coinRainConfig: coinRain ?? defaultCoinRainConfig(),
+        goalAchieved: goal ?? { hasAchievedGoal: false },
+        timeRangeHistory: timeRange ?? { records: [] },
+        countdownProgressHistory: progressHistory ?? [],
+        currentWealthLevel: level ?? { level: '' },
+        wealthTrackerHistory: linkedHistory ?? [],
+        hydrated: true,
+      });
+
+      if (isFirstRun) {
+        // 首次运行：写入默认数据，保证刷新后仍在。
+        persist();
+      }
+    },
+
+    // ---------------------------------------------------------------------
+    pushToast(message, kind = 'info') {
+      const id = uuid();
+      set((s) => ({ toasts: [...s.toasts, { id, kind, message }] }));
+      setTimeout(() => get().dismissToast(id), 4000);
+    },
+    dismissToast(id) {
+      set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+    },
+    setImportModalOpen(open) {
+      set({ importModalOpen: open });
+    },
+
+    // ---------------------------------------------------------------------
+    addParentChannel(name, emoji, color) {
+      const channel = makeChannel(name, emoji, color);
+      set((s) => ({ channels: [...s.channels, channel] }));
+      get().pushToast(`已添加渠道「${name}」`, 'success');
+      persist();
+    },
+    updateParentChannel(id, patch) {
+      set((s) => ({ channels: updateChannel(s.channels, id, patch) }));
+      persist();
+    },
+    deleteParentChannel(id) {
+      set((s) => ({ channels: removeChannel(s.channels, id) }));
+      persist();
+    },
+    toggleChannel(id) {
+      set((s) => ({ channels: toggleChannelExpanded(s.channels, id) }));
+      persist();
+    },
+    addSubChannel(parentId, name, emoji, color) {
+      const child = makeSubChannel(parentId, name, emoji, color);
+      set((s) => ({ channels: addChildChannel(s.channels, parentId, child) }));
+      persist();
+    },
+    updateSubChannelInfo(parentId, childId, patch) {
+      set((s) => ({ channels: updateSubChannel(s.channels, parentId, childId, patch) }));
+      persist();
+    },
+    deleteSubChannel(parentId, childId) {
+      set((s) => ({ channels: removeChildChannel(s.channels, parentId, childId) }));
+      persist();
+    },
+    setAmount(target, amount) {
+      set((s) => {
+        const channels = setLeafAmount(s.channels, target, amount);
+        const { history } = afterChannelChange({ ...s, channels });
+        return { channels, history };
+      });
+      persist();
+    },
+
+    // ---------------------------------------------------------------------
+    addHistoryPoint(date, totalAmount) {
+      set((s) => {
+        const rest = s.history.filter((h) => h.date !== date);
+        const history = [...rest, { date, totalAmount: round2(totalAmount) }].sort((a, b) =>
+          a.date < b.date ? -1 : 1,
+        );
+        return { history };
+      });
+      persist();
+    },
+    updateHistoryPoint(date, totalAmount) {
+      set((s) => ({
+        history: s.history.map((h) => (h.date === date ? { ...h, totalAmount: round2(totalAmount) } : h)),
+      }));
+      persist();
+    },
+    deleteHistoryPoint(date) {
+      set((s) => ({ history: s.history.filter((h) => h.date !== date) }));
+      persist();
+    },
+    deleteHistoryPoints(dates) {
+      const set_ = new Set(dates);
+      set((s) => ({ history: s.history.filter((h) => !set_.has(h.date)) }));
+      persist();
+    },
+
+    // ---------------------------------------------------------------------
+    generateReportNow(reportType, referenceDate = todayString()) {
+      const s = get();
+      const report = generateReport(s.channels, s.history, reportType, referenceDate);
+      const reports = [report, ...s.reports];
+      set({ reports });
+      persist();
+      get().pushToast(`已生成报告「${report.title}」`, 'success');
+      return report;
+    },
+    archiveReport(id, note) {
+      set((s) => ({
+        reports: s.reports.map((r) => (r.id === id ? toggleReportArchive(r, note) : r)),
+      }));
+      persist();
+    },
+    deleteReport(id) {
+      set((s) => ({ reports: s.reports.filter((r) => r.id !== id) }));
+      persist();
+    },
+    deleteReports(ids) {
+      const set_ = new Set(ids);
+      set((s) => ({ reports: s.reports.filter((r) => !set_.has(r.id)) }));
+      persist();
+    },
+
+    // ---------------------------------------------------------------------
+    addSortRule(rule) {
+      const full: CustomSortRule = { ...rule, id: randomId('rule'), createdAt: new Date().toISOString() };
+      set((s) => ({ sortRules: [...s.sortRules, full] }));
+      persist();
+    },
+    deleteSortRule(id) {
+      set((s) => ({ sortRules: s.sortRules.filter((r) => r.id !== id) }));
+      persist();
+    },
+    recordSortHistory(key, label) {
+      const entry = { key, label, timestamp: new Date().toISOString() };
+      set((s) => {
+        const history = [{ ...entry }, ...s.sortHistory.history.filter((h) => h.key !== key)].slice(0, 10);
+        return { sortHistory: { history } };
+      });
+      persist();
+    },
+    clearSortHistory() {
+      set({ sortHistory: { history: [] } });
+      persist();
+    },
+
+    // ---------------------------------------------------------------------
+    setCountdown(countdown) {
+      set({ countdown });
+      persist();
+    },
+    setCountdownOpacity(opacity) {
+      const clamped = Math.max(0, Math.min(1, opacity));
+      set({ countdownOpacity: clamped });
+      persist();
+    },
+    markGoalAchieved() {
+      set({ goalAchieved: { hasAchievedGoal: true } });
+      persist();
+    },
+    resetGoal() {
+      set({ goalAchieved: { hasAchievedGoal: false } });
+      persist();
+    },
+
+    // ---------------------------------------------------------------------
+    setCoinRainConfig(config) {
+      set({ coinRainConfig: config });
+      persist();
+    },
+    setChartSettings(settings) {
+      set({ chartSettings: settings });
+      persist();
+    },
+    triggerCoinRain() {
+      set({ coinRainActive: true });
+    },
+    stopCoinRain() {
+      set({ coinRainActive: false });
+    },
+
+    // ---------------------------------------------------------------------
+    async exportData() {
+      const s = get();
+      const source: BackupSource = {
+        channels: s.channels,
+        history: s.history,
+        reports: s.reports,
+        sortRules: s.sortRules.filter((r) => !r.isSystem),
+        countdown: s.countdown,
+        goalAchieved: s.goalAchieved,
+        countdownOpacity: s.countdownOpacity,
+        coinRainConfig: s.coinRainConfig,
+        chartSettings: s.chartSettings,
+        sortHistory: s.sortHistory,
+        timeRangeHistory: s.timeRangeHistory,
+        countdownProgressHistory: s.countdownProgressHistory,
+        currentWealthLevel: s.currentWealthLevel,
+        wealthTrackerHistory: s.wealthTrackerHistory,
+      };
+      const backup = buildBackup(source);
+      const text = JSON.stringify(backup, null, 2);
+      const filename = backupFilename();
+      await saveTextFile(filename, text);
+      get().pushToast(`数据已成功导出为 ${filename}`, 'success');
+    },
+    async importData(jsonText) {
+      const result = parseBackup(jsonText);
+      if (!result.ok) return { ok: false, message: result.error };
+
+      const d: ImportedData = result.data;
+      set({
+        channels: normalizeChannelAmounts(d.channels),
+        history: d.history,
+        reports: d.reports,
+        sortRules: d.sortRules.length ? d.sortRules : defaultSortRules(),
+        countdown: d.countdown,
+        goalAchieved: d.goalAchieved,
+        countdownOpacity: d.countdownOpacity,
+        coinRainConfig: d.coinRainConfig ?? defaultCoinRainConfig(),
+        chartSettings: d.chartSettings ?? defaultChartSettings(),
+        sortHistory: d.sortHistory ?? { history: [] },
+        timeRangeHistory: d.timeRangeHistory ?? { records: [] },
+        countdownProgressHistory: d.countdownProgressHistory ?? [],
+        currentWealthLevel: d.currentWealthLevel ?? { level: '' },
+        wealthTrackerHistory: d.wealthTrackerHistory ?? [],
+      });
+      persist();
+      return {
+        ok: true,
+        message: `导入成功：${d.channels.length} 个渠道、${d.history.length} 条历史记录${
+          d.reports.length ? `、${d.reports.length} 份报告` : ''
+        }`,
+      };
+    },
+  };
+});
+
+/** 派生：当前总资产。 */
+export function selectTotalAssets(s: AppState): number {
+  return totalAssets(s.channels);
+}

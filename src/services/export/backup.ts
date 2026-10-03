@@ -1,0 +1,401 @@
+import type {
+  BackupData,
+  Channel,
+  ChartSettings,
+  CoinRainConfig,
+  CountdownData,
+  CountdownProgressPoint,
+  CurrentWealthLevel,
+  CustomSortRule,
+  FinancialReport,
+  GoalAchievementStatus,
+  HistoryPoint,
+  SortHistory,
+  SubChannel,
+  TimeRangeHistory,
+} from '../../types';
+import { round2 } from '../../utils/money';
+import { randomId } from '../../utils/id';
+import { todayString } from '../../utils/date';
+import { defaultChannels, defaultCountdownData } from '../../constants/defaults';
+import { getLevelByAmount } from '../../constants/levels';
+
+export const BACKUP_VERSION = '1.0.0';
+export const APP_NAME = '财富成长记';
+
+/** 导出/导入时需要用到的完整应用状态（由 store 提供）。 */
+export interface BackupSource {
+  channels: Channel[];
+  history: HistoryPoint[];
+  reports: FinancialReport[];
+  sortRules: CustomSortRule[];
+  countdown: CountdownData;
+  goalAchieved: GoalAchievementStatus;
+  countdownOpacity: number;
+  coinRainConfig: CoinRainConfig;
+  chartSettings: ChartSettings;
+  sortHistory: SortHistory;
+  timeRangeHistory: TimeRangeHistory;
+  countdownProgressHistory: CountdownProgressPoint[];
+  currentWealthLevel: CurrentWealthLevel;
+  wealthTrackerHistory: HistoryPoint[];
+}
+
+/** 解析+归一化后的可导入数据。 */
+export interface ImportedData {
+  channels: Channel[];
+  history: HistoryPoint[];
+  reports: FinancialReport[];
+  sortRules: CustomSortRule[];
+  countdown: CountdownData;
+  goalAchieved: GoalAchievementStatus;
+  countdownOpacity: number;
+  coinRainConfig?: CoinRainConfig;
+  chartSettings?: ChartSettings;
+  sortHistory?: SortHistory;
+  timeRangeHistory?: TimeRangeHistory;
+  countdownProgressHistory?: CountdownProgressPoint[];
+  currentWealthLevel?: CurrentWealthLevel;
+  wealthTrackerHistory?: HistoryPoint[];
+}
+
+export type ParseResult =
+  | { ok: true; data: ImportedData; version: string; meta: { totalRecords?: Record<string, number>; totalAmount?: number } }
+  | { ok: false; error: string };
+
+// ---------------------------------------------------------------------------
+// 归一化辅助（容错：字段缺失/类型错误时回退到安全默认值）
+// ---------------------------------------------------------------------------
+
+function toNumber(v: unknown, fallback = 0): number {
+  const n = typeof v === 'string' ? Number(v) : v;
+  return typeof n === 'number' && Number.isFinite(n) ? n : fallback;
+}
+
+function toStr(v: unknown, fallback = ''): string {
+  return typeof v === 'string' ? v : fallback;
+}
+
+function toBool(v: unknown, fallback = false): boolean {
+  return typeof v === 'boolean' ? v : fallback;
+}
+
+function toArray(v: unknown): unknown[] {
+  return Array.isArray(v) ? v : [];
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function normalizeSubChannel(raw: unknown, parentId: string): SubChannel {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    id: toStr(r.id, randomId('sub')),
+    name: toStr(r.name, '未命名渠道'),
+    emoji: toStr(r.emoji, '💰'),
+    amount: round2(toNumber(r.amount, 0)),
+    color: toStr(r.color, '#06B6D4'),
+    parentId: toStr(r.parentId, parentId),
+  };
+}
+
+function normalizeChannel(raw: unknown): Channel {
+  const r = isRecord(raw) ? raw : {};
+  const id = toStr(r.id, randomId('channel'));
+  const rawChildren = toArray(r.children);
+  const children = rawChildren.length
+    ? rawChildren.map((c) => normalizeSubChannel(c, id))
+    : undefined;
+  return {
+    id,
+    name: toStr(r.name, '未命名渠道'),
+    emoji: toStr(r.emoji, '🏦'),
+    amount: round2(toNumber(r.amount, 0)),
+    color: toStr(r.color, '#3B82F6'),
+    isParent: toBool(r.isParent, true),
+    isExpanded: toBool(r.isExpanded, false),
+    ...(r.parentId !== undefined ? { parentId: toStr(r.parentId, '') } : {}),
+    ...(children ? { children } : {}),
+    ...(r.createdAt !== undefined ? { createdAt: toStr(r.createdAt, '') } : {}),
+    ...(r.updatedAt !== undefined ? { updatedAt: toStr(r.updatedAt, '') } : {}),
+  };
+}
+
+function normalizeHistoryPoint(raw: unknown): HistoryPoint | null {
+  const r = isRecord(raw) ? raw : {};
+  const date = toStr(r.date, '');
+  if (!date) return null;
+  const point: HistoryPoint = {
+    date,
+    totalAmount: round2(toNumber(r.totalAmount, 0)),
+  };
+  if (r.id !== undefined) point.id = toStr(r.id, '');
+  if (r.name !== undefined) point.name = toStr(r.name, '');
+  if (r.timestamp !== undefined) point.timestamp = toNumber(r.timestamp, 0);
+  if (r.wealthLevel !== undefined) point.wealthLevel = toStr(r.wealthLevel, '');
+  if (r.linkedReportId !== undefined) point.linkedReportId = toStr(r.linkedReportId, '');
+  if (Array.isArray(r.channels)) point.channels = r.channels.map(normalizeChannel);
+  if (Array.isArray(r.events)) point.events = r.events;
+  if (r.marketConditions !== undefined) point.marketConditions = r.marketConditions;
+  return point;
+}
+
+function normalizeChannelDetail(raw: unknown): FinancialReport['channelDetails'][number] | null {
+  if (!isRecord(raw)) return null;
+  const id = toStr(raw.id, '');
+  if (!id) return null;
+  return {
+    id,
+    name: toStr(raw.name, '未命名渠道'),
+    emoji: toStr(raw.emoji, '💰'),
+    amount: round2(toNumber(raw.amount, 0)),
+    isParent: toBool(raw.isParent, false),
+    children: toArray(raw.children)
+      .filter(isRecord)
+      .map((c) => ({ id: toStr(c.id, ''), name: toStr(c.name, ''), amount: round2(toNumber(c.amount, 0)) })),
+    percentage: toNumber(raw.percentage, 0),
+  };
+}
+
+function normalizeReport(raw: unknown): FinancialReport | null {
+  const r = isRecord(raw) ? raw : {};
+  const id = toStr(r.id, '');
+  if (!id) return null;
+  const reportType = ['weekly', 'monthly', 'yearly'].includes(toStr(r.reportType))
+    ? (toStr(r.reportType) as FinancialReport['reportType'])
+    : 'weekly';
+  return {
+    id,
+    reportType,
+    startDate: toStr(r.startDate, ''),
+    endDate: toStr(r.endDate, ''),
+    title: toStr(r.title, '未命名报告'),
+    totalAmount: round2(toNumber(r.totalAmount, 0)),
+    changeAmount: round2(toNumber(r.changeAmount, 0)),
+    changePercentage: toNumber(r.changePercentage, 0),
+    ...(r.weeklyChange !== undefined ? { weeklyChange: toNumber(r.weeklyChange, 0) } : {}),
+    ...(r.weeklyChangePercentage !== undefined ? { weeklyChangePercentage: toNumber(r.weeklyChangePercentage, 0) } : {}),
+    ...(r.monthlyChange !== undefined ? { monthlyChange: toNumber(r.monthlyChange, 0) } : {}),
+    ...(r.monthlyChangePercentage !== undefined ? { monthlyChangePercentage: toNumber(r.monthlyChangePercentage, 0) } : {}),
+    ...(r.yearlyChange !== undefined ? { yearlyChange: toNumber(r.yearlyChange, 0) } : {}),
+    ...(r.yearlyChangePercentage !== undefined ? { yearlyChangePercentage: toNumber(r.yearlyChangePercentage, 0) } : {}),
+    ...(r.previousTotalAmount !== undefined ? { previousTotalAmount: toNumber(r.previousTotalAmount, 0) } : {}),
+    ...(r.year !== undefined ? { year: toNumber(r.year, 0) } : {}),
+    ...(r.monthNumber !== undefined ? { monthNumber: toNumber(r.monthNumber, 0) } : {}),
+    ...(r.weekNumber !== undefined ? { weekNumber: toNumber(r.weekNumber, 0) } : {}),
+    ...(r.historyPointsCount !== undefined ? { historyPointsCount: toNumber(r.historyPointsCount, 0) } : {}),
+    ...(r.summary !== undefined ? { summary: toStr(r.summary, '') } : {}),
+    ...(r.generatedAt !== undefined ? { generatedAt: toStr(r.generatedAt, '') } : {}),
+    ...(r.wealthLevel !== undefined ? { wealthLevel: toStr(r.wealthLevel, '') } : {}),
+    ...(r.wealthLevelName !== undefined ? { wealthLevelName: toStr(r.wealthLevelName, '') } : {}),
+    ...(r.wealthLevelTheme !== undefined ? { wealthLevelTheme: toStr(r.wealthLevelTheme, '') } : {}),
+    ...(r.wealthLevelColor !== undefined ? { wealthLevelColor: toStr(r.wealthLevelColor, '') } : {}),
+    ...(Array.isArray(r.channels) ? { channels: r.channels.map(normalizeChannel) } : {}),
+    channelDetails: toArray(r.channelDetails)
+      .map(normalizeChannelDetail)
+      .filter((d): d is FinancialReport['channelDetails'][number] => d !== null),
+    ...(Array.isArray(r.topChannels) ? { topChannels: r.topChannels } : {}),
+    isArchived: toBool(r.isArchived, false),
+    ...(r.archivedAt !== undefined ? { archivedAt: toStr(r.archivedAt, '') } : {}),
+    ...(r.archiveNote !== undefined ? { archiveNote: toStr(r.archiveNote, '') } : {}),
+    createdAt: toStr(r.createdAt, new Date().toISOString()),
+  };
+}
+
+function normalizeSortRule(raw: unknown): CustomSortRule | null {
+  const r = isRecord(raw) ? raw : {};
+  const key = toStr(r.key, '');
+  if (!key) return null;
+  return {
+    id: toStr(r.id, randomId('rule')),
+    key,
+    label: toStr(r.label, key),
+    ...(r.description !== undefined ? { description: toStr(r.description, '') } : {}),
+    field: toStr(r.field, 'amount'),
+    direction: r.direction === 'asc' ? 'asc' : 'desc',
+    category: toStr(r.category, '其他'),
+    tags: toArray(r.tags).map((t) => toStr(t, '')),
+    ...(r.isSystem !== undefined ? { isSystem: toBool(r.isSystem, false) } : {}),
+    ...(r.createdAt !== undefined ? { createdAt: toStr(r.createdAt, '') } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 构建备份
+// ---------------------------------------------------------------------------
+
+/** 把当前状态打包成与旧版兼容的备份结构。 */
+export function buildBackup(src: BackupSource): BackupData {
+  const totalAmount = src.channels.reduce((acc, c) => acc + (c.amount || 0), 0);
+  const currentLevel = getLevelByAmount(totalAmount);
+  return {
+    version: BACKUP_VERSION,
+    exportDate: new Date().toISOString(),
+    appInfo: { name: APP_NAME, version: BACKUP_VERSION },
+    data: {
+      wealth_tracker_data: { channels: src.channels, history: src.history },
+      financial_reports: src.reports,
+      custom_sort_rules: { rules: src.sortRules },
+      countdown_data: src.countdown,
+      goal_achievement_status: src.goalAchieved,
+      countdown_opacity: src.countdownOpacity,
+      coin_rain_config: src.coinRainConfig,
+      chart_settings: src.chartSettings,
+      sort_history: src.sortHistory,
+      time_range_history: src.timeRangeHistory,
+      countdown_progress_history: src.countdownProgressHistory,
+      current_wealth_level: src.currentWealthLevel,
+      wealth_tracker_history: src.wealthTrackerHistory,
+    },
+    metadata: {
+      totalRecords: {
+        channels: src.channels.length,
+        history: src.history.length,
+        financial_reports: src.reports.length,
+      },
+      currentLevel: currentLevel.name,
+      totalAmount: round2(totalAmount),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 解析 + 归一化 + 迁移
+// ---------------------------------------------------------------------------
+
+/**
+ * 解析备份 JSON 字符串，做 schema 校验、字段归一化与版本迁移。
+ * 兼容旧版导出的所有字段；未知字段会被忽略（向前兼容）。
+ */
+export function parseBackup(text: string): ParseResult {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return { ok: false, error: '文件不是有效的 JSON 格式' };
+  }
+  if (!isRecord(raw)) return { ok: false, error: '备份根节点格式不正确' };
+
+  // 旧版校验顺序：先 data.wealth_tracker_data，再 version / appInfo。
+  const data = isRecord(raw.data) ? raw.data : {};
+  const wtd = isRecord(data.wealth_tracker_data) ? data.wealth_tracker_data : undefined;
+  if (!wtd) return { ok: false, error: '文件格式不正确，不是有效的备份文件（缺少 wealth_tracker_data）' };
+
+  const version = toStr(raw.version, BACKUP_VERSION);
+  // 未来版本号高于当前时，仍尝试导入核心数据（向前兼容），但保留提示信息。
+  if (!raw.version) {
+    // 旧版导出一定带 version；缺失则视为极早期版本，仍按 1.0.0 处理。
+  }
+
+  const channels = toArray(wtd.channels).map(normalizeChannel);
+  const history = toArray(wtd.history)
+    .map(normalizeHistoryPoint)
+    .filter((p): p is HistoryPoint => p !== null);
+
+  const reports = toArray(data.financial_reports)
+    .map(normalizeReport)
+    .filter((r): r is FinancialReport => r !== null);
+
+  const rulesRaw = isRecord(data.custom_sort_rules) ? data.custom_sort_rules : undefined;
+  const sortRules = toArray(rulesRaw?.rules).map(normalizeSortRule).filter((r): r is CustomSortRule => r !== null);
+
+  const cdRaw = isRecord(data.countdown_data) ? data.countdown_data : undefined;
+  const countdown: CountdownData = cdRaw
+    ? {
+        targetAmount: toNumber(cdRaw.targetAmount, 1_000_000),
+        targetDate: toStr(cdRaw.targetDate, todayString()),
+        startDate: toStr(cdRaw.startDate, todayString()),
+      }
+    : defaultCountdownData();
+
+  const goalRaw = isRecord(data.goal_achievement_status) ? data.goal_achievement_status : undefined;
+  const goalAchieved: GoalAchievementStatus = { hasAchievedGoal: toBool(goalRaw?.hasAchievedGoal, false) };
+
+  const countdownOpacity = toNumber(data.countdown_opacity, 1);
+
+  const imported: ImportedData = {
+    channels,
+    history,
+    reports,
+    sortRules,
+    countdown,
+    goalAchieved,
+    countdownOpacity,
+  };
+
+  if (isRecord(data.coin_rain_config)) {
+    imported.coinRainConfig = {
+      intensity: ['low', 'medium', 'high'].includes(toStr(data.coin_rain_config.intensity, 'medium'))
+        ? (data.coin_rain_config.intensity as CoinRainConfig['intensity'])
+        : 'medium',
+      windStrength: toNumber(data.coin_rain_config.windStrength, 0.5),
+      bounceFactor: toNumber(data.coin_rain_config.bounceFactor, 0.6),
+      autoCollect: toBool(data.coin_rain_config.autoCollect, true),
+      autoCollectDelay: toNumber(data.coin_rain_config.autoCollectDelay, 4000),
+    };
+  }
+  if (isRecord(data.chart_settings)) {
+    imported.chartSettings = {
+      showHistoricalData: toBool(data.chart_settings.showHistoricalData, true),
+      ...(data.chart_settings.chartTimeRangeStart !== undefined
+        ? { chartTimeRangeStart: toStr(data.chart_settings.chartTimeRangeStart, '') }
+        : {}),
+      enableCustomAxisColor: toBool(data.chart_settings.enableCustomAxisColor, false),
+      chartColors: isRecord(data.chart_settings.chartColors) ? { ...data.chart_settings.chartColors } : {},
+    } as ChartSettings;
+  }
+  if (isRecord(data.sort_history)) {
+    imported.sortHistory = {
+      history: toArray(data.sort_history.history)
+        .filter(isRecord)
+        .map((h) => ({ key: toStr(h.key, ''), label: toStr(h.label, ''), timestamp: toStr(h.timestamp, '') })),
+    };
+  }
+  if (isRecord(data.time_range_history)) {
+    imported.timeRangeHistory = {
+      records: toArray(data.time_range_history.records)
+        .filter(isRecord)
+        .map((h) => ({
+          timeRange: toStr(h.timeRange, ''),
+          timeDimension: toStr(h.timeDimension, ''),
+          label: toStr(h.label, ''),
+          timestamp: toNumber(h.timestamp, 0),
+        })),
+    };
+  }
+  if (Array.isArray(data.countdown_progress_history)) {
+    imported.countdownProgressHistory = data.countdown_progress_history
+      .filter(isRecord)
+      .map((p) => ({ date: toStr(p.date, ''), progress: toNumber(p.progress, 0), totalAmount: toNumber(p.totalAmount, 0) }));
+  }
+  if (isRecord(data.current_wealth_level)) {
+    imported.currentWealthLevel = { level: toStr(data.current_wealth_level.level, '') };
+  }
+  if (Array.isArray(data.wealth_tracker_history)) {
+    imported.wealthTrackerHistory = data.wealth_tracker_history
+      .map(normalizeHistoryPoint)
+      .filter((p): p is HistoryPoint => p !== null);
+  }
+
+  const metaRaw = isRecord(raw.metadata) ? raw.metadata : undefined;
+  const meta = {
+    totalRecords: isRecord(metaRaw?.totalRecords) ? (metaRaw.totalRecords as Record<string, number>) : undefined,
+    totalAmount: metaRaw?.totalAmount !== undefined ? toNumber(metaRaw.totalAmount, 0) : undefined,
+  };
+
+  return { ok: true, data: imported, version, meta };
+}
+
+/** 首次启动时使用的空数据（用于「无任何已存数据」时的初始化）。 */
+export function emptyImportedData(): ImportedData {
+  return {
+    channels: defaultChannels(),
+    history: [{ date: todayString(), totalAmount: 0 }],
+    reports: [],
+    sortRules: [],
+    countdown: defaultCountdownData(),
+    goalAchieved: { hasAchievedGoal: false },
+    countdownOpacity: 1,
+  };
+}

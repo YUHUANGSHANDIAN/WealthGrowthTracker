@@ -1,0 +1,42 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# build output
+dist/
+dist-ssr/
+*.local
+*.tsbuildinfo
+
+# tests / coverage
+coverage/
+
+# logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# 灵光旧版导出的 production bundle（保留在本地作为参考，不提交到仓库）
+财富梦想实现家.html
+财富梦想实现家_files/
+legacy-export/
+
+# 临时分析产物
+*.tmp
+.tmp/
