@@ -16,6 +16,7 @@ export const STORAGE_KEYS = {
   smartSortConfig: 'smart_sort_config',
   userProfile: 'user_profile',
   appearanceSettings: 'appearance_settings',
+  authData: 'auth_data',
   chartSettings: 'chart_settings',
   countdownData: 'countdown_data',
   countdownOpacity: 'countdown_opacity',

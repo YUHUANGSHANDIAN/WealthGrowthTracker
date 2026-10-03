@@ -17,6 +17,7 @@ import type {
   SubChannel,
   TimeRangeHistory,
   UserProfile,
+  LocalAccount,
 } from '../types';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { getLevelByAmount } from '../constants/levels';
@@ -58,6 +59,9 @@ import { reportFileBase, reportHtml } from '../features/reports/reportFile';
 import { migrateChannelsV12, needsV12Migration } from '../services/migration';
 import { detectCelebrations, type CelebrationEvent } from '../utils/celebrate';
 import { DEFAULT_SMART_CONFIG } from '../utils/smartSort';
+import { mergeData } from '../utils/mergeData';
+import { checkDataHealth, applyHealthFixes } from '../utils/dataHealth';
+import { createAuthRecord, verifySecret, type AuthRecord } from '../utils/auth';
 
 export type ToastKind = 'success' | 'error' | 'info';
 export interface Toast {
@@ -87,6 +91,11 @@ interface AppState {
   smartSortConfig: SmartSortConfig;
   profile: UserProfile;
   appearance: AppearanceSettings;
+  /** 本地账户（元数据；hash 见 authRecord，均不进财务 Backup）。 */
+  account: LocalAccount | null;
+  authRecord: AuthRecord | null;
+  /** 当前会话是否锁定。 */
+  locked: boolean;
   chartSettings: ChartSettings;
   countdown: CountdownData;
   countdownOpacity: number;
@@ -145,6 +154,10 @@ interface AppState {
   setSmartSortConfig: (config: SmartSortConfig) => void;
   setProfile: (profile: UserProfile) => void;
   setAppearance: (appearance: AppearanceSettings) => void;
+  setupAccount: (displayName: string, method: 'pin' | 'password', secret: string) => Promise<boolean>;
+  login: (secret: string) => Promise<boolean>;
+  logout: () => void;
+  disableAccount: () => void;
 
   // ---- 倒计时 / 目标 ----
   setCountdown: (countdown: CountdownData) => void;
@@ -160,7 +173,8 @@ interface AppState {
 
   // ---- 导入导出 ----
   exportData: () => Promise<void>;
-  importData: (jsonText: string) => Promise<{ ok: boolean; message: string }>;
+  importData: (jsonText: string, mode?: 'replace' | 'merge') => Promise<{ ok: boolean; message: string }>;
+  applyDataFixes: () => Promise<{ fixed: number }>;
 }
 
 const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
@@ -175,6 +189,7 @@ const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
   { key: STORAGE_KEYS.smartSortConfig, pick: (s) => s.smartSortConfig },
   { key: STORAGE_KEYS.userProfile, pick: (s) => s.profile },
   { key: STORAGE_KEYS.appearanceSettings, pick: (s) => s.appearance },
+  { key: STORAGE_KEYS.authData, pick: (s) => ({ account: s.account, authRecord: s.authRecord }) },
   { key: STORAGE_KEYS.chartSettings, pick: (s) => s.chartSettings },
   { key: STORAGE_KEYS.countdownData, pick: (s) => s.countdown },
   { key: STORAGE_KEYS.countdownOpacity, pick: (s) => s.countdownOpacity },
@@ -246,6 +261,9 @@ export const useAppStore = create<AppState>()((set, get) => {
     smartSortConfig: DEFAULT_SMART_CONFIG,
     profile: { defaultCurrency: 'CNY' },
     appearance: { themeMode: 'system', followWealthTheme: true, animationIntensity: 'normal', backgroundOpacity: 30, reduceMotion: 'system' },
+    account: null,
+    authRecord: null,
+    locked: false,
     chartSettings: defaultChartSettings(),
     countdown: defaultCountdownData(),
     countdownOpacity: 1,
@@ -278,6 +296,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         smartSortConfig,
         profile,
         appearance,
+        authData,
       ] = await Promise.all([
         storageService.getJSON<{ channels: Channel[]; history: HistoryPoint[] }>(STORAGE_KEYS.wealthTrackerData),
         storageService.getJSON<FinancialReport[]>(STORAGE_KEYS.financialReports),
@@ -296,6 +315,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         storageService.getJSON<SmartSortConfig>(STORAGE_KEYS.smartSortConfig),
         storageService.getJSON<UserProfile>(STORAGE_KEYS.userProfile),
         storageService.getJSON<AppearanceSettings>(STORAGE_KEYS.appearanceSettings),
+        storageService.getJSON<{ account: LocalAccount | null; authRecord: AuthRecord | null }>(STORAGE_KEYS.authData),
       ]);
 
       const isFirstRun = !wtd;
@@ -328,6 +348,9 @@ export const useAppStore = create<AppState>()((set, get) => {
         smartSortConfig: smartSortConfig ?? DEFAULT_SMART_CONFIG,
         profile: profile ?? { defaultCurrency: 'CNY' },
         appearance: appearance ?? { themeMode: 'system', followWealthTheme: true, animationIntensity: 'normal', backgroundOpacity: 30, reduceMotion: 'system' },
+        account: authData?.account ?? null,
+        authRecord: authData?.authRecord ?? null,
+        locked: authData?.account?.requireOnLaunch && authData?.authRecord ? true : false,
         chartSettings: chartSettings ?? defaultChartSettings(),
         countdown: countdown ?? defaultCountdownData(),
         countdownOpacity: opacity != null ? Number(opacity) || 1 : 1,
@@ -530,6 +553,36 @@ export const useAppStore = create<AppState>()((set, get) => {
       set({ appearance });
       persist();
     },
+    async setupAccount(displayName, method, secret) {
+      const record = await createAuthRecord(secret, method);
+      const account: LocalAccount = {
+        username: displayName,
+        displayName,
+        avatarEmoji: '👤',
+        lockEnabled: true,
+        lockMethod: method,
+        autoLockMinutes: 0,
+        requireOnLaunch: true,
+        created: true,
+      };
+      set({ account, authRecord: record, locked: false });
+      persist();
+      return true;
+    },
+    async login(secret) {
+      const record = get().authRecord;
+      if (!record) return false;
+      const ok = await verifySecret(secret, record);
+      if (ok) set({ locked: false });
+      return ok;
+    },
+    logout() {
+      set({ locked: true });
+    },
+    disableAccount() {
+      set({ account: null, authRecord: null, locked: false });
+      persist();
+    },
 
     // ---------------------------------------------------------------------
     setCountdown(countdown) {
@@ -592,15 +645,26 @@ export const useAppStore = create<AppState>()((set, get) => {
       await saveTextFile(filename, text);
       get().pushToast(`数据已成功导出为 ${filename}`, 'success');
     },
-    async importData(jsonText) {
+    async importData(jsonText, mode = 'replace') {
       const result = parseBackup(jsonText);
       if (!result.ok) return { ok: false, message: result.error };
 
-      // 覆盖导入前先备份当前数据（桌面版），避免误操作造成资产数据丢失。
+      // 导入前先备份当前数据（桌面版），避免误操作造成资产数据丢失。
       const mgr = storageService.getDesktopManager();
       if (mgr) await mgr.backupNow(true);
 
       const d: ImportedData = result.data;
+      if (mode === 'merge') {
+        const s = get();
+        const merged = mergeData(
+          { channels: s.channels, history: s.history, reports: s.reports },
+          { channels: d.channels, history: d.history, reports: d.reports },
+        );
+        set({ channels: normalizeChannelAmounts(merged.channels), history: merged.history, reports: merged.reports });
+        persist();
+        return { ok: true, message: `合并导入成功：渠道 ${merged.channels.length} 个、历史 ${merged.history.length} 条、报告 ${merged.reports.length} 份` };
+      }
+
       set({
         channels: normalizeChannelAmounts(d.channels),
         history: d.history,
@@ -624,6 +688,17 @@ export const useAppStore = create<AppState>()((set, get) => {
           d.reports.length ? `、${d.reports.length} 份报告` : ''
         }`,
       };
+    },
+    async applyDataFixes() {
+      const s = get();
+      const { issues } = checkDataHealth(s.channels, s.history);
+      if (issues.length === 0) return { fixed: 0 };
+      const mgr = storageService.getDesktopManager();
+      if (mgr) await mgr.backupNow(true);
+      const { channels, history, fixed } = applyHealthFixes(s.channels, s.history, issues);
+      set({ channels: normalizeChannelAmounts(channels), history });
+      persist();
+      return { fixed };
     },
   };
 });

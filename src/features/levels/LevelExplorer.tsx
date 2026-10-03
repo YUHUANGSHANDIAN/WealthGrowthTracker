@@ -8,7 +8,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Badge } from '../../components/ui/primitives';
 
 /** 格式化等级资产范围（最高级显示 +，不显示 Infinity）。 */
-export function formatLevelRange(level: WealthLevel): string {
+function formatLevelRange(level: WealthLevel): string {
   if (level.maxAmount === Number.POSITIVE_INFINITY) return `${formatCNY(level.minAmount)}+`;
   return `${formatCNY(level.minAmount)} - ${formatCNY(level.maxAmount)}`;
 }

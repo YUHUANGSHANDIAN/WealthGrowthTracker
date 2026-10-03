@@ -66,11 +66,6 @@ export function AssetsPanel() {
   }, [growths]);
   const pinned = useMemo(() => new Set(pinnedChannelIds), [pinnedChannelIds]);
 
-  const applyPinned = (arr: Channel[]) => {
-    if (pinned.size === 0) return arr;
-    return [...arr].sort((a, b) => (pinned.has(a.id) ? 0 : 1) - (pinned.has(b.id) ? 0 : 1));
-  };
-
   const sortedChannels = useMemo(() => {
     let base: Channel[];
     if (sortConfig.mode === 'single') {
@@ -88,7 +83,8 @@ export function AssetsPanel() {
     } else {
       base = sortChannels(channels);
     }
-    return applyPinned(base);
+    if (pinned.size === 0) return base;
+    return [...base].sort((a, b) => (pinned.has(a.id) ? 0 : 1) - (pinned.has(b.id) ? 0 : 1));
   }, [channels, sortConfig, sortRules, total, growthByChannel, growths, pinned, smartSortConfig]);
 
   function applySingle(ruleId: string) {

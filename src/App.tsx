@@ -3,7 +3,7 @@ import { useAppStore } from './store/appStore';
 import { storageService } from './services/storage';
 import { totalAssets } from './utils/channels';
 import { getLevelByAmount } from './constants/levels';
-import { applyLevelTheme } from './utils/theme';
+import { applyLevelTheme, applyNeutralTheme } from './utils/theme';
 import { formatCNY } from './utils/money';
 import { ToastHost } from './components/ui/ToastHost';
 import { Spinner } from './components/ui/primitives';
@@ -11,6 +11,8 @@ import { AssetsPanel } from './features/assets/AssetsPanel';
 import { CoinRainOverlay } from './features/coinRain/CoinRainOverlay';
 import { LevelUpCelebrationOverlay } from './features/celebrate/LevelUpCelebrationOverlay';
 import { LevelExplorer } from './features/levels/LevelExplorer';
+import { SettingsModal } from './features/settings/SettingsModal';
+import { LockScreen } from './features/settings/LockScreen';
 
 const HistoryPanel = lazy(() =>
   import('./features/history/HistoryPanel').then((m) => ({ default: m.HistoryPanel })),
@@ -56,8 +58,11 @@ export default function App() {
   const hydrated = useAppStore((s) => s.hydrated);
   const hydrate = useAppStore((s) => s.hydrate);
   const channels = useAppStore((s) => s.channels);
+  const locked = useAppStore((s) => s.locked);
+  const followWealthTheme = useAppStore((s) => s.appearance.followWealthTheme);
   const [tab, setTab] = useState<TabId>('assets');
   const [levelExplorerOpen, setLevelExplorerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const total = totalAssets(channels);
   const level = getLevelByAmount(total);
@@ -75,10 +80,11 @@ export default function App() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, []);
 
-  // 应用当前财富等级主题（CSS Variables）
+  // 应用当前财富等级主题（CSS Variables）；关闭「跟随等级主题」时使用中性主题
   useEffect(() => {
-    applyLevelTheme(level);
-  }, [level]);
+    if (followWealthTheme) applyLevelTheme(level);
+    else applyNeutralTheme();
+  }, [level, followWealthTheme]);
 
   if (!hydrated) {
     return (
@@ -90,6 +96,10 @@ export default function App() {
         <p className="text-sm">正在加载财富成长记…</p>
       </div>
     );
+  }
+
+  if (locked) {
+    return <LockScreen />;
   }
 
   return (
@@ -122,6 +132,14 @@ export default function App() {
               title="查看财富等级体系"
             >
               {level.badge} {level.name}
+            </button>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="h-8 w-8 inline-flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
+              title="设置"
+              aria-label="设置"
+            >
+              ⚙
             </button>
           </div>
         </div>
@@ -163,6 +181,7 @@ export default function App() {
       <CoinRainOverlay />
       <LevelUpCelebrationOverlay />
       <LevelExplorer open={levelExplorerOpen} onClose={() => setLevelExplorerOpen(false)} />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { Modal, ConfirmDialog } from '../../components/ui/Modal';
 import { SelectField } from '../../components/ui/form';
 import { BarChart } from '../../components/charts/BarChart';
 import { saveTextFile, backupFilename } from '../../services/export/download';
+import { ShareReportModal } from './ShareReportModal';
 
 const TYPE_META: Record<ReportType, { label: string; icon: string; tone: 'emerald' | 'blue' | 'purple' }> = {
   weekly: { label: '周报', icon: '📅', tone: 'emerald' },
@@ -183,6 +184,7 @@ export function ReportsPanel() {
 }
 
 function ReportDetailModal({ report, onClose }: { report: FinancialReport; onClose: () => void }) {
+  const [shareOpen, setShareOpen] = useState(false);
   const positive = report.changeAmount >= 0;
   const items = report.channelDetails.map((c) => ({
     id: c.id,
@@ -253,7 +255,12 @@ function ReportDetailModal({ report, onClose }: { report: FinancialReport; onClo
         <div className="text-xs text-slate-400">
           生成时间：{report.createdAt ? new Date(report.createdAt).toLocaleString('zh-CN') : '—'}
         </div>
+
+        <div className="border-t border-slate-100 pt-3">
+          <Button onClick={() => setShareOpen(true)}>📤 分享报告</Button>
+        </div>
       </div>
+      {shareOpen && <ShareReportModal report={report} onClose={() => setShareOpen(false)} />}
     </Modal>
   );
 }
