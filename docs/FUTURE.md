@@ -7,11 +7,11 @@
 - 未来：购买 EV / OV 代码签名证书，在 GitHub Secrets 中配置 `WINDOWS_CERTIFICATE`（base64 PFX）、`WINDOWS_CERTIFICATE_PASSWORD`，并在 release workflow 中使用 `azure-trusted-signing` 或 `signtool` 签名。
 
 ## 自动更新（Tauri Updater）
-- 未来可通过 `tauri-plugin-updater` + GitHub Releases 实现应用内更新。
-- 需要维护一个 updater 签名密钥对，并发布 `latest.json`。
+- 已实现「手动更新检查」（设置 → 版本更新，仅点击时访问 GitHub API）。
+- 未来可通过 `tauri-plugin-updater` + GitHub Releases 实现应用内自动更新（需维护 updater 签名密钥对并发布 `latest.json`）。
 
 ## 本地数据加密
-- 当前数据以明文 JSON 保存在 `文档\财富成长记\`。
+- 已实现「本地账户锁」（PIN/密码，Web Crypto PBKDF2 + 随机盐，不明文存储）。注意：这是**应用锁**，不等于磁盘加密。
 - 未来可引入 SQLite（`tauri-plugin-sql`）或对 `app-state.json` 做本地加密（如 `keyring` + `age`/`chacha20`）。
 
 ## 数据目录迁移（更改数据文件夹）
