@@ -9,10 +9,13 @@ import { downloadCSV, downloadPNG, downloadSVG } from '../../components/charts/e
 import { BRAND } from '../../components/charts/palette';
 import { PREDICTION_MODELS, HORIZON_OPTIONS, defaultHorizonDays, runPrediction, type Forecast } from './models';
 import { DiagnosticsModal } from './DiagnosticsModal';
+import { aggregateHistory, filterHistoryRange, filterTrainingWindow } from '../../utils/timeDimension';
+import { ChartControls } from './ChartControls';
 
 export function PredictionPanel() {
   const history = useAppStore((s) => s.history);
   const countdown = useAppStore((s) => s.countdown);
+  const chartSettings = useAppStore((s) => s.chartSettings);
 
   const [horizon, setHorizon] = useState(defaultHorizonDays());
   const [mode, setMode] = useState<'single' | 'compare'>('single');
@@ -20,8 +23,15 @@ export function PredictionPanel() {
   const [diagModel, setDiagModel] = useState<PredictionModelType | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
 
-  const result = useMemo(() => runPrediction(history, horizon), [history, horizon]);
-  const sortedHistory = useMemo(() => [...history].sort((a, b) => (a.date < b.date ? -1 : 1)), [history]);
+  const trainingHistory = useMemo(
+    () => filterTrainingWindow(history, chartSettings.trainingWindow ?? 'all', chartSettings.customTrainingDays),
+    [history, chartSettings.trainingWindow, chartSettings.customTrainingDays],
+  );
+  const result = useMemo(() => runPrediction(trainingHistory, horizon), [trainingHistory, horizon]);
+  const sortedHistory = useMemo(
+    () => aggregateHistory(filterHistoryRange(history, chartSettings.timeRange ?? 'all', chartSettings.customTimeRangeStart, chartSettings.customTimeRangeEnd), chartSettings.timeDimension ?? 'raw'),
+    [history, chartSettings.timeRange, chartSettings.customTimeRangeStart, chartSettings.customTimeRangeEnd, chartSettings.timeDimension],
+  );
 
   const activeForecast: Forecast = selected === 'hybrid' ? result.hybrid : result.forecasts[selected];
   const activeFit = selected === 'hybrid' ? result.hybrid.fit : result.fits[selected];
@@ -40,14 +50,19 @@ export function PredictionPanel() {
 
   // 构建图表序列
   const chart = useMemo(() => {
+    const style = chartSettings.chartStyle ?? 'line';
     const historySeries: LineSeries = {
       id: 'history',
       name: '历史资产',
       color: BRAND,
       points: sortedHistory.map((h) => ({ date: h.date, value: h.totalAmount })),
-      showDots: true,
+      showDots: style === 'line-dots' || style === 'scatter',
+      area: style === 'area',
       strokeWidth: 2,
     };
+
+    const series: LineSeries[] = [];
+    if (chartSettings.showHistory !== false) series.push(historySeries);
 
     if (mode === 'single') {
       const fit = activeFit;
@@ -61,40 +76,43 @@ export function PredictionPanel() {
           upper: p.upper95 ?? p.value,
         })),
       ];
-      const fittedSeries: LineSeries = {
-        id: 'fitted',
-        name: `${meta.shortName}拟合`,
-        color: meta.color,
-        points: fit.fitted.map((f) => ({ date: f.date, value: f.fitted })),
-        strokeWidth: 1.2,
-      };
-      const forecastSeries: LineSeries = {
-        id: 'forecast',
-        name: `${meta.shortName}预测`,
-        color: meta.color,
-        points: forecastPoints,
-        dashed: true,
-        band: activeForecast.intervalType !== 'none',
-        bandColor: meta.color,
-        strokeWidth: 2,
-      };
-      return [historySeries, fittedSeries, forecastSeries];
+      if (chartSettings.showFitted !== false) {
+        series.push({
+          id: 'fitted',
+          name: `${meta.shortName}拟合`,
+          color: meta.color,
+          points: fit.fitted.map((f) => ({ date: f.date, value: f.fitted })),
+          strokeWidth: 1.2,
+        });
+      }
+      if (chartSettings.showForecast !== false) {
+        series.push({
+          id: 'forecast',
+          name: `${meta.shortName}预测`,
+          color: meta.color,
+          points: forecastPoints,
+          dashed: true,
+          band: chartSettings.showPredictionBand !== false && activeForecast.intervalType !== 'none',
+          bandColor: meta.color,
+          strokeWidth: 2,
+        });
+      }
+      return series;
     }
 
-    const compare: LineSeries[] = [historySeries];
     for (const m of PREDICTION_MODELS) {
       const f = m.type === 'hybrid' ? result.hybrid : result.forecasts[m.type];
       const pts = [
         { date: f.fit.lastDate, value: f.fit.lastValue },
         ...f.points.map((p) => ({ date: p.date, value: p.value })),
       ];
-      compare.push({ id: m.type, name: m.shortName, color: m.color, points: pts, dashed: true, strokeWidth: 2 });
+      series.push({ id: m.type, name: m.shortName, color: m.color, points: pts, dashed: true, strokeWidth: 2 });
     }
-    return compare;
-  }, [mode, sortedHistory, activeFit, activeForecast, meta, result]);
+    return series;
+  }, [mode, sortedHistory, activeFit, activeForecast, meta, result, chartSettings]);
 
   const referenceLines: ReferenceLine[] =
-    countdown.targetAmount > 0
+    countdown.targetAmount > 0 && chartSettings.showTarget !== false
       ? [{ value: countdown.targetAmount, label: `目标 ${formatCNY(countdown.targetAmount)}`, color: '#e34948' }]
       : [];
 
@@ -210,6 +228,8 @@ export function PredictionPanel() {
           <Button size="sm" variant="ghost" onClick={() => onExport('csv')}>CSV</Button>
         </div>
       </div>
+
+      <ChartControls />
 
       {/* 模型选择（单模型模式） */}
       {mode === 'single' && (
