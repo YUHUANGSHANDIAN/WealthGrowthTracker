@@ -138,8 +138,24 @@ export interface SortHistory {
 
 export interface CountdownData {
   targetAmount: Money;
-  targetDate: string; // YYYY-MM-DD
-  startDate: string; // YYYY-MM-DD
+  targetDate: string; // YYYY-MM-DD（向后兼容）
+  startDate: string; // YYYY-MM-DD（向后兼容）
+  /** 目标名称（可选）。 */
+  targetName?: string;
+  /** IANA 时区（如 Asia/Shanghai）。 */
+  timezone?: string;
+  /** 起始日期时间（含时间，YYYY-MM-DDTHH:mm）。 */
+  startDateTime?: string;
+  /** 目标日期时间（含时间）。 */
+  targetDateTime?: string;
+  /** 起始绝对时间戳（ms）。 */
+  startInstant?: number;
+  /** 目标绝对时间戳（ms）。 */
+  targetInstant?: number;
+  /** 显示格式。 */
+  displayMode?: 'calendar' | 'days' | 'hours' | 'simple';
+  /** 是否显示秒。 */
+  showSeconds?: boolean;
 }
 
 export interface CountdownProgressPoint {
@@ -148,7 +164,7 @@ export interface CountdownProgressPoint {
   totalAmount: Money;
 }
 
-export type CoinRainIntensity = 'low' | 'medium' | 'high';
+export type CoinRainIntensity = 'off' | 'low' | 'medium' | 'high';
 
 export interface CoinRainConfig {
   intensity: CoinRainIntensity;
@@ -167,10 +183,40 @@ export interface ChartSettings {
     axis?: string;
     fill?: string;
   };
+  // —— v1.2 新增图表控制（向后兼容，均 optional）——
+  /** 显示范围。 */
+  timeRange?: 'all' | '30' | '90' | '180' | '365' | 'ytd' | 'custom';
+  customTimeRangeStart?: string;
+  customTimeRangeEnd?: string;
+  /** 时间维度聚合。 */
+  timeDimension?: 'raw' | 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+  /** 模型训练窗口。 */
+  trainingWindow?: 'all' | '90' | '180' | '365' | 'custom';
+  customTrainingDays?: number;
+  /** 图表样式。 */
+  chartStyle?: 'line' | 'line-dots' | 'area' | 'scatter';
+  showHistory?: boolean;
+  showFitted?: boolean;
+  showForecast?: boolean;
+  showPredictionBand?: boolean;
+  showTarget?: boolean;
+  showGrid?: boolean;
+  showLegend?: boolean;
+  showDots?: boolean;
+  /** Y 轴单位。 */
+  yUnit?: 'auto' | 'yuan' | 'thousand' | 'ten-thousand' | 'million';
+  /** Y 轴刻度。 */
+  yScale?: 'linear' | 'log';
+  /** X 轴标签密度。 */
+  tickDensity?: 'auto' | 'sparse' | 'normal' | 'dense';
 }
 
 export interface GoalAchievementStatus {
   hasAchievedGoal: boolean;
+  /** 目标身份 key（由目标金额+日期生成；修改目标后变化，从而可重新触发庆祝）。 */
+  goalKey?: string;
+  achievedAt?: string;
+  achievedTargetAmount?: Money;
 }
 
 /** 图表时间区间历史记录（旧版 key: time_range_history）。 */
@@ -190,6 +236,77 @@ export interface CurrentWealthLevel {
   updatedAt?: string;
 }
 
+/** 用户个人资料（本地保存，不上传）。 */
+export interface UserProfile {
+  nickname?: string;
+  avatarEmoji?: string;
+  signature?: string;
+  /** 默认货币（当前固定 CNY）。 */
+  defaultCurrency?: 'CNY';
+  /** 默认时区（IANA）。 */
+  defaultTimezone?: string;
+  updatedAt?: string;
+}
+
+/** 外观设置。 */
+export interface AppearanceSettings {
+  themeMode: 'light' | 'system' | 'dark';
+  followWealthTheme: boolean;
+  animationIntensity: 'off' | 'low' | 'normal' | 'high';
+  backgroundOpacity: number; // 0-100
+  reduceMotion: 'system' | 'always';
+}
+
+/** 本地账户（本地锁，非云账号；密码/PIN 不明文、不进财务 Backup）。 */
+export interface LocalAccount {
+  username: string;
+  displayName: string;
+  avatarEmoji: string;
+  lockEnabled: boolean;
+  lockMethod: 'pin' | 'password';
+  /** 自动锁屏分钟数（0 = 不自动锁）。 */
+  autoLockMinutes: number;
+  /** 启动时是否要求登录。 */
+  requireOnLaunch: boolean;
+  /** 是否已创建（区别于未设置）。 */
+  created: boolean;
+}
+
+/** 智能综合排序权重配置。 */
+export interface SmartSortConfig {
+  amountWeight: number;
+  growthWeight: number;
+  activityWeight: number;
+  updatedAtWeight: number;
+  preset?: 'size' | 'growth' | 'recent' | 'balanced';
+}
+
+/** 渠道增长（用于增长率排序与智能排序，来自历史快照）。 */
+export interface ChannelGrowth {
+  id: string;
+  /** 相对基准的增长比例（0.068 = +6.8%），无快照时为 null。 */
+  g7d: number | null;
+  g30d: number | null;
+  g90d: number | null;
+  g365d: number | null;
+}
+
+/** 财富等级的结构化视觉主题 Token（映射到 CSS Variables，全局生效）。 */
+export interface LevelTheme {
+  primary: string;
+  secondary: string;
+  accent: string;
+  surface: string;
+  surfaceSoft: string;
+  textOnPrimary: string;
+  border: string;
+  glow: string;
+  progressGradient: string;
+  heroGradient: string;
+  particleColor: string;
+  chartAccent: string;
+}
+
 /** 财富等级。 */
 export interface WealthLevel {
   name: string;
@@ -198,7 +315,10 @@ export interface WealthLevel {
   badge: string;
   color: string;
   description: string;
+  /** 主题标识 key（如 green-nature），用作 data-wealth-theme。 */
   theme: string;
+  /** 结构化视觉 Token（映射为 CSS Variables）。 */
+  tokens: LevelTheme;
   milestones: { percentage: number; name: string; emoji: string }[];
 }
 

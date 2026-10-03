@@ -20,7 +20,7 @@ import { todayString } from '../../utils/date';
 import { defaultChannels, defaultCountdownData } from '../../constants/defaults';
 import { getLevelByAmount } from '../../constants/levels';
 
-export const BACKUP_VERSION = '1.1.0';
+export const BACKUP_VERSION = '1.2.0';
 export const APP_NAME = '财富成长记';
 
 /** 导出/导入时需要用到的完整应用状态（由 store 提供）。 */
@@ -306,11 +306,26 @@ export function parseBackup(text: string): ParseResult {
         targetAmount: toNumber(cdRaw.targetAmount, 1_000_000),
         targetDate: toStr(cdRaw.targetDate, todayString()),
         startDate: toStr(cdRaw.startDate, todayString()),
+        ...(cdRaw.targetName !== undefined ? { targetName: toStr(cdRaw.targetName, '') } : {}),
+        ...(cdRaw.timezone !== undefined ? { timezone: toStr(cdRaw.timezone, '') } : {}),
+        ...(cdRaw.startDateTime !== undefined ? { startDateTime: toStr(cdRaw.startDateTime, '') } : {}),
+        ...(cdRaw.targetDateTime !== undefined ? { targetDateTime: toStr(cdRaw.targetDateTime, '') } : {}),
+        ...(cdRaw.startInstant !== undefined ? { startInstant: toNumber(cdRaw.startInstant, 0) } : {}),
+        ...(cdRaw.targetInstant !== undefined ? { targetInstant: toNumber(cdRaw.targetInstant, 0) } : {}),
+        ...(cdRaw.displayMode !== undefined
+          ? { displayMode: (['calendar', 'days', 'hours', 'simple'] as const).includes(toStr(cdRaw.displayMode) as never) ? (toStr(cdRaw.displayMode) as CountdownData['displayMode']) : 'calendar' }
+          : {}),
+        ...(cdRaw.showSeconds !== undefined ? { showSeconds: toBool(cdRaw.showSeconds, false) } : {}),
       }
     : defaultCountdownData();
 
   const goalRaw = isRecord(data.goal_achievement_status) ? data.goal_achievement_status : undefined;
-  const goalAchieved: GoalAchievementStatus = { hasAchievedGoal: toBool(goalRaw?.hasAchievedGoal, false) };
+  const goalAchieved: GoalAchievementStatus = {
+    hasAchievedGoal: toBool(goalRaw?.hasAchievedGoal, false),
+    ...(goalRaw?.goalKey !== undefined ? { goalKey: toStr(goalRaw.goalKey, '') } : {}),
+    ...(goalRaw?.achievedAt !== undefined ? { achievedAt: toStr(goalRaw.achievedAt, '') } : {}),
+    ...(goalRaw?.achievedTargetAmount !== undefined ? { achievedTargetAmount: toNumber(goalRaw.achievedTargetAmount, 0) } : {}),
+  };
 
   const countdownOpacity = toNumber(data.countdown_opacity, 1);
 
@@ -343,6 +358,21 @@ export function parseBackup(text: string): ParseResult {
         : {}),
       enableCustomAxisColor: toBool(data.chart_settings.enableCustomAxisColor, false),
       chartColors: isRecord(data.chart_settings.chartColors) ? { ...data.chart_settings.chartColors } : {},
+      ...(data.chart_settings.timeRange !== undefined ? { timeRange: toStr(data.chart_settings.timeRange) as ChartSettings['timeRange'] } : {}),
+      ...(data.chart_settings.timeDimension !== undefined ? { timeDimension: toStr(data.chart_settings.timeDimension) as ChartSettings['timeDimension'] } : {}),
+      ...(data.chart_settings.trainingWindow !== undefined ? { trainingWindow: toStr(data.chart_settings.trainingWindow) as ChartSettings['trainingWindow'] } : {}),
+      ...(data.chart_settings.chartStyle !== undefined ? { chartStyle: toStr(data.chart_settings.chartStyle) as ChartSettings['chartStyle'] } : {}),
+      showHistory: data.chart_settings.showHistory !== undefined ? toBool(data.chart_settings.showHistory, true) : undefined,
+      showFitted: data.chart_settings.showFitted !== undefined ? toBool(data.chart_settings.showFitted, true) : undefined,
+      showForecast: data.chart_settings.showForecast !== undefined ? toBool(data.chart_settings.showForecast, true) : undefined,
+      showPredictionBand: data.chart_settings.showPredictionBand !== undefined ? toBool(data.chart_settings.showPredictionBand, true) : undefined,
+      showTarget: data.chart_settings.showTarget !== undefined ? toBool(data.chart_settings.showTarget, true) : undefined,
+      showGrid: data.chart_settings.showGrid !== undefined ? toBool(data.chart_settings.showGrid, true) : undefined,
+      showLegend: data.chart_settings.showLegend !== undefined ? toBool(data.chart_settings.showLegend, true) : undefined,
+      showDots: data.chart_settings.showDots !== undefined ? toBool(data.chart_settings.showDots, false) : undefined,
+      ...(data.chart_settings.yUnit !== undefined ? { yUnit: toStr(data.chart_settings.yUnit) as ChartSettings['yUnit'] } : {}),
+      ...(data.chart_settings.yScale !== undefined ? { yScale: toStr(data.chart_settings.yScale) as ChartSettings['yScale'] } : {}),
+      ...(data.chart_settings.tickDensity !== undefined ? { tickDensity: toStr(data.chart_settings.tickDensity) as ChartSettings['tickDensity'] } : {}),
     } as ChartSettings;
   }
   if (isRecord(data.sort_history)) {

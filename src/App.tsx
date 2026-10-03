@@ -3,11 +3,14 @@ import { useAppStore } from './store/appStore';
 import { storageService } from './services/storage';
 import { totalAssets } from './utils/channels';
 import { getLevelByAmount } from './constants/levels';
+import { applyLevelTheme } from './utils/theme';
 import { formatCNY } from './utils/money';
 import { ToastHost } from './components/ui/ToastHost';
-import { Spinner, Badge } from './components/ui/primitives';
+import { Spinner } from './components/ui/primitives';
 import { AssetsPanel } from './features/assets/AssetsPanel';
 import { CoinRainOverlay } from './features/coinRain/CoinRainOverlay';
+import { LevelUpCelebrationOverlay } from './features/celebrate/LevelUpCelebrationOverlay';
+import { LevelExplorer } from './features/levels/LevelExplorer';
 
 const HistoryPanel = lazy(() =>
   import('./features/history/HistoryPanel').then((m) => ({ default: m.HistoryPanel })),
@@ -54,6 +57,10 @@ export default function App() {
   const hydrate = useAppStore((s) => s.hydrate);
   const channels = useAppStore((s) => s.channels);
   const [tab, setTab] = useState<TabId>('assets');
+  const [levelExplorerOpen, setLevelExplorerOpen] = useState(false);
+
+  const total = totalAssets(channels);
+  const level = getLevelByAmount(total);
 
   useEffect(() => {
     void hydrate();
@@ -68,6 +75,11 @@ export default function App() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, []);
 
+  // 应用当前财富等级主题（CSS Variables）
+  useEffect(() => {
+    applyLevelTheme(level);
+  }, [level]);
+
   if (!hydrated) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 text-slate-500">
@@ -80,14 +92,11 @@ export default function App() {
     );
   }
 
-  const total = totalAssets(channels);
-  const level = getLevelByAmount(total);
-
   return (
     <div className="min-h-screen">
       <header
         className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-slate-200/80"
-        style={{ backgroundImage: `linear-gradient(120deg, ${level.color}14, transparent 60%)` }}
+        style={{ backgroundImage: 'linear-gradient(120deg, var(--wealth-surface) 0%, transparent 55%)' }}
       >
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -102,11 +111,18 @@ export default function App() {
           <div className="flex items-center gap-3">
             <div className="text-right">
               <div className="text-[11px] text-slate-400">总资产</div>
-              <div className="text-lg sm:text-xl font-bold text-emerald-600 tabular leading-tight">
+              <div className="text-lg sm:text-xl font-bold tabular leading-tight" style={{ color: 'var(--wealth-primary)' }}>
                 {formatCNY(total)}
               </div>
             </div>
-            <Badge tone="emerald">{level.badge} {level.name}</Badge>
+            <button
+              onClick={() => setLevelExplorerOpen(true)}
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border transition-opacity hover:opacity-85"
+              style={{ background: 'var(--wealth-surface)', borderColor: 'var(--wealth-border)', color: 'var(--wealth-primary)' }}
+              title="查看财富等级体系"
+            >
+              {level.badge} {level.name}
+            </button>
           </div>
         </div>
         {/* 顶部标签导航（移动端可横向滚动） */}
@@ -145,6 +161,8 @@ export default function App() {
 
       <ToastHost />
       <CoinRainOverlay />
+      <LevelUpCelebrationOverlay />
+      <LevelExplorer open={levelExplorerOpen} onClose={() => setLevelExplorerOpen(false)} />
     </div>
   );
 }

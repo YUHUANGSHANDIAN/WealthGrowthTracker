@@ -2,9 +2,10 @@ import React, { useMemo, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import type { Channel, CustomSortRule, SubChannel } from '../../types';
 import { sortChannels, sortChannelsByRule, sortChannelsMulti, totalAssets } from '../../utils/channels';
-import { formatCNY } from '../../utils/money';
-import { getLevelByAmount, WEALTH_LEVELS } from '../../constants/levels';
-import { Button, Card, Badge, ProgressBar, EmptyState } from '../../components/ui/primitives';
+import { computeChannelGrowths, sortChannelsSmart } from '../../utils/smartSort';
+import { Button, Card, Badge, EmptyState } from '../../components/ui/primitives';
+import { WealthHeroCard } from '../dashboard/WealthHeroCard';
+import { LevelExplorer } from '../levels/LevelExplorer';
 import { Modal, ConfirmDialog } from '../../components/ui/Modal';
 import { TextField, SelectField } from '../../components/ui/form';
 import { ChannelItem, type AmountTarget, type ChannelHandlers } from './ChannelItem';
@@ -12,12 +13,17 @@ import { ChannelFormModal, SubChannelFormModal, AmountModal } from './channelMod
 
 type SortConfig =
   | { mode: 'default' }
+  | { mode: 'smart' }
   | { mode: 'single'; ruleId: string }
   | { mode: 'multi'; ruleIds: string[] };
 
 export function AssetsPanel() {
   const channels = useAppStore((s) => s.channels);
+  const history = useAppStore((s) => s.history);
   const sortRules = useAppStore((s) => s.sortRules);
+  const pinnedChannelIds = useAppStore((s) => s.pinnedChannelIds);
+  const smartSortConfig = useAppStore((s) => s.smartSortConfig);
+  const activeSortKey = useAppStore((s) => s.activeSortKey);
   const {
     addParentChannel,
     updateParentChannel,
@@ -30,11 +36,16 @@ export function AssetsPanel() {
     addSortRule,
     deleteSortRule,
     recordSortHistory,
+    setActiveSortKey,
+    togglePinChannel,
   } = useAppStore();
 
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ mode: 'default' });
+  const [sortConfig, setSortConfig] = useState<SortConfig>(
+    activeSortKey === 'smart' ? { mode: 'smart' } : activeSortKey === 'default' ? { mode: 'default' } : { mode: 'single', ruleId: activeSortKey },
+  );
   const [multiOpen, setMultiOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [levelExplorerOpen, setLevelExplorerOpen] = useState(false);
 
   // 渠道表单
   const [channelForm, setChannelForm] = useState<{ open: boolean; editing: Channel | null }>({ open: false, editing: null });
@@ -46,29 +57,59 @@ export function AssetsPanel() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void }>({ open: false, title: '', message: '', onConfirm: () => {} });
 
   const total = totalAssets(channels);
-  const level = getLevelByAmount(total);
+
+  const growths = useMemo(() => computeChannelGrowths(history, channels), [history, channels]);
+  const growthByChannel = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const [id, g] of growths) m.set(id, g.g30d ?? -Infinity);
+    return m;
+  }, [growths]);
+  const pinned = useMemo(() => new Set(pinnedChannelIds), [pinnedChannelIds]);
+
+  const applyPinned = (arr: Channel[]) => {
+    if (pinned.size === 0) return arr;
+    return [...arr].sort((a, b) => (pinned.has(a.id) ? 0 : 1) - (pinned.has(b.id) ? 0 : 1));
+  };
 
   const sortedChannels = useMemo(() => {
+    let base: Channel[];
     if (sortConfig.mode === 'single') {
       const rule = sortRules.find((r) => r.id === sortConfig.ruleId);
-      if (rule) return sortChannelsByRule(channels, rule, { totalAmount: total });
-    }
-    if (sortConfig.mode === 'multi') {
+      base = rule ? sortChannelsByRule(channels, rule, { totalAmount: total, growthByChannel }) : sortChannels(channels);
+    } else if (sortConfig.mode === 'multi') {
       const rules = sortConfig.ruleIds
         .map((id) => sortRules.find((r) => r.id === id))
         .filter((r): r is CustomSortRule => !!r);
-      if (rules.length) return sortChannelsMulti(channels, rules, { totalAmount: total });
+      base = rules.length ? sortChannelsMulti(channels, rules, { totalAmount: total, growthByChannel }) : sortChannels(channels);
+    } else if (sortConfig.mode === 'smart') {
+      const order = sortChannelsSmart(channels, growths, total, new Set(), smartSortConfig);
+      const orderMap = new Map(order.map((o, i) => [o.id, i]));
+      base = [...channels].sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
+    } else {
+      base = sortChannels(channels);
     }
-    return sortChannels(channels);
-  }, [channels, sortConfig, sortRules, total]);
+    return applyPinned(base);
+  }, [channels, sortConfig, sortRules, total, growthByChannel, growths, pinned, smartSortConfig]);
 
   function applySingle(ruleId: string) {
+    if (ruleId === 'smart') {
+      setSortConfig({ mode: 'smart' });
+      setActiveSortKey('smart');
+      return;
+    }
+    if (ruleId === 'default') {
+      setSortConfig({ mode: 'default' });
+      setActiveSortKey('default');
+      return;
+    }
     const rule = sortRules.find((r) => r.id === ruleId);
     if (!rule) {
       setSortConfig({ mode: 'default' });
+      setActiveSortKey('default');
       return;
     }
     setSortConfig({ mode: 'single', ruleId });
+    setActiveSortKey(ruleId);
     recordSortHistory(rule.key, rule.label);
   }
 
@@ -99,40 +140,13 @@ export function AssetsPanel() {
       }),
     onEditAmount: (target, current, label) =>
       setAmountForm({ open: true, target, current, label }),
+    onTogglePin: togglePinChannel,
   };
-
-  const nextLevel = WEALTH_LEVELS.find((l) => l.minAmount > total);
-  const levelProgress = nextLevel
-    ? Math.min(100, ((total - level.minAmount) / (nextLevel.minAmount - level.minAmount)) * 100)
-    : 100;
 
   return (
     <div className="space-y-4">
-      {/* 财富等级进度卡 */}
-      <Card className="p-4">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl" aria-hidden>{level.badge}</span>
-            <div>
-              <div className="font-semibold text-slate-800">{level.name}</div>
-              <div className="text-xs text-slate-500">{level.description}</div>
-            </div>
-          </div>
-          {nextLevel ? (
-            <div className="text-right">
-              <div className="text-xs text-slate-400">距 {nextLevel.name}</div>
-              <div className="text-sm font-semibold text-slate-700 tabular">{formatCNY(nextLevel.minAmount - total)}</div>
-            </div>
-          ) : (
-            <Badge tone="amber">🏆 已达最高等级</Badge>
-          )}
-        </div>
-        <ProgressBar value={levelProgress} barClassName="bg-gradient-to-r from-emerald-400 to-emerald-600" />
-        <div className="mt-1 text-xs text-slate-400 flex justify-between tabular">
-          <span>{formatCNY(level.minAmount)}</span>
-          <span>{nextLevel ? formatCNY(nextLevel.minAmount) : '∞'}</span>
-        </div>
-      </Card>
+      {/* 财富 Dashboard */}
+      <WealthHeroCard onOpenLevels={() => setLevelExplorerOpen(true)} />
 
       {/* 工具栏 */}
       <div className="flex flex-wrap items-center gap-2">
@@ -140,11 +154,12 @@ export function AssetsPanel() {
           <label className="text-sm text-slate-500 shrink-0">排序</label>
           <select
             className="flex-1 px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            value={sortConfig.mode === 'single' ? sortConfig.ruleId : 'default'}
+            value={sortConfig.mode === 'single' ? sortConfig.ruleId : sortConfig.mode}
             onChange={(e) => applySingle(e.target.value)}
             aria-label="排序方式"
           >
             <option value="default">默认（金额从高到低）</option>
+            <option value="smart">✨ 智能综合排序</option>
             {sortRules.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.label}
@@ -176,7 +191,7 @@ export function AssetsPanel() {
       ) : (
         <div className="space-y-3">
           {sortedChannels.map((c) => (
-            <ChannelItem key={c.id} channel={c} handlers={handlers} />
+            <ChannelItem key={c.id} channel={c} handlers={handlers} isPinned={pinned.has(c.id)} />
           ))}
         </div>
       )}
@@ -232,6 +247,7 @@ export function AssetsPanel() {
         onAdd={(rule) => addSortRule(rule)}
         onDelete={deleteSortRule}
       />
+      <LevelExplorer open={levelExplorerOpen} onClose={() => setLevelExplorerOpen(false)} />
     </div>
   );
 }

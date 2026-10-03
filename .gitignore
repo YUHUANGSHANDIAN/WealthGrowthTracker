@@ -9,6 +9,10 @@ dist-ssr/
 *.local
 *.tsbuildinfo
 
+# Tauri 桌面构建/安装产物（本地）
+WealthGrowthTracker/
+src-tauri/target/
+
 # tests / coverage
 coverage/
 

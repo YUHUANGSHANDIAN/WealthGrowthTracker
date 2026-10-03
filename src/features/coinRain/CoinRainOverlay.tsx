@@ -12,7 +12,7 @@ interface Coin {
   alpha: number;
 }
 
-const INTENSITY_COUNT = { low: 24, medium: 48, high: 80 } as const;
+const INTENSITY_COUNT = { off: 0, low: 24, medium: 48, high: 80 } as const;
 
 /**
  * 金币雨庆祝动画（canvas + requestAnimationFrame）。

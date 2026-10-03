@@ -80,7 +80,11 @@ export function defaultChannels(): Channel[] {
       isExpanded: false,
       createdAt: now,
       updatedAt: now,
-      children: [],
+      children: [
+        child('campus_card_dlut', '大连理工大学', '🎓', '#06B6D4', 'campus_card'),
+        child('campus_card_tju', '天津大学', '🏫', '#0EA5E9', 'campus_card'),
+        child('campus_card_fudan', '复旦大学', '📚', '#6366F1', 'campus_card'),
+      ],
     },
     {
       id: 'bank_cards',

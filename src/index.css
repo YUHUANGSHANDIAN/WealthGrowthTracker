@@ -9,6 +9,20 @@
   --text-secondary: #475569;
   --brand: #10b981;
   --brand-deep: #059669;
+
+  /* 财富等级主题 Token（默认 emerald，App 运行时按当前等级覆盖） */
+  --wealth-primary: #10b981;
+  --wealth-secondary: #34d399;
+  --wealth-accent: #059669;
+  --wealth-surface: #ecfdf5;
+  --wealth-surface-soft: #f7fefa;
+  --wealth-text-on-primary: #ffffff;
+  --wealth-border: #a7f3d0;
+  --wealth-glow: rgba(16, 185, 129, 0.35);
+  --wealth-progress-gradient: linear-gradient(90deg, #34d399, #059669);
+  --wealth-hero-gradient: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 55%, #6ee7b7 100%);
+  --wealth-particle: #6ee7b7;
+  --wealth-chart-accent: #10b981;
 }
 
 html,

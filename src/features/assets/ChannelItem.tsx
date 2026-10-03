@@ -16,6 +16,7 @@ export interface ChannelHandlers {
   onEditSub: (parentId: string, sub: SubChannel) => void;
   onDeleteSub: (parentId: string, sub: SubChannel) => void;
   onEditAmount: (target: AmountTarget, current: number, label: string) => void;
+  onTogglePin: (id: string) => void;
 }
 
 function ActionButton({
@@ -49,7 +50,7 @@ function ActionButton({
   );
 }
 
-export function ChannelItem({ channel, handlers }: { channel: Channel; handlers: ChannelHandlers }) {
+export function ChannelItem({ channel, handlers, isPinned = false }: { channel: Channel; handlers: ChannelHandlers; isPinned?: boolean }) {
   const amount = channelAmount(channel);
   const children = channel.children ?? [];
   const hasChildren = children.length > 0;
@@ -97,6 +98,9 @@ export function ChannelItem({ channel, handlers }: { channel: Channel; handlers:
         </ActionButton>
         <ActionButton label="编辑渠道" onClick={() => handlers.onEditChannel(channel)}>
           ✎ 编辑
+        </ActionButton>
+        <ActionButton label={isPinned ? '取消置顶' : '置顶'} onClick={() => handlers.onTogglePin(channel.id)}>
+          {isPinned ? '📌 已置顶' : '📍 置顶'}
         </ActionButton>
         <div className="flex-1" />
         <ActionButton label="删除渠道" onClick={() => handlers.onDeleteChannel(channel)} tone="red">

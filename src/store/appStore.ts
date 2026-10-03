@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type {
+  AppearanceSettings,
   Channel,
   ChartSettings,
   CoinRainConfig,
@@ -11,9 +12,11 @@ import type {
   GoalAchievementStatus,
   HistoryPoint,
   ReportType,
+  SmartSortConfig,
   SortHistory,
   SubChannel,
   TimeRangeHistory,
+  UserProfile,
 } from '../types';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { getLevelByAmount } from '../constants/levels';
@@ -52,6 +55,9 @@ import {
 import { saveTextFile, backupFilename } from '../services/export/download';
 import { generateReport, toggleReportArchive } from '../features/reports/generate';
 import { reportFileBase, reportHtml } from '../features/reports/reportFile';
+import { migrateChannelsV12, needsV12Migration } from '../services/migration';
+import { detectCelebrations, type CelebrationEvent } from '../utils/celebrate';
+import { DEFAULT_SMART_CONFIG } from '../utils/smartSort';
 
 export type ToastKind = 'success' | 'error' | 'info';
 export interface Toast {
@@ -65,6 +71,8 @@ interface AppState {
   hydrated: boolean;
   toasts: Toast[];
   coinRainActive: boolean;
+  /** 当前庆祝事件（等级升级 / 目标达成），由 CelebrationOverlay 消费。 */
+  celebration: CelebrationEvent | null;
 
   // 业务数据（持久化）
   channels: Channel[];
@@ -72,6 +80,13 @@ interface AppState {
   reports: FinancialReport[];
   sortRules: CustomSortRule[];
   sortHistory: SortHistory;
+  /** 当前排序模式 key（持久化，刷新后恢复）。 */
+  activeSortKey: string;
+  /** 固定置顶的渠道 id。 */
+  pinnedChannelIds: string[];
+  smartSortConfig: SmartSortConfig;
+  profile: UserProfile;
+  appearance: AppearanceSettings;
   chartSettings: ChartSettings;
   countdown: CountdownData;
   countdownOpacity: number;
@@ -92,6 +107,7 @@ interface AppState {
   pushToast: (message: string, kind?: ToastKind) => void;
   dismissToast: (id: string) => void;
   setImportModalOpen: (open: boolean) => void;
+  dismissCelebration: () => void;
 
   // ---- 渠道 ----
   addParentChannel: (name: string, emoji: string, color: string) => void;
@@ -124,6 +140,11 @@ interface AppState {
   deleteSortRule: (id: string) => void;
   recordSortHistory: (key: string, label: string) => void;
   clearSortHistory: () => void;
+  setActiveSortKey: (key: string) => void;
+  togglePinChannel: (id: string) => void;
+  setSmartSortConfig: (config: SmartSortConfig) => void;
+  setProfile: (profile: UserProfile) => void;
+  setAppearance: (appearance: AppearanceSettings) => void;
 
   // ---- 倒计时 / 目标 ----
   setCountdown: (countdown: CountdownData) => void;
@@ -150,6 +171,10 @@ const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
   { key: STORAGE_KEYS.financialReports, pick: (s) => s.reports },
   { key: STORAGE_KEYS.customSortRules, pick: (s) => ({ rules: s.sortRules.filter((r) => !r.isSystem) }) },
   { key: STORAGE_KEYS.sortHistory, pick: (s) => s.sortHistory },
+  { key: STORAGE_KEYS.sortConfig, pick: (s) => ({ activeKey: s.activeSortKey, pinned: s.pinnedChannelIds }) },
+  { key: STORAGE_KEYS.smartSortConfig, pick: (s) => s.smartSortConfig },
+  { key: STORAGE_KEYS.userProfile, pick: (s) => s.profile },
+  { key: STORAGE_KEYS.appearanceSettings, pick: (s) => s.appearance },
   { key: STORAGE_KEYS.chartSettings, pick: (s) => s.chartSettings },
   { key: STORAGE_KEYS.countdownData, pick: (s) => s.countdown },
   { key: STORAGE_KEYS.countdownOpacity, pick: (s) => s.countdownOpacity },
@@ -209,12 +234,18 @@ export const useAppStore = create<AppState>()((set, get) => {
     hydrated: false,
     toasts: [],
     coinRainActive: false,
+    celebration: null,
 
     channels: [],
     history: [],
     reports: [],
     sortRules: [],
     sortHistory: { history: [] },
+    activeSortKey: 'default',
+    pinnedChannelIds: [],
+    smartSortConfig: DEFAULT_SMART_CONFIG,
+    profile: { defaultCurrency: 'CNY' },
+    appearance: { themeMode: 'system', followWealthTheme: true, animationIntensity: 'normal', backgroundOpacity: 30, reduceMotion: 'system' },
     chartSettings: defaultChartSettings(),
     countdown: defaultCountdownData(),
     countdownOpacity: 1,
@@ -243,6 +274,10 @@ export const useAppStore = create<AppState>()((set, get) => {
         progressHistory,
         level,
         linkedHistory,
+        sortConfig,
+        smartSortConfig,
+        profile,
+        appearance,
       ] = await Promise.all([
         storageService.getJSON<{ channels: Channel[]; history: HistoryPoint[] }>(STORAGE_KEYS.wealthTrackerData),
         storageService.getJSON<FinancialReport[]>(STORAGE_KEYS.financialReports),
@@ -257,15 +292,30 @@ export const useAppStore = create<AppState>()((set, get) => {
         storageService.getJSON<CountdownProgressPoint[]>(STORAGE_KEYS.countdownProgressHistory),
         storageService.getJSON<CurrentWealthLevel>(STORAGE_KEYS.currentWealthLevel),
         storageService.getJSON<HistoryPoint[]>(STORAGE_KEYS.wealthTrackerHistory),
+        storageService.getJSON<{ activeKey: string; pinned: string[] }>(STORAGE_KEYS.sortConfig),
+        storageService.getJSON<SmartSortConfig>(STORAGE_KEYS.smartSortConfig),
+        storageService.getJSON<UserProfile>(STORAGE_KEYS.userProfile),
+        storageService.getJSON<AppearanceSettings>(STORAGE_KEYS.appearanceSettings),
       ]);
 
       const isFirstRun = !wtd;
-      const channels = wtd?.channels?.length ? wtd.channels : defaultChannels();
+      const storedVersion = await storageService.getRaw(STORAGE_VERSION_KEY);
+      let channels = wtd?.channels?.length ? wtd.channels : defaultChannels();
       const history = wtd?.history?.length ? wtd.history : defaultHistory();
 
       // 系统规则始终可用，叠加用户自定义规则（只持久化用户规则，系统规则随版本生成）。
       const userRules = rules?.rules?.filter((r) => !r.isSystem) ?? [];
       const allRules = [...defaultSortRules(), ...userRules];
+
+      // v1.1 → v1.2 迁移：校园卡补充默认学校（仅升级时运行一次）。
+      let migrationNote: string | undefined;
+      if (!isFirstRun && needsV12Migration(storedVersion)) {
+        const migrated = migrateChannelsV12(channels);
+        if (migrated.added > 0) {
+          channels = migrated.channels;
+          migrationNote = `已为「校园卡」补充 ${migrated.added} 个默认学校子渠道`;
+        }
+      }
 
       set({
         channels: normalizeChannelAmounts(channels),
@@ -273,6 +323,11 @@ export const useAppStore = create<AppState>()((set, get) => {
         reports: reports ?? [],
         sortRules: allRules,
         sortHistory: sortHistory ?? { history: [] },
+        activeSortKey: sortConfig?.activeKey ?? 'default',
+        pinnedChannelIds: sortConfig?.pinned ?? [],
+        smartSortConfig: smartSortConfig ?? DEFAULT_SMART_CONFIG,
+        profile: profile ?? { defaultCurrency: 'CNY' },
+        appearance: appearance ?? { themeMode: 'system', followWealthTheme: true, animationIntensity: 'normal', backgroundOpacity: 30, reduceMotion: 'system' },
         chartSettings: chartSettings ?? defaultChartSettings(),
         countdown: countdown ?? defaultCountdownData(),
         countdownOpacity: opacity != null ? Number(opacity) || 1 : 1,
@@ -285,12 +340,12 @@ export const useAppStore = create<AppState>()((set, get) => {
         hydrated: true,
       });
 
-      // 版本升级检测：存储版本变化时先备份，再写回新版本号（仅桌面文件存储有意义）。
-      const storedVersion = await storageService.getRaw(STORAGE_VERSION_KEY);
+      // 版本升级检测：先备份再写回新版本号（仅桌面文件存储有意义）。
       if (!isFirstRun && storedVersion !== APP_VERSION) {
         const mgr = storageService.getDesktopManager();
         if (mgr) await mgr.backupNow(true);
         await storageService.setRaw(STORAGE_VERSION_KEY, APP_VERSION);
+        if (migrationNote) get().pushToast(migrationNote, 'info');
       }
 
       if (isFirstRun) {
@@ -311,6 +366,9 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
     setImportModalOpen(open) {
       set({ importModalOpen: open });
+    },
+    dismissCelebration() {
+      set({ celebration: null });
     },
 
     // ---------------------------------------------------------------------
@@ -346,11 +404,20 @@ export const useAppStore = create<AppState>()((set, get) => {
       persist();
     },
     setAmount(target, amount) {
+      const prevTotal = totalAssets(get().channels);
       set((s) => {
         const channels = setLeafAmount(s.channels, target, amount);
         const { history } = afterChannelChange({ ...s, channels });
         return { channels, history };
       });
+      const newTotal = totalAssets(get().channels);
+      // 检测并触发等级升级 / 目标达成庆祝（仅真实的金额编辑触发，导入/重启不触发）
+      const { event, newGoalAchieved } = detectCelebrations(prevTotal, newTotal, get().countdown, get().goalAchieved);
+      if (event) {
+        if (newGoalAchieved) set({ goalAchieved: newGoalAchieved });
+        if (event.goal) get().triggerCoinRain();
+        set({ celebration: event });
+      }
       persist();
     },
 
@@ -440,6 +507,29 @@ export const useAppStore = create<AppState>()((set, get) => {
       set({ sortHistory: { history: [] } });
       persist();
     },
+    setActiveSortKey(key) {
+      set({ activeSortKey: key });
+      persist();
+    },
+    togglePinChannel(id) {
+      set((s) => {
+        const has = s.pinnedChannelIds.includes(id);
+        return { pinnedChannelIds: has ? s.pinnedChannelIds.filter((x) => x !== id) : [...s.pinnedChannelIds, id] };
+      });
+      persist();
+    },
+    setSmartSortConfig(config) {
+      set({ smartSortConfig: config });
+      persist();
+    },
+    setProfile(profile) {
+      set({ profile: { ...profile, updatedAt: new Date().toISOString() } });
+      persist();
+    },
+    setAppearance(appearance) {
+      set({ appearance });
+      persist();
+    },
 
     // ---------------------------------------------------------------------
     setCountdown(countdown) {
@@ -470,6 +560,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       persist();
     },
     triggerCoinRain() {
+      if (get().coinRainConfig.intensity === 'off') return;
       set({ coinRainActive: true });
     },
     stopCoinRain() {
