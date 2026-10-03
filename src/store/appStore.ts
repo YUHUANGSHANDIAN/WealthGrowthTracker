@@ -16,6 +16,7 @@ import type {
   TimeRangeHistory,
 } from '../types';
 import { STORAGE_KEYS } from '../constants/storageKeys';
+import { getLevelByAmount } from '../constants/levels';
 import {
   defaultChannels,
   defaultChartSettings,
@@ -179,12 +180,22 @@ function afterChannelChange(s: Pick<AppState, 'channels' | 'history'>): {
   const channels = normalizeChannelAmounts(s.channels);
   const total = totalAssets(channels);
   const today = todayString();
+  // 保存当日完整渠道快照，使未来可正确回答「某天支付宝是多少」等历史构成问题。
+  const snapshot: Channel[] = channels.map((c) => ({
+    ...c,
+    children: c.children ? c.children.map((child) => ({ ...child })) : undefined,
+  }));
+  const wealthLevel = getLevelByAmount(total).name;
+  const timestamp = Date.now();
+
   let history = s.history;
   const existing = history.find((h) => h.date === today);
   if (existing) {
-    history = history.map((h) => (h.date === today ? { ...h, totalAmount: total } : h));
+    history = history.map((h) =>
+      h.date === today ? { ...h, totalAmount: total, channels: snapshot, wealthLevel, timestamp } : h,
+    );
   } else {
-    history = [...history, { date: today, totalAmount: total }];
+    history = [...history, { date: today, totalAmount: total, channels: snapshot, wealthLevel, timestamp }];
   }
   return { channels, history };
 }
@@ -362,7 +373,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     // ---------------------------------------------------------------------
     generateReportNow(reportType, referenceDate = todayString()) {
       const s = get();
-      const report = generateReport(s.channels, s.history, reportType, referenceDate);
+      const report = generateReport(s.history, reportType, referenceDate, s.channels);
       const reports = [report, ...s.reports];
       set({ reports });
       persist();

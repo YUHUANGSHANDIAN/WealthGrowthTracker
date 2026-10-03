@@ -38,7 +38,13 @@ describe('appStore', () => {
     expect(totalAssets(s.channels)).toBe(123.45);
 
     const today = todayString();
-    expect(s.history.find((h) => h.date === today)?.totalAmount).toBe(123.45);
+    const todayPoint = s.history.find((h) => h.date === today);
+    expect(todayPoint?.totalAmount).toBe(123.45);
+    // 新历史快照必须保存完整渠道快照 + 财富等级 + 时间戳
+    expect(todayPoint?.channels).toBeDefined();
+    expect(todayPoint?.channels![0]!.children![0]!.amount).toBe(123.45);
+    expect(todayPoint?.wealthLevel).toBeDefined();
+    expect(todayPoint?.timestamp).toBeGreaterThan(0);
   });
 
   it('addHistoryPoint 同日期覆盖而非重复', () => {

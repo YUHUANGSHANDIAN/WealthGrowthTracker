@@ -10,6 +10,7 @@ import { round2, diffMoney } from '../../utils/money';
 import { getLevelByAmount } from '../../constants/levels';
 import {
   parseDateString,
+  todayString,
   weekStart,
   weekEnd,
   monthStart,
@@ -51,17 +52,22 @@ export function reportTitle(reportType: ReportType, referenceDate: string): stri
   }
 }
 
-/** 某日期及之前的最近一次总资产（用于周期起点基准）。 */
+/** 某日期及之前最近一次总资产（不含渠道构成）。 */
 export function assetAtDate(history: HistoryPoint[], date: string): number {
-  if (history.length === 0) return 0;
+  const p = latestPointAtOrBefore(history, date);
+  return p ? p.totalAmount : 0;
+}
+
+/** 某日期及之前最近的一条历史记录（含渠道快照，若存在）。 */
+export function latestPointAtOrBefore(history: HistoryPoint[], date: string): HistoryPoint | null {
+  if (history.length === 0) return null;
   const sorted = [...history].sort((a, b) => (a.date < b.date ? -1 : 1));
   let candidate: HistoryPoint | null = null;
   for (const p of sorted) {
     if (p.date <= date) candidate = p;
     else break;
   }
-  if (candidate) return candidate.totalAmount;
-  return sorted[0]!.totalAmount;
+  return candidate ?? sorted[0]!;
 }
 
 /** 当前渠道构成报告所需的份额明细。 */
@@ -78,16 +84,47 @@ export function buildChannelDetails(channels: Channel[], total: number): ReportC
   }));
 }
 
-/** 生成一份周/月/年财务报告（纯函数，可单测）。 */
+/**
+ * 生成一份周/月/年财务报告（纯函数，可单测）。
+ *
+ * 准确性原则：
+ * - 「当前周期」的期末总资产用当前渠道状态；「过去周期」用该周期末或之前最近一次
+ *   HistoryPoint 的总资产作为期末快照。
+ * - 渠道构成优先使用历史快照（HistoryPoint.channels）；旧版历史只有总资产、无渠道快照时，
+ *   明确标记 channelSnapshotMissing，而非拿今天的数据冒充过去数据。
+ */
 export function generateReport(
-  channels: Channel[],
   history: HistoryPoint[],
   reportType: ReportType,
   referenceDate: string,
+  currentChannels: Channel[] = [],
+  now: string = todayString(),
 ): FinancialReport {
   const { startDate, endDate } = periodRange(reportType, referenceDate);
-  const total = totalAssets(channels);
-  const previous = assetAtDate(history, startDate);
+  const isCurrentPeriod = endDate >= now;
+
+  const endPoint = latestPointAtOrBefore(history, endDate);
+  const startPoint = latestPointAtOrBefore(history, startDate);
+
+  let total: number;
+  let endChannels: Channel[] | undefined;
+  let channelSnapshotMissing = false;
+
+  if (isCurrentPeriod) {
+    total = totalAssets(currentChannels);
+    endChannels = currentChannels;
+  } else if (endPoint && endPoint.channels && endPoint.channels.length > 0) {
+    total = endPoint.totalAmount;
+    endChannels = endPoint.channels;
+  } else if (endPoint) {
+    total = endPoint.totalAmount;
+    channelSnapshotMissing = true;
+  } else {
+    total = 0;
+    channelSnapshotMissing = true;
+  }
+
+  const previous = startPoint ? startPoint.totalAmount : 0;
   const change = diffMoney(total, previous);
   const changePercentage = previous > 0 ? round2((change / previous) * 100) : 0;
 
@@ -97,7 +134,7 @@ export function generateReport(
   const min = amounts.length ? Math.min(...amounts) : total;
   const avg = amounts.length ? round2(amounts.reduce((a, b) => a + b, 0) / amounts.length) : total;
 
-  const channelDetails = buildChannelDetails(channels, total);
+  const channelDetails = endChannels ? buildChannelDetails(endChannels, total) : [];
   const topChannels = [...channelDetails]
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 3)
@@ -127,6 +164,8 @@ export function generateReport(
     generatedAt: new Date().toISOString(),
     historyPointsCount: inPeriod.length,
     year: d.getFullYear(),
+    ...(endChannels ? { channels: endChannels } : {}),
+    ...(channelSnapshotMissing ? { channelSnapshotMissing: true } : {}),
   };
 
   switch (reportType) {

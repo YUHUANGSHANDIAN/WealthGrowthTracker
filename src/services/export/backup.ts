@@ -20,7 +20,7 @@ import { todayString } from '../../utils/date';
 import { defaultChannels, defaultCountdownData } from '../../constants/defaults';
 import { getLevelByAmount } from '../../constants/levels';
 
-export const BACKUP_VERSION = '1.0.0';
+export const BACKUP_VERSION = '1.1.0';
 export const APP_NAME = '财富成长记';
 
 /** 导出/导入时需要用到的完整应用状态（由 store 提供）。 */

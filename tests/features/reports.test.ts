@@ -34,14 +34,40 @@ describe('报告生成', () => {
     expect(assetAtDate([], '2026-01-01')).toBe(0);
   });
 
-  it('generateReport 计算变化量与变化率', () => {
-    const report = generateReport(channels, history, 'monthly', '2026-10-15');
+  it('当前周期：用当前渠道状态计算期末，不冒充过去', () => {
+    const report = generateReport(history, 'monthly', '2026-10-15', channels, '2026-10-15');
     expect(report.totalAmount).toBe(150);
-    // 期初（10-01 之前最近）为 100（9-01 的点），变化 +50
     expect(report.changeAmount).toBe(50);
     expect(report.changePercentage).toBe(50);
     expect(report.reportType).toBe('monthly');
     expect(report.channelDetails.length).toBe(2);
+  });
+
+  it('过去周期：使用历史渠道快照而非当前渠道', () => {
+    const snapshot: Channel[] = [
+      { id: 'x', name: '储蓄', emoji: '💰', amount: 80, color: '#000', isParent: true, isExpanded: false, children: [] },
+    ];
+    const histWithSnapshot: HistoryPoint[] = [
+      { date: '2026-08-31', totalAmount: 50 },
+      { date: '2026-09-30', totalAmount: 80, channels: snapshot },
+    ];
+    const report = generateReport(histWithSnapshot, 'monthly', '2026-09-15', channels, '2026-10-15');
+    expect(report.totalAmount).toBe(80);
+    expect(report.changeAmount).toBe(30);
+    expect(report.channelSnapshotMissing).toBeUndefined();
+    expect(report.channelDetails.length).toBe(1);
+    expect(report.channelDetails[0]!.amount).toBe(80);
+  });
+
+  it('旧版历史无渠道快照：明确标记而非拿今天数据冒充', () => {
+    const oldHist: HistoryPoint[] = [
+      { date: '2026-08-31', totalAmount: 50 },
+      { date: '2026-09-30', totalAmount: 80 },
+    ];
+    const report = generateReport(oldHist, 'monthly', '2026-09-15', channels, '2026-10-15');
+    expect(report.totalAmount).toBe(80);
+    expect(report.channelSnapshotMissing).toBe(true);
+    expect(report.channelDetails.length).toBe(0);
   });
 
   it('reportTitle 命名', () => {
@@ -50,7 +76,7 @@ describe('报告生成', () => {
   });
 
   it('toggleReportArchive 切换归档状态', () => {
-    const r = generateReport(channels, history, 'weekly', '2026-10-03');
+    const r = generateReport(history, 'weekly', '2026-10-03', channels, '2026-10-03');
     const archived = toggleReportArchive(r, '已归档');
     expect(archived.isArchived).toBe(true);
     expect(archived.archiveNote).toBe('已归档');

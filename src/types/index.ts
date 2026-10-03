@@ -92,6 +92,8 @@ export interface FinancialReport {
   historyPointsCount?: number;
   // 快照与摘要
   channels?: Channel[];
+  /** 旧版历史只有总资产、无渠道快照时为 true（报告无法还原该日期渠道构成）。 */
+  channelSnapshotMissing?: boolean;
   channelDetails: ReportChannelDetail[];
   topChannels?: { name: string; emoji: string; amount: Money; percentage: number }[];
   summary?: string;
