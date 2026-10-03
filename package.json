@@ -1,8 +1,8 @@
 {
   "name": "wealth-growth-tracker",
   "private": true,
-  "version": "1.0.0",
-  "description": "财富成长记 / 财富梦想实现家 —— 本地个人财富管理 Web App（React + TypeScript + Vite 重构版）",
+  "version": "1.1.0",
+  "description": "财富成长记 / 财富梦想实现家 —— 本地个人财富管理 Web + Windows 桌面应用（React + TypeScript + Vite + Tauri）",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,14 +11,18 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b --noEmit",
-    "lint": "eslint src --ext .ts,.tsx --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint src --ext .ts,.tsx --report-unused-disable-directives --max-warnings 0",
+    "tauri": "tauri",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.12.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.1",
     "@testing-library/jest-dom": "^6.6.2",
     "@testing-library/react": "^16.0.1",
     "@testing-library/user-event": "^14.5.2",

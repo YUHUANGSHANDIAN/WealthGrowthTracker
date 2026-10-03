@@ -80,7 +80,7 @@ export function LineChart({
         : (_e: number) => (W - M.left - M.right) / 2 + M.left;
 
     // 单日退化为索引位置
-    let values: number[] = [];
+    const values: number[] = [];
     for (const s of series) {
       for (const p of s.points) {
         values.push(p.value);

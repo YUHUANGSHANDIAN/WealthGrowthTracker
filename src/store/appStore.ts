@@ -17,6 +17,7 @@ import type {
 } from '../types';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { getLevelByAmount } from '../constants/levels';
+import { APP_VERSION, STORAGE_VERSION_KEY } from '../constants/version';
 import {
   defaultChannels,
   defaultChartSettings,
@@ -50,6 +51,7 @@ import {
 } from '../services/export';
 import { saveTextFile, backupFilename } from '../services/export/download';
 import { generateReport, toggleReportArchive } from '../features/reports/generate';
+import { reportFileBase, reportHtml } from '../features/reports/reportFile';
 
 export type ToastKind = 'success' | 'error' | 'info';
 export interface Toast {
@@ -283,8 +285,17 @@ export const useAppStore = create<AppState>()((set, get) => {
         hydrated: true,
       });
 
+      // 版本升级检测：存储版本变化时先备份，再写回新版本号（仅桌面文件存储有意义）。
+      const storedVersion = await storageService.getRaw(STORAGE_VERSION_KEY);
+      if (!isFirstRun && storedVersion !== APP_VERSION) {
+        const mgr = storageService.getDesktopManager();
+        if (mgr) await mgr.backupNow(true);
+        await storageService.setRaw(STORAGE_VERSION_KEY, APP_VERSION);
+      }
+
       if (isFirstRun) {
-        // 首次运行：写入默认数据，保证刷新后仍在。
+        // 首次运行：写入默认数据与版本号，保证刷新后仍在。
+        await storageService.setRaw(STORAGE_VERSION_KEY, APP_VERSION);
         persist();
       }
     },
@@ -377,6 +388,17 @@ export const useAppStore = create<AppState>()((set, get) => {
       const reports = [report, ...s.reports];
       set({ reports });
       persist();
+      // 桌面版：把报告同时持久化为 JSON + HTML 到 reports/{type}/ 目录
+      const mgr = storageService.getDesktopManager();
+      if (mgr) {
+        void (async () => {
+          try {
+            await mgr.writeReport(reportType, reportFileBase(report), JSON.stringify(report, null, 2), reportHtml(report));
+          } catch (err) {
+            console.warn('[reports] 报告写盘失败:', err);
+          }
+        })();
+      }
       get().pushToast(`已生成报告「${report.title}」`, 'success');
       return report;
     },
@@ -482,6 +504,10 @@ export const useAppStore = create<AppState>()((set, get) => {
     async importData(jsonText) {
       const result = parseBackup(jsonText);
       if (!result.ok) return { ok: false, message: result.error };
+
+      // 覆盖导入前先备份当前数据（桌面版），避免误操作造成资产数据丢失。
+      const mgr = storageService.getDesktopManager();
+      if (mgr) await mgr.backupNow(true);
 
       const d: ImportedData = result.data;
       set({

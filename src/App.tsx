@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { useAppStore } from './store/appStore';
+import { storageService } from './services/storage';
 import { totalAssets } from './utils/channels';
 import { getLevelByAmount } from './constants/levels';
 import { formatCNY } from './utils/money';
@@ -57,6 +58,15 @@ export default function App() {
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  // 退出前确保桌面文件存储已落盘
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      void storageService.flush();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
 
   if (!hydrated) {
     return (
