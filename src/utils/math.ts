@@ -1,13 +1,19 @@
-import type { HistoryPoint } from '../types';
-
 /**
- * 统计/预测所需的纯数学函数。全部无副作用、可单测。
- * 与旧版逻辑对齐：线性预测用「加权线性回归」，指数预测用「复合增长率(CAGR)」，
- * 保守/激进在基础增长率上做风险调节。
+ * 统计 / 预测所需的纯数学函数。全部无副作用、可单测。
+ *
+ * 约定：
+ * - 时间轴统一使用「真实 elapsed days」作为自变量 X（见 prediction/series.ts），
+ *   绝不用「第几条」这类伪索引。
+ * - 误差指标 MAE / RMSE / sMAPE 用于模型诊断与回测，不用于伪称「统计置信度」。
  */
 
-/** 简单线性回归：返回 {slope, intercept, r2}。 */
-export function linearRegression(points: { x: number; y: number }[]): {
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/** 简单线性回归 y = slope·x + intercept，返回 slope、intercept、R²。 */
+export function linearRegression(points: Point[]): {
   slope: number;
   intercept: number;
   r2: number;
@@ -41,15 +47,14 @@ export function linearRegression(points: { x: number; y: number }[]): {
   return { slope, intercept, r2 };
 }
 
-/** 加权线性回归：越靠后的数据点权重越大（weight^i）。 */
+/** 加权线性回归：越靠后的数据点权重越大（weightBase^(n-1-i)，weightBase∈(0,1]）。 */
 export function weightedLinearRegression(
-  points: { x: number; y: number }[],
+  points: Point[],
   weightBase = 0.9,
 ): { slope: number; intercept: number } {
   const n = points.length;
   if (n < 2) return { slope: 0, intercept: points[0]?.y ?? 0 };
 
-  // 权重：索引 i 的点权重为 weightBase^(n-1-i)
   let sw = 0;
   let swx = 0;
   let swy = 0;
@@ -70,55 +75,153 @@ export function weightedLinearRegression(
   return { slope, intercept };
 }
 
-/** 复合年化增长率（CAGR），基于首尾两个点的天数。 */
-export function compoundGrowthRate(
-  first: number,
-  last: number,
-  daysElapsed: number,
-): number {
+/**
+ * log-linear 回归：ln(y) = a + b·x，用于指数增长模型的拟合。
+ * 仅使用 y > 0 的点（金额为 0 或负数不参与对数拟合）。
+ */
+export function logLinearRegression(points: Point[]): { a: number; b: number; r2: number; used: number } {
+  const valid = points.filter((p) => p.y > 0 && Number.isFinite(Math.log(p.y)));
+  if (valid.length < 2) {
+    return { a: 0, b: 0, r2: 0, used: valid.length };
+  }
+  const { slope: b, intercept: a, r2 } = linearRegression(
+    valid.map((p) => ({ x: p.x, y: Math.log(p.y) })),
+  );
+  return { a, b, r2, used: valid.length };
+}
+
+// ---------------------------------------------------------------------------
+// 误差指标
+// ---------------------------------------------------------------------------
+
+/** 平均绝对误差。 */
+export function mae(actual: number[], predicted: number[]): number {
+  const n = Math.min(actual.length, predicted.length);
+  if (n === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += Math.abs(actual[i]! - predicted[i]!);
+  return sum / n;
+}
+
+/** 均方根误差。 */
+export function rmse(actual: number[], predicted: number[]): number {
+  const n = Math.min(actual.length, predicted.length);
+  if (n === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const d = actual[i]! - predicted[i]!;
+    sum += d * d;
+  }
+  return Math.sqrt(sum / n);
+}
+
+/**
+ * 对称平均绝对百分比误差（0~200，百分比）。
+ * 相比普通 MAPE 对接近 0 的值更稳健。
+ */
+export function smape(actual: number[], predicted: number[]): number {
+  const n = Math.min(actual.length, predicted.length);
+  if (n === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const a = Math.abs(actual[i]!);
+    const p = Math.abs(predicted[i]!);
+    const denom = a + p;
+    if (denom === 0) continue; // 双方都为 0，视为完美预测
+    sum += (2 * Math.abs(actual[i]! - predicted[i]!)) / denom;
+  }
+  return (sum / n) * 100;
+}
+
+// ---------------------------------------------------------------------------
+// 统计量
+// ---------------------------------------------------------------------------
+
+/** 均值。 */
+export function mean(values: number[]): number {
+  if (values.length === 0) return 0;
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+/** 标准差（总体标准差，除以 n）。 */
+export function stddev(values: number[]): number {
+  if (values.length === 0) return 0;
+  const m = mean(values);
+  const variance = values.reduce((a, b) => a + (b - m) * (b - m), 0) / values.length;
+  return Math.sqrt(variance);
+}
+
+/** 变异系数 = 标准差 / |均值|（去量纲，衡量波动）。 */
+export function coefficientOfVariation(values: number[]): number {
+  if (values.length === 0) return 0;
+  const m = mean(values);
+  if (m === 0) return 0;
+  return stddev(values) / Math.abs(m);
+}
+
+/**
+ * 分位数（对已升序排序的数组，线性插值，R-7 型）。
+ * q ∈ [0,1]。
+ */
+export function quantile(sortedAsc: number[], q: number): number {
+  if (sortedAsc.length === 0) return 0;
+  if (sortedAsc.length === 1) return sortedAsc[0]!;
+  const pos = (sortedAsc.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  if (lo === hi) return sortedAsc[lo]!;
+  const frac = pos - lo;
+  return sortedAsc[lo]! * (1 - frac) + sortedAsc[hi]! * frac;
+}
+
+/** 复合年化增长率（CAGR），基于首尾两点的天数。仅供展示，不再作为指数模型主算法。 */
+export function compoundGrowthRate(first: number, last: number, daysElapsed: number): number {
   if (daysElapsed <= 0 || first <= 0 || last <= 0) return 0;
   const ratio = last / first;
   if (!Number.isFinite(ratio) || ratio <= 0) return 0;
   return Math.pow(ratio, 365 / daysElapsed) - 1;
 }
 
-/** 历史点的逐段增长率（相邻点）。 */
-export function periodGrowthRates(history: HistoryPoint[]): number[] {
-  const rates: number[] = [];
-  for (let i = 1; i < history.length; i++) {
-    const prev = history[i - 1]!.totalAmount;
-    const curr = history[i]!.totalAmount;
-    if (prev > 0 && curr > 0) {
-      const days = Math.max(1, daysBetweenDates(history[i - 1]!.date, history[i]!.date));
-      const total = curr / prev - 1;
-      rates.push(total / days); // 日均增长率
-    }
-  }
-  return rates;
-}
-
-function daysBetweenDates(a: string, b: string): number {
-  const ms = new Date(b).getTime() - new Date(a).getTime();
-  return Math.round(ms / 86_400_000);
-}
-
-/** 标准差。 */
-export function stddev(values: number[]): number {
-  if (values.length === 0) return 0;
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  const variance = values.reduce((a, b) => a + (b - mean) * (b - mean), 0) / values.length;
-  return Math.sqrt(variance);
-}
-
-/** 变异系数 = 标准差 / 均值（去量纲，衡量波动）。 */
-export function coefficientOfVariation(values: number[]): number {
-  if (values.length === 0) return 0;
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  if (mean === 0) return 0;
-  return stddev(values) / Math.abs(mean);
-}
-
-/** 把 [0,1] 的波动值 clamp 到区间。 */
+/** 把值 clamp 到 [0,1]。 */
 export function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
+}
+
+// ---------------------------------------------------------------------------
+// 可复现伪随机数（用于 bootstrap，固定 seed 使单元测试可重复）
+// ---------------------------------------------------------------------------
+
+/** mulberry32 可复现 PRNG。 */
+export class SeededRng {
+  private state: number;
+
+  constructor(seed: number) {
+    this.state = seed >>> 0;
+  }
+
+  /** 返回 [0,1) 的浮点数。 */
+  next(): number {
+    this.state = (this.state + 0x6d2b79f5) >>> 0;
+    let t = this.state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  /** 返回 [0, maxExclusive) 的整数。 */
+  int(maxExclusive: number): number {
+    return Math.floor(this.next() * maxExclusive);
+  }
+
+  /** 从数组中随机取一个元素。 */
+  pick<T>(arr: T[]): T {
+    return arr[this.int(arr.length)]!;
+  }
+}
+
+/** 归一化一组权重，使其总和为 1（全为 0 时均分）。 */
+export function normalizeWeights(weights: number[]): number[] {
+  const total = weights.reduce((a, b) => a + Math.max(0, b), 0);
+  if (total <= 0) return weights.map(() => 1 / weights.length);
+  return weights.map((w) => Math.max(0, w) / total);
 }

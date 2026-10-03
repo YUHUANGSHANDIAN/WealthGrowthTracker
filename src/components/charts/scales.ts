@@ -35,3 +35,58 @@ export function formatMoneyTick(v: number): string {
   if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(1)}千`;
   return `${Math.round(v)}`;
 }
+
+/** 两个 YYYY-MM-DD 之间的天数（本地时区）。 */
+export function daysBetweenDates(a: string, b: string): number {
+  const [ay, am, ad] = a.split('-').map(Number);
+  const [by, bm, bd] = b.split('-').map(Number);
+  const da = new Date(ay ?? 0, (am ?? 1) - 1, ad ?? 1).getTime();
+  const db = new Date(by ?? 0, (bm ?? 1) - 1, bd ?? 1).getTime();
+  return Math.round((db - da) / 86_400_000);
+}
+
+/**
+ * 根据时间跨度选择「nice」的刻度间隔（天），用于时间轴。
+ * 跨度越大，刻度间隔越粗，避免标签重叠。
+ */
+export function timeTickInterval(spanDays: number): number {
+  if (spanDays <= 14) return 1;
+  if (spanDays <= 45) return 7;
+  if (spanDays <= 100) return 14;
+  if (spanDays <= 200) return 30;
+  if (spanDays <= 400) return 60;
+  if (spanDays <= 800) return 90;
+  return 180;
+}
+
+/** 时间刻度标签格式化：跨年显示 YYYY-MM，年内显示 MM-DD。 */
+export function formatDateTick(date: string, spanDays: number): string {
+  const [y, m, d] = date.split('-');
+  if (spanDays > 365) return `${y}-${m}`;
+  return `${m}-${d}`;
+}
+
+/** 生成时间轴刻度（返回 elapsed-days 位置与标签）。 */
+export function timeTicks(minDate: string, maxDate: string, maxTicks = 7): { t: number; label: string }[] {
+  const spanDays = daysBetweenDates(minDate, maxDate);
+  if (spanDays <= 0) return [{ t: 0, label: minDate }];
+  const interval = timeTickInterval(spanDays);
+  const ticks: { t: number; label: string }[] = [];
+  for (let t = 0; t <= spanDays; t += interval) {
+    const d = addDaysStr(minDate, t);
+    ticks.push({ t, label: formatDateTick(d, spanDays) });
+  }
+  if (ticks.length > maxTicks) {
+    // 若仍过多，抽稀
+    const step = Math.ceil(ticks.length / maxTicks);
+    return ticks.filter((_, i) => i % step === 0);
+  }
+  return ticks;
+}
+
+function addDaysStr(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const dt = new Date(y ?? 0, (m ?? 1) - 1, (d ?? 1) + days);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
