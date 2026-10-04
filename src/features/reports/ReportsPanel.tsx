@@ -3,11 +3,12 @@ import type { ReactNode } from 'react';
 import { useAppStore } from '../../store/appStore';
 import type { FinancialReport, ReportType } from '../../types';
 import { formatCNY, diffMoney } from '../../utils/money';
-import { assetAtDate } from './generate';
+import { assetAtDate, generateReport } from './generate';
+import { displayTitle, findReportConflict, repairReportFromHistory } from './reportRepair';
 import { weekStart, monthStart, yearStart, todayString, addDays } from '../../utils/date';
 import { Card, Button, Badge, EmptyState } from '../../components/ui/primitives';
 import { Modal, ConfirmDialog } from '../../components/ui/Modal';
-import { SelectField } from '../../components/ui/form';
+import { SelectField, TextField, TextArea } from '../../components/ui/form';
 import { BarChart } from '../../components/charts/BarChart';
 import { LineChart } from '../../components/charts/LineChart';
 import { saveTextFile, backupFilename } from '../../services/export/download';
@@ -36,8 +37,9 @@ type TimeFilter = 'all' | 'this-year' | 'last-year' | '12m' | 'custom';
 export function ReportsPanel() {
   const reports = useAppStore((s) => s.reports);
   const history = useAppStore((s) => s.history);
+  const channels = useAppStore((s) => s.channels);
   const reportSortSpec = useAppStore((s) => s.reportSortSpec);
-  const { generateReportNow, archiveReport, deleteReport, deleteReports, setReportSortSpec, pushToast } = useAppStore();
+  const { commitReport, archiveReport, deleteReport, deleteReports, setReportSortSpec, updateReportMetadata, repairReport, pushToast } = useAppStore();
 
   const [reportType, setReportType] = useState<ReportType>('weekly');
   const [search, setSearch] = useState('');
@@ -45,6 +47,9 @@ export function ReportsPanel() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
   const [customYear, setCustomYear] = useState(String(new Date().getFullYear()));
   const [detail, setDetail] = useState<FinancialReport | null>(null);
+  const [conflict, setConflict] = useState<{ generated: FinancialReport; existing: FinancialReport } | null>(null);
+  const [editMeta, setEditMeta] = useState<FinancialReport | null>(null);
+  const [repairTarget, setRepairTarget] = useState<FinancialReport | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [sortEditorOpen, setSortEditorOpen] = useState(false);
@@ -98,7 +103,14 @@ export function ReportsPanel() {
   }, [reports, typeFilter, timeFilter, customYear, nowYear, today, search, reportSortSpec]);
 
   function generate() {
-    generateReportNow(reportType, today, 'update');
+    const generated = generateReport(history, reportType, today, channels);
+    const existing = findReportConflict(reports, generated.periodKey);
+    if (existing) {
+      // 不静默覆盖：弹出冲突对话框，让用户选择更新/另存/取消
+      setConflict({ generated, existing });
+    } else {
+      commitReport(generated, 'update');
+    }
   }
 
   function toggleSelect(id: string) {
@@ -130,7 +142,7 @@ export function ReportsPanel() {
       return;
     }
     const payload = {
-      version: '1.3.0',
+      version: '1.4.0',
       exportDate: new Date().toISOString(),
       exportType: 'financial_reports_batch',
       reports: items,
@@ -170,7 +182,7 @@ export function ReportsPanel() {
             />
           </div>
           <Button onClick={generate}>生成 / 更新当前周期</Button>
-          <Button variant="outline" onClick={() => generateReportNow(reportType, today, 'saveAs')}>另存一份</Button>
+          <Button variant="outline" onClick={() => { const g = generateReport(history, reportType, today, channels); commitReport(g, 'saveAs', findReportConflict(reports, g.periodKey)); }}>另存一份</Button>
         </div>
       </Card>
 
@@ -270,6 +282,34 @@ export function ReportsPanel() {
           reports={reports}
           history={history}
           onClose={() => setDetail(null)}
+          onEditMetadata={(r) => { setDetail(null); setEditMeta(r); }}
+          onRepair={(r) => { setDetail(null); setRepairTarget(r); }}
+        />
+      )}
+
+      {conflict && (
+        <ReportConflictDialog
+          existing={conflict.existing}
+          onClose={() => setConflict(null)}
+          onUpdate={() => { commitReport(conflict.generated, 'update', conflict.existing); setConflict(null); }}
+          onSaveAs={() => { commitReport(conflict.generated, 'saveAs', conflict.existing); setConflict(null); }}
+        />
+      )}
+
+      {editMeta && (
+        <EditReportMetadataModal
+          report={editMeta}
+          onClose={() => setEditMeta(null)}
+          onSave={(patch) => { updateReportMetadata(editMeta.id, patch); setEditMeta(null); pushToast('报告元数据已保存', 'success'); }}
+        />
+      )}
+
+      {repairTarget && (
+        <RepairReportModal
+          report={repairTarget}
+          history={history}
+          onClose={() => setRepairTarget(null)}
+          onApply={(repaired) => { repairReport(repairTarget.id, repaired); setRepairTarget(null); pushToast('报告已修复（历史事实已按真实数据恢复）', 'success'); }}
         />
       )}
 
@@ -355,7 +395,7 @@ function ReportRow({ report, selected, onToggle, onOpen, onArchive, onDelete }: 
         <button className="flex-1 text-left min-w-0" onClick={onOpen}>
           <div className="flex items-center gap-2 flex-wrap">
             <span aria-hidden>{meta.icon}</span>
-            <h3 className="font-semibold text-slate-800 truncate">{report.title}</h3>
+            <h3 className="font-semibold text-slate-800 truncate">{displayTitle(report)}</h3>
             <Badge tone={meta.tone}>{meta.label}</Badge>
             {report.isArchived && <Badge tone="slate">已归档</Badge>}
             {report.dataCompleteness != null && report.dataCompleteness < 90 && (
@@ -383,11 +423,13 @@ function ReportRow({ report, selected, onToggle, onOpen, onArchive, onDelete }: 
   );
 }
 
-function ReportDetailModal({ report, reports, history, onClose }: {
+function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, onRepair }: {
   report: FinancialReport;
   reports: FinancialReport[];
   history: import('../../types').HistoryPoint[];
   onClose: () => void;
+  onEditMetadata: (r: FinancialReport) => void;
+  onRepair: (r: FinancialReport) => void;
 }) {
   const [shareOpen, setShareOpen] = useState(false);
   const positive = report.changeAmount >= 0;
@@ -421,7 +463,7 @@ function ReportDetailModal({ report, reports, history, onClose }: {
   }));
 
   return (
-    <Modal open onClose={onClose} title={report.title} size="lg">
+    <Modal open onClose={onClose} title={displayTitle(report)} size="lg">
       <div className="space-y-5">
         {/* Overview */}
         <section>
@@ -528,8 +570,10 @@ function ReportDetailModal({ report, reports, history, onClose }: {
           {report.sourceVersion ? ` · 版本 v${report.sourceVersion}` : ''}
         </div>
 
-        <div className="border-t border-slate-100 pt-3">
+        <div className="border-t border-slate-100 pt-3 flex flex-wrap gap-2">
           <Button onClick={() => setShareOpen(true)}>📤 分享报告</Button>
+          <Button variant="outline" onClick={() => onEditMetadata(report)}>✏️ 编辑元数据</Button>
+          <Button variant="outline" onClick={() => onRepair(report)}>🧰 数据修复</Button>
         </div>
       </div>
       {shareOpen && <ShareReportModal report={report} onClose={() => setShareOpen(false)} />}
@@ -613,6 +657,152 @@ function ReportSortEditor({ open, spec, onClose, onApply }: {
         ))}
       </div>
       <Button variant="outline" size="sm" onClick={add} className="mt-3">＋ 添加规则</Button>
+    </Modal>
+  );
+}
+
+function ReportConflictDialog({ existing, onClose, onUpdate, onSaveAs }: {
+  existing: FinancialReport;
+  onClose: () => void;
+  onUpdate: () => void;
+  onSaveAs: () => void;
+}) {
+  const archived = existing.isArchived;
+  const comp = existing.dataCompleteness != null ? `${existing.dataCompleteness}%` : '—';
+  return (
+    <Modal open onClose={onClose} title={archived ? '该周期已有归档报告' : '本周期已经存在财务报告'} size="sm"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>取消</Button>
+          {!archived && <Button onClick={onUpdate}>更新现有报告（推荐）</Button>}
+          <Button variant="outline" onClick={onSaveAs}>另存为新版本</Button>
+        </>
+      }>
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <span className="text-2xl" aria-hidden>📄</span>
+          <div>
+            <div className="font-semibold text-slate-800">{displayTitle(existing)}</div>
+            <div className="text-xs text-slate-500">{existing.startDate} ~ {existing.endDate}</div>
+          </div>
+        </div>
+        <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600 space-y-1">
+          <div>已生成：{existing.createdAt ? new Date(existing.createdAt).toLocaleString('zh-CN') : '—'}</div>
+          <div>当前修订：Revision {existing.revision ?? 1}</div>
+          <div>数据完整度：{comp}</div>
+          {existing.isArchived && <div className="text-amber-600">该报告已归档。</div>}
+        </div>
+        {archived ? (
+          <p className="text-sm text-slate-500">该周期报告已归档，默认不会覆盖。如需替代归档报告，请先取消归档；这里可选择「另存为新版本」。</p>
+        ) : (
+          <p className="text-sm text-slate-500">「更新现有报告」将根据最新历史数据重新生成，保留报告 ID、创建时间、自定义标题与备注，并递增修订号。</p>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+type ReportMetadataPatch = Partial<Pick<FinancialReport, 'titleMode' | 'standardTitle' | 'customTitle' | 'tags' | 'customSummary' | 'archiveNote'>>;
+
+function EditReportMetadataModal({ report, onClose, onSave }: {
+  report: FinancialReport;
+  onClose: () => void;
+  onSave: (patch: ReportMetadataPatch) => void;
+}) {
+  const [mode, setMode] = useState<FinancialReport['titleMode']>(report.titleMode ?? 'auto');
+  const [customTitle, setCustomTitle] = useState(report.customTitle ?? '');
+  const [tags, setTags] = useState((report.tags ?? []).join(', '));
+  const [customSummary, setCustomSummary] = useState(report.customSummary ?? '');
+  const [archiveNote, setArchiveNote] = useState(report.archiveNote ?? '');
+
+  function save() {
+    const tagList = tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
+    onSave({
+      titleMode: mode,
+      customTitle: mode === 'custom' ? customTitle.trim() : undefined,
+      tags: tagList.length ? tagList : undefined,
+      customSummary: customSummary.trim() || undefined,
+      archiveNote: archiveNote.trim() || undefined,
+    });
+  }
+
+  return (
+    <Modal open onClose={onClose} title="编辑报告元数据" size="md"
+      footer={<>
+        <Button variant="ghost" onClick={onClose}>取消</Button>
+        <Button onClick={save}>保存</Button>
+      </>}>
+      <div className="space-y-4">
+        <p className="text-xs text-slate-400">仅可修改标题、备注、标签、摘要与归档说明；历史金额/渠道构成属于历史事实，请在「数据修复」中处理。</p>
+        <SelectField label="标题模式" value={mode ?? 'auto'} onChange={(e) => setMode(e.target.value as FinancialReport['titleMode'])}
+          options={[
+            { value: 'auto', label: `自动（${report.standardTitle ?? report.title}）` },
+            { value: 'custom', label: '自定义标题' },
+          ]} />
+        {mode === 'custom' && (
+          <TextField label="自定义标题" value={customTitle} onChange={(e) => setCustomTitle(e.target.value)} placeholder="例如：2026年第40周｜国庆假期资产报告" />
+        )}
+        <TextField label="标签（逗号分隔）" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="年度总结, 旅行, 重要节点" />
+        <TextArea label="自定义摘要（可选）" value={customSummary} onChange={(e) => setCustomSummary(e.target.value)} placeholder="留空则使用默认摘要" />
+        <TextArea label="归档说明" value={archiveNote} onChange={(e) => setArchiveNote(e.target.value)} placeholder="归档备注" />
+      </div>
+    </Modal>
+  );
+}
+
+function RepairReportModal({ report, history, onClose, onApply }: {
+  report: FinancialReport;
+  history: import('../../types').HistoryPoint[];
+  onClose: () => void;
+  onApply: (repaired: FinancialReport) => void;
+}) {
+  const preview = useMemo(() => repairReportFromHistory(report, history), [report, history]);
+  const [reason, setReason] = useState('');
+
+  function apply() {
+    const repaired: FinancialReport = {
+      ...preview.report,
+      repairAudit: [...(preview.report.repairAudit ?? [])],
+    };
+    // 记录修复原因（若用户填写）
+    if (reason.trim() && repaired.repairAudit?.length) {
+      repaired.repairAudit = repaired.repairAudit.map((a) => ({ ...a, reason: `${a.reason}（用户补充：${reason.trim()}）` }));
+    }
+    onApply(repaired);
+  }
+
+  return (
+    <Modal open onClose={onClose} title="数据修复（历史事实）" size="md"
+      footer={<>
+        <Button variant="ghost" onClick={onClose}>取消</Button>
+        <Button onClick={apply} disabled={preview.repairedFields.length === 0}>应用修复</Button>
+      </>}>
+      <div className="space-y-4">
+        <p className="text-xs text-amber-600">修复会写入真实历史数据；应用前系统会自动备份当前数据。</p>
+        {preview.repairedFields.length > 0 ? (
+          <div className="bg-slate-50 rounded-lg p-3 space-y-2">
+            <div className="text-sm font-medium text-slate-700">将恢复 {preview.repairedFields.length} 个字段：</div>
+            <ul className="text-sm text-slate-600 list-disc list-inside">
+              {preview.repairedFields.map((f) => <li key={f}>{f}（来源：history-snapshot）</li>)}
+            </ul>
+            {preview.report.repairAudit && preview.report.repairAudit.length > 0 && (
+              <div className="text-xs text-slate-500 border-t border-slate-200 pt-2">
+                {preview.report.repairAudit.map((a, i) => (
+                  <div key={i}>{a.field}: {String(a.oldValue ?? '缺失')} → {String(a.newValue)}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-400">没有可从历史数据恢复的字段。</p>
+        )}
+        {preview.warnings.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
+            {preview.warnings.map((w) => <p key={w}>⚠️ {w}</p>)}
+          </div>
+        )}
+        <TextArea label="修复原因（可选）" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="例如：补充早期缺失的历史快照" />
+      </div>
     </Modal>
   );
 }

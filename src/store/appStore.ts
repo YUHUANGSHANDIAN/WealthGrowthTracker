@@ -155,6 +155,10 @@ interface AppState {
 
   // ---- 报告 ----
   generateReportNow: (reportType: ReportType, referenceDate?: string, mode?: 'update' | 'saveAs') => FinancialReport;
+  /** 显式写入报告（update=覆盖同周期；saveAs=另存新版本）。不静默覆盖归档报告。 */
+  commitReport: (generated: FinancialReport, mode: 'update' | 'saveAs', existing?: FinancialReport) => FinancialReport;
+  updateReportMetadata: (id: string, patch: Partial<Pick<FinancialReport, 'titleMode' | 'standardTitle' | 'customTitle' | 'tags' | 'customSummary' | 'archiveNote'>>) => void;
+  repairReport: (id: string, repaired: FinancialReport) => void;
   archiveReport: (id: string, note?: string) => void;
   deleteReport: (id: string) => void;
   deleteReports: (ids: string[]) => void;
@@ -559,46 +563,85 @@ export const useAppStore = create<AppState>()((set, get) => {
       const s = get();
       const generated = generateReport(s.history, reportType, referenceDate, s.channels);
       const existing = s.reports.find((r) => r.periodKey && r.periodKey === generated.periodKey);
-
+      return get().commitReport(generated, mode, existing);
+    },
+    commitReport(generated, mode = 'update', existing) {
+      const s = get();
+      // 归档报告绝不静默覆盖：update 模式遇到 archived 自动退化为 saveAs（另存新版本）
+      const shouldUpdate = !!existing && mode === 'update' && !existing!.isArchived;
       let report: FinancialReport;
       let reports: FinancialReport[];
 
-      if (existing && mode === 'update' && !existing.isArchived) {
-        // 同周期已存在且未归档：更新原报告（保留 id/createdAt/归档备注，递增 revision）
+      if (shouldUpdate) {
+        const prev = existing!;
+        const custom = prev.titleMode === 'custom' && prev.customTitle?.trim();
         report = {
           ...generated,
-          id: existing.id,
-          createdAt: existing.createdAt,
-          revision: (existing.revision ?? 1) + 1,
+          id: prev.id,
+          createdAt: prev.createdAt,
+          revision: (prev.revision ?? 1) + 1,
           updatedAt: new Date().toISOString(),
-          isArchived: existing.isArchived,
-          archivedAt: existing.archivedAt,
-          archiveNote: existing.archiveNote,
+          isArchived: prev.isArchived,
+          archivedAt: prev.archivedAt,
+          archiveNote: prev.archiveNote,
+          // 保留用户自定义元数据
+          titleMode: prev.titleMode ?? 'auto',
+          standardTitle: generated.standardTitle ?? generated.title,
+          customTitle: prev.customTitle,
+          title: custom ? prev.customTitle! : generated.title,
+          tags: prev.tags,
+          customSummary: prev.customSummary,
+          repairAudit: prev.repairAudit,
+          fieldProvenance: prev.fieldProvenance,
         };
-        reports = s.reports.map((r) => (r.id === existing.id ? report : r));
+        reports = s.reports.map((r) => (r.id === prev.id ? report : r));
       } else {
-        // 归档的历史报告默认不静默覆盖；saveAs 或首次生成 → 新增一份
-        report = generated;
+        report = existing && mode === 'saveAs' ? { ...generated, copyOfReportId: existing.id } : generated;
         reports = [report, ...s.reports];
       }
 
       set({ reports });
       persist();
-      // 桌面版：把报告同时持久化为 JSON + HTML 到 reports/{type}/ 目录
       const mgr = storageService.getDesktopManager();
       if (mgr) {
         void (async () => {
           try {
-            await mgr.writeReport(reportType, reportFileBase(report), JSON.stringify(report, null, 2), reportHtml(report));
+            await mgr.writeReport(report.reportType, reportFileBase(report), JSON.stringify(report, null, 2), reportHtml(report));
             await mgr.writeReportIndex(JSON.stringify(buildReportIndex(reports), null, 2));
           } catch (err) {
             console.warn('[reports] 报告写盘失败:', err);
           }
         })();
       }
-      const verb = existing && mode === 'update' && !existing.isArchived ? '已更新' : '已生成';
+      const verb = shouldUpdate ? '已更新' : '已生成';
       get().pushToast(`${verb}报告「${report.title}」`, 'success');
       return report;
+    },
+    updateReportMetadata(id, patch) {
+      set((s) => ({
+        reports: s.reports.map((r) => {
+          if (r.id !== id) return r;
+          const next: FinancialReport = { ...r, ...patch, updatedAt: new Date().toISOString() };
+          if (patch.titleMode === 'custom' && patch.customTitle?.trim()) {
+            next.title = patch.customTitle.trim();
+          } else if (patch.titleMode === 'auto') {
+            next.customTitle = undefined;
+            next.title = next.standardTitle ?? next.title;
+          }
+          return next;
+        }),
+      }));
+      persist();
+    },
+    repairReport(id, repaired) {
+      set((s) => ({ reports: s.reports.map((r) => (r.id === id ? repaired : r)) }));
+      persist();
+      const mgr = storageService.getDesktopManager();
+      if (mgr) {
+        void mgr
+          .writeReport(repaired.reportType, reportFileBase(repaired), JSON.stringify(repaired, null, 2), reportHtml(repaired))
+          .catch(() => {});
+      }
     },
     archiveReport(id, note) {
       set((s) => ({

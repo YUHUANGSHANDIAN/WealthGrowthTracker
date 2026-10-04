@@ -137,6 +137,8 @@ export function normalizeFinancialReport(report: FinancialReport): FinancialRepo
   const endDate = report.endDate || report.startDate;
   const periodKey = report.periodKey ?? periodKeyOf(report);
   const title = report.title?.trim() ? report.title : buildTitle(report.reportType, endDate);
+  const standardTitle = report.standardTitle ?? title;
+  const titleMode = report.titleMode ?? 'auto';
 
   const d = parseDateString(endDate);
   const iso = report.reportType === 'weekly' ? isoWeekOfYear(endDate) : null;
@@ -182,6 +184,8 @@ export function normalizeFinancialReport(report: FinancialReport): FinancialRepo
     reportNormalizedAt: report.reportNormalizedAt,
     periodKey,
     title,
+    standardTitle,
+    titleMode,
     year,
     ...(monthNumber !== undefined ? { monthNumber } : {}),
     ...(weekNumber !== undefined ? { weekNumber } : {}),

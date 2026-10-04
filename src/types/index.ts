@@ -136,6 +136,37 @@ export interface FinancialReport {
   updatedAt?: string;
   /** 旧版未知字段透传（升级时保留，不丢弃用户数据）。 */
   legacyMetadata?: Record<string, unknown>;
+
+  // —— v1.4 Report Domain（可选，向后兼容）——
+  /** 标题模式：auto（标准标题）/ custom（用户自定义标题）。 */
+  titleMode?: 'auto' | 'custom';
+  /** 标准（自动）标题。 */
+  standardTitle?: string;
+  /** 用户自定义标题。 */
+  customTitle?: string;
+  /** 用户标签（如「年度总结」「旅行」「重要节点」）。 */
+  tags?: string[];
+  /** 用户自定义摘要（可选，覆盖默认 summary）。 */
+  customSummary?: string;
+  /** 另存为时的源报告 ID。 */
+  copyOfReportId?: string;
+  /** 字段来源（区分原始记录/周期推导/历史快照/手动修复/旧版导入）。 */
+  fieldProvenance?: Partial<Record<string, ReportFieldProvenance>>;
+  /** 修复审计记录（手动修复历史事实）。 */
+  repairAudit?: ReportRepairAudit[];
+}
+
+/** 报告字段来源。 */
+export type ReportFieldProvenance = 'generated-original' | 'derived-period' | 'history-snapshot' | 'manual-repair' | 'legacy-import';
+
+/** 一次报告历史事实修复的审计记录。 */
+export interface ReportRepairAudit {
+  field: string;
+  oldValue: unknown;
+  newValue: unknown;
+  reason: string;
+  source: ReportFieldProvenance;
+  repairedAt: string;
 }
 
 export type SortDirection = 'asc' | 'desc';

@@ -3,6 +3,7 @@ import { useAppStore } from '../../store/appStore';
 import type { PredictionModelType } from '../../types';
 import { formatCNY, formatAmount } from '../../utils/money';
 import { todayString } from '../../utils/date';
+import { APP_VERSION } from '../../constants/version';
 import { Card, Button, Badge, EmptyState } from '../../components/ui/primitives';
 import { LineChart, type LineSeries, type ReferenceLine, type VerticalMarker } from '../../components/charts/LineChart';
 import { downloadCSV, downloadPNG, downloadSVG } from '../../components/charts/export';
@@ -165,7 +166,7 @@ export function PredictionPanel() {
         ['horizon', String(horizon)],
         ['intervalLevel', String(intervalLevel)],
         ['generatedAt', new Date().toISOString()],
-        ['appVersion', '1.3.0'],
+        ['appVersion', APP_VERSION],
       ];
       downloadCSV(`${base}.csv`, header, rows, meta);
     }
