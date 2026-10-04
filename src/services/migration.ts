@@ -1,4 +1,5 @@
-import type { Channel } from '../types';
+import type { Channel, FinancialReport } from '../types';
+import { normalizeAndReport, REPORT_SCHEMA_VERSION } from '../features/reports/normalize';
 
 /**
  * 数据迁移管道：随 schema 版本升级运行，幂等且只运行一次（由 app_version 检测触发）。
@@ -43,3 +44,15 @@ export function needsV12Migration(fromVersion: string | null): boolean {
   };
   return toNum(fromVersion) < toNum('1.2.0');
 }
+
+/**
+ * v1.2 → v1.3：财务报告规范化迁移（幂等）。
+ * 对旧报告补 periodKey / title / ISO week / wealthLevel / topChannels / completeness / schemaVersion；
+ * 绝不编造历史渠道构成与期间极值。返回 { reports, changed }。
+ */
+export function migrateReportsV13(reports: FinancialReport[]): { reports: FinancialReport[]; changed: number } {
+  return normalizeAndReport(reports);
+}
+
+/** 当前报告 schema 版本（供测试与设置「关于」展示）。 */
+export { REPORT_SCHEMA_VERSION };

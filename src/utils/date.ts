@@ -67,18 +67,43 @@ export function yearEnd(s: string): string {
   return `${parseDateString(s).getFullYear()}-12-31`;
 }
 
-/** 计算某日期是当年的第几周（周一为一周开始）。 */
-export function weekNumberOfYear(s: string): number {
-  const d = parseDateString(s);
-  const jan1 = new Date(d.getFullYear(), 0, 1);
-  const dayOfWeek = jan1.getDay() === 0 ? 7 : jan1.getDay();
-  const firstMonday = new Date(d.getFullYear(), 0, 1 + (8 - dayOfWeek));
-  const diff = Math.round((d.getTime() - firstMonday.getTime()) / 86_400_000);
-  return Math.floor(diff / 7) + 1;
+/** ISO-8601 周编号结果：ISO 周年份可能与日历年不同（年初/年末跨年周）。 */
+export interface IsoWeek {
+  /** ISO 周年份（如 2026-W53 可能落在 2027 年初，此时 isoYear 为 2026）。 */
+  year: number;
+  /** ISO 周编号，1-53。 */
+  week: number;
 }
 
-/** 周报标题，如 "2026年第19周周度财务报告"。 */
+/**
+ * ISO-8601 周编号（周一为一周起点，第 1 周为包含当年第一个周四的周）。
+ * 与旧自定义算法不同：不会出现 Week 0，且跨年周编号稳定。
+ */
+export function isoWeekOfYear(s: string): IsoWeek {
+  const d = parseDateString(s);
+  // 用 UTC 计算避免本地时区/夏令时对周计算的影响
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7; // 1=周一 … 7=周日
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum); // 移到本周周四
+  const isoYear = date.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const week = Math.ceil(((date.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
+  return { year: isoYear, week };
+}
+
+/** ISO 周编号（数字，向后兼容旧调用方；跨年周返回 ISO 周而非日历年周）。 */
+export function weekNumberOfYear(s: string): number {
+  return isoWeekOfYear(s).week;
+}
+
+/** ISO 周 key，如 "2026-W40"。 */
+export function isoWeekKey(s: string): string {
+  const { year, week } = isoWeekOfYear(s);
+  return `${year}-W${pad2(week)}`;
+}
+
+/** 周报标题，如 "2026年第19周周度财务报告"（使用 ISO 周年份与周编号）。 */
 export function weeklyReportTitle(s: string): string {
-  const year = parseDateString(s).getFullYear();
-  return `${year}年第${weekNumberOfYear(s)}周周度财务报告`;
+  const { year, week } = isoWeekOfYear(s);
+  return `${year}年第${week}周周度财务报告`;
 }

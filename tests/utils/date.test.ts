@@ -9,6 +9,8 @@ import {
   daysBetween,
   addDays,
   weekNumberOfYear,
+  isoWeekOfYear,
+  isoWeekKey,
   todayString,
   toDateString,
 } from '../../src/utils/date';
@@ -41,6 +43,19 @@ describe('date 工具', () => {
     const n = weekNumberOfYear('2026-10-03');
     expect(n).toBeGreaterThan(0);
     expect(n).toBeLessThanOrEqual(53);
+  });
+
+  it('ISO-8601 周编号：无 Week 0，跨年周一致', () => {
+    // 2026-01-01 是周四 → 属于第 1 周
+    expect(isoWeekOfYear('2026-01-01')).toEqual({ year: 2026, week: 1 });
+    // 2026-01-04（周日）仍是第 1 周；2026-01-05（周一）进入第 2 周
+    expect(isoWeekOfYear('2026-01-04')).toEqual({ year: 2026, week: 1 });
+    expect(isoWeekOfYear('2026-01-05')).toEqual({ year: 2026, week: 2 });
+    // 2026 年有 53 周，2026-12-31 属于 W53
+    expect(isoWeekOfYear('2026-12-31')).toEqual({ year: 2026, week: 53 });
+    // 跨年：2027-01-01 属于 ISO 2026-W53
+    expect(isoWeekOfYear('2027-01-01')).toEqual({ year: 2026, week: 53 });
+    expect(isoWeekKey('2027-01-01')).toBe('2026-W53');
   });
 
   it('todayString 返回合法 YYYY-MM-DD', () => {

@@ -3,6 +3,11 @@ import { formatCNY } from '../../utils/money';
 
 /** 报告文件基础名（ASCII，便于 CI / 文件系统），如 2026-W40-weekly-report。 */
 export function reportFileBase(report: FinancialReport): string {
+  // 优先用统一 periodKey（v1.3），保证标题/文件名/排序/去重同源。
+  if (report.periodKey) {
+    const key = report.periodKey.replace(':', '-');
+    return `${key}-${report.reportType}-report`;
+  }
   const y = report.year ?? new Date(report.createdAt).getFullYear();
   switch (report.reportType) {
     case 'weekly':

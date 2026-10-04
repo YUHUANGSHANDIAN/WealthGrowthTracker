@@ -13,6 +13,7 @@ export const STORAGE_KEYS = {
   customSortRules: 'custom_sort_rules',
   sortHistory: 'sort_history',
   sortConfig: 'sort_config',
+  reportSortSettings: 'report_sort_settings',
   smartSortConfig: 'smart_sort_config',
   userProfile: 'user_profile',
   appearanceSettings: 'appearance_settings',

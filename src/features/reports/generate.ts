@@ -2,12 +2,12 @@ import type {
   Channel,
   FinancialReport,
   HistoryPoint,
-  ReportChannelDetail,
   ReportType,
 } from '../../types';
-import { leafChannels, totalAssets } from '../../utils/channels';
+import { totalAssets } from '../../utils/channels';
 import { round2, diffMoney } from '../../utils/money';
 import { getLevelByAmount } from '../../constants/levels';
+import { APP_VERSION } from '../../constants/version';
 import {
   parseDateString,
   todayString,
@@ -17,9 +17,14 @@ import {
   monthEnd,
   yearStart,
   yearEnd,
-  weekNumberOfYear,
+  isoWeekOfYear,
 } from '../../utils/date';
 import { randomId } from '../../utils/id';
+import {
+  buildChannelDetails,
+  buildTitle,
+  normalizeFinancialReport,
+} from './normalize';
 
 /** 报告时间范围。 */
 export interface PeriodRange {
@@ -38,18 +43,9 @@ export function periodRange(reportType: ReportType, referenceDate: string): Peri
   }
 }
 
-/** 报告标题（与旧版命名风格一致）。 */
+/** 报告标题（与旧版命名风格一致；周报使用 ISO 周年份 + ISO 周编号）。 */
 export function reportTitle(reportType: ReportType, referenceDate: string): string {
-  const d = parseDateString(referenceDate);
-  const year = d.getFullYear();
-  switch (reportType) {
-    case 'weekly':
-      return `${year}年第${weekNumberOfYear(referenceDate)}周周度财务报告`;
-    case 'monthly':
-      return `${year}年${d.getMonth() + 1}月月度财务报告`;
-    case 'yearly':
-      return `${year}年年度财务报告`;
-  }
+  return buildTitle(reportType, referenceDate);
 }
 
 /** 某日期及之前最近一次总资产（不含渠道构成）。 */
@@ -70,19 +66,7 @@ export function latestPointAtOrBefore(history: HistoryPoint[], date: string): Hi
   return candidate ?? sorted[0]!;
 }
 
-/** 当前渠道构成报告所需的份额明细。 */
-export function buildChannelDetails(channels: Channel[], total: number): ReportChannelDetail[] {
-  const leaves = leafChannels(channels);
-  return leaves.map((l) => ({
-    id: l.id,
-    name: l.name,
-    emoji: l.emoji,
-    amount: l.amount,
-    isParent: l.parentId === null,
-    children: [],
-    percentage: total > 0 ? round2((l.amount / total) * 100) : 0,
-  }));
-}
+export { buildChannelDetails } from './normalize';
 
 /**
  * 生成一份周/月/年财务报告（纯函数，可单测）。
@@ -142,6 +126,8 @@ export function generateReport(
 
   const level = getLevelByAmount(total);
   const d = parseDateString(referenceDate);
+  const nowIso = new Date().toISOString();
+  const iso = isoWeekOfYear(referenceDate);
 
   const base = {
     id: randomId('report'),
@@ -160,27 +146,34 @@ export function generateReport(
     wealthLevelTheme: level.theme,
     wealthLevelColor: level.color,
     isArchived: false,
-    createdAt: new Date().toISOString(),
-    generatedAt: new Date().toISOString(),
+    createdAt: nowIso,
+    generatedAt: nowIso,
     historyPointsCount: inPeriod.length,
-    year: d.getFullYear(),
+    year: reportType === 'weekly' ? iso.year : d.getFullYear(),
+    revision: 1,
+    updatedAt: nowIso,
+    sourceVersion: APP_VERSION,
     ...(endChannels ? { channels: endChannels } : {}),
     ...(channelSnapshotMissing ? { channelSnapshotMissing: true } : {}),
   };
 
+  let report: FinancialReport;
   switch (reportType) {
     case 'weekly':
-      return {
+      report = {
         ...base,
         weeklyChange: change,
         weeklyChangePercentage: changePercentage,
         weeklyMax: max,
         weeklyMin: min,
         weeklyAvg: avg,
-        weekNumber: weekNumberOfYear(referenceDate),
+        weekNumber: iso.week,
+        isoWeek: iso.week,
+        isoWeekYear: iso.year,
       };
+      break;
     case 'monthly':
-      return {
+      report = {
         ...base,
         monthlyChange: change,
         monthlyChangePercentage: changePercentage,
@@ -189,8 +182,9 @@ export function generateReport(
         monthlyAvg: avg,
         monthNumber: d.getMonth() + 1,
       };
+      break;
     case 'yearly':
-      return {
+      report = {
         ...base,
         yearlyChange: change,
         yearlyChangePercentage: changePercentage,
@@ -198,7 +192,11 @@ export function generateReport(
         yearlyMin: min,
         yearlyAvg: avg,
       };
+      break;
   }
+
+  // 规范化：补 periodKey / completeness / schemaVersion（幂等）
+  return normalizeFinancialReport(report);
 }
 
 /** 报表归档状态切换。 */

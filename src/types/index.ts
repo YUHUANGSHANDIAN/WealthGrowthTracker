@@ -108,6 +108,34 @@ export interface FinancialReport {
   archivedAt?: string;
   archiveNote?: string;
   createdAt: string;
+
+  // —— v1.3 Report Domain（可选，向后兼容旧备份）——
+  /** 报告 schema 版本（v1.3 起为 2）。 */
+  reportSchemaVersion?: number;
+  /** 报告视觉渲染器版本（用于未来重渲染磁盘 HTML/图片）。 */
+  reportRendererVersion?: number;
+  /** 规范化完成时间（仅首次 normalize 写入，保证 normalize 幂等）。 */
+  reportNormalizedAt?: string;
+  /** 统一周期 key，如 weekly:2026-W40 / monthly:2026-10 / yearly:2026。 */
+  periodKey?: string;
+  /** ISO 周编号（周报）。 */
+  isoWeek?: number;
+  /** ISO 周年份（周报）。 */
+  isoWeekYear?: number;
+  /** 数据完整度 0-100（报告历史数据完整度，非投资质量）。 */
+  dataCompleteness?: number;
+  /** 数据完整度标签。 */
+  dataCompletenessLabel?: '完整' | '部分完整' | '旧版有限数据';
+  /** 数据缺失/限制说明。 */
+  dataWarnings?: string[];
+  /** 生成该报告时的 App 版本。 */
+  sourceVersion?: string;
+  /** 同周期报告的修订号（第 1 次生成 = 1）。 */
+  revision?: number;
+  /** 最后更新时间（同周期更新时刷新）。 */
+  updatedAt?: string;
+  /** 旧版未知字段透传（升级时保留，不丢弃用户数据）。 */
+  legacyMetadata?: Record<string, unknown>;
 }
 
 export type SortDirection = 'asc' | 'desc';

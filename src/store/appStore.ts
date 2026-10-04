@@ -56,7 +56,8 @@ import {
 import { saveTextFile, backupFilename } from '../services/export/download';
 import { generateReport, toggleReportArchive } from '../features/reports/generate';
 import { reportFileBase, reportHtml } from '../features/reports/reportFile';
-import { migrateChannelsV12, needsV12Migration } from '../services/migration';
+import { migrateChannelsV12, migrateReportsV13, needsV12Migration } from '../services/migration';
+import { DEFAULT_REPORT_SORT, type ReportSortSpec } from '../features/reports/reportSort';
 import { detectCelebrations, type CelebrationEvent } from '../utils/celebrate';
 import { DEFAULT_SMART_CONFIG } from '../utils/smartSort';
 import { mergeData } from '../utils/mergeData';
@@ -88,6 +89,8 @@ interface AppState {
   activeSortKey: string;
   /** 固定置顶的渠道 id。 */
   pinnedChannelIds: string[];
+  /** 报告多维排序规则（持久化）。 */
+  reportSortSpec: ReportSortSpec;
   smartSortConfig: SmartSortConfig;
   profile: UserProfile;
   appearance: AppearanceSettings;
@@ -139,10 +142,11 @@ interface AppState {
   deleteHistoryPoints: (dates: string[]) => void;
 
   // ---- 报告 ----
-  generateReportNow: (reportType: ReportType, referenceDate?: string) => FinancialReport;
+  generateReportNow: (reportType: ReportType, referenceDate?: string, mode?: 'update' | 'saveAs') => FinancialReport;
   archiveReport: (id: string, note?: string) => void;
   deleteReport: (id: string) => void;
   deleteReports: (ids: string[]) => void;
+  setReportSortSpec: (spec: ReportSortSpec) => void;
 
   // ---- 排序 ----
   addSortRule: (rule: Omit<CustomSortRule, 'id' | 'createdAt'>) => void;
@@ -186,6 +190,7 @@ const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
   { key: STORAGE_KEYS.customSortRules, pick: (s) => ({ rules: s.sortRules.filter((r) => !r.isSystem) }) },
   { key: STORAGE_KEYS.sortHistory, pick: (s) => s.sortHistory },
   { key: STORAGE_KEYS.sortConfig, pick: (s) => ({ activeKey: s.activeSortKey, pinned: s.pinnedChannelIds }) },
+  { key: STORAGE_KEYS.reportSortSettings, pick: (s) => s.reportSortSpec },
   { key: STORAGE_KEYS.smartSortConfig, pick: (s) => s.smartSortConfig },
   { key: STORAGE_KEYS.userProfile, pick: (s) => s.profile },
   { key: STORAGE_KEYS.appearanceSettings, pick: (s) => s.appearance },
@@ -258,6 +263,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     sortHistory: { history: [] },
     activeSortKey: 'default',
     pinnedChannelIds: [],
+    reportSortSpec: DEFAULT_REPORT_SORT,
     smartSortConfig: DEFAULT_SMART_CONFIG,
     profile: { defaultCurrency: 'CNY' },
     appearance: { themeMode: 'system', followWealthTheme: true, animationIntensity: 'normal', backgroundOpacity: 30, reduceMotion: 'system' },
@@ -297,6 +303,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         profile,
         appearance,
         authData,
+        reportSortSettings,
       ] = await Promise.all([
         storageService.getJSON<{ channels: Channel[]; history: HistoryPoint[] }>(STORAGE_KEYS.wealthTrackerData),
         storageService.getJSON<FinancialReport[]>(STORAGE_KEYS.financialReports),
@@ -316,6 +323,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         storageService.getJSON<UserProfile>(STORAGE_KEYS.userProfile),
         storageService.getJSON<AppearanceSettings>(STORAGE_KEYS.appearanceSettings),
         storageService.getJSON<{ account: LocalAccount | null; authRecord: AuthRecord | null }>(STORAGE_KEYS.authData),
+        storageService.getJSON<ReportSortSpec>(STORAGE_KEYS.reportSortSettings),
       ]);
 
       const isFirstRun = !wtd;
@@ -337,14 +345,24 @@ export const useAppStore = create<AppState>()((set, get) => {
         }
       }
 
+      // v1.2 → v1.3 迁移：财务报告规范化（补 periodKey/title/ISO week/wealthLevel/completeness）。
+      const reportMigration = migrateReportsV13(reports ?? []);
+      const normalizedReports = reportMigration.reports;
+      if (reportMigration.changed > 0) {
+        migrationNote = migrationNote
+          ? `${migrationNote}；已规范化 ${reportMigration.changed} 份历史报告`
+          : `已规范化 ${reportMigration.changed} 份历史报告`;
+      }
+
       set({
         channels: normalizeChannelAmounts(channels),
         history,
-        reports: reports ?? [],
+        reports: normalizedReports,
         sortRules: allRules,
         sortHistory: sortHistory ?? { history: [] },
         activeSortKey: sortConfig?.activeKey ?? 'default',
         pinnedChannelIds: sortConfig?.pinned ?? [],
+        reportSortSpec: reportSortSettings ?? DEFAULT_REPORT_SORT,
         smartSortConfig: smartSortConfig ?? DEFAULT_SMART_CONFIG,
         profile: profile ?? { defaultCurrency: 'CNY' },
         appearance: appearance ?? { themeMode: 'system', followWealthTheme: true, animationIntensity: 'normal', backgroundOpacity: 30, reduceMotion: 'system' },
@@ -368,6 +386,15 @@ export const useAppStore = create<AppState>()((set, get) => {
         const mgr = storageService.getDesktopManager();
         if (mgr) await mgr.backupNow(true);
         await storageService.setRaw(STORAGE_VERSION_KEY, APP_VERSION);
+        // 报告 schema 升级：备份成功后持久化规范化报告，并用新渲染器重写桌面 JSON/HTML。
+        if (reportMigration.changed > 0) {
+          await storageService.setJSON(STORAGE_KEYS.financialReports, normalizedReports);
+          if (mgr) {
+            for (const r of normalizedReports) {
+              void mgr.writeReport(r.reportType, reportFileBase(r), JSON.stringify(r, null, 2), reportHtml(r)).catch(() => {});
+            }
+          }
+        }
         if (migrationNote) get().pushToast(migrationNote, 'info');
       }
 
@@ -472,10 +499,33 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     // ---------------------------------------------------------------------
-    generateReportNow(reportType, referenceDate = todayString()) {
+    generateReportNow(reportType, referenceDate = todayString(), mode = 'update') {
       const s = get();
-      const report = generateReport(s.history, reportType, referenceDate, s.channels);
-      const reports = [report, ...s.reports];
+      const generated = generateReport(s.history, reportType, referenceDate, s.channels);
+      const existing = s.reports.find((r) => r.periodKey && r.periodKey === generated.periodKey);
+
+      let report: FinancialReport;
+      let reports: FinancialReport[];
+
+      if (existing && mode === 'update' && !existing.isArchived) {
+        // 同周期已存在且未归档：更新原报告（保留 id/createdAt/归档备注，递增 revision）
+        report = {
+          ...generated,
+          id: existing.id,
+          createdAt: existing.createdAt,
+          revision: (existing.revision ?? 1) + 1,
+          updatedAt: new Date().toISOString(),
+          isArchived: existing.isArchived,
+          archivedAt: existing.archivedAt,
+          archiveNote: existing.archiveNote,
+        };
+        reports = s.reports.map((r) => (r.id === existing.id ? report : r));
+      } else {
+        // 归档的历史报告默认不静默覆盖；saveAs 或首次生成 → 新增一份
+        report = generated;
+        reports = [report, ...s.reports];
+      }
+
       set({ reports });
       persist();
       // 桌面版：把报告同时持久化为 JSON + HTML 到 reports/{type}/ 目录
@@ -489,7 +539,8 @@ export const useAppStore = create<AppState>()((set, get) => {
           }
         })();
       }
-      get().pushToast(`已生成报告「${report.title}」`, 'success');
+      const verb = existing && mode === 'update' && !existing.isArchived ? '已更新' : '已生成';
+      get().pushToast(`${verb}报告「${report.title}」`, 'success');
       return report;
     },
     archiveReport(id, note) {
@@ -505,6 +556,10 @@ export const useAppStore = create<AppState>()((set, get) => {
     deleteReports(ids) {
       const set_ = new Set(ids);
       set((s) => ({ reports: s.reports.filter((r) => !set_.has(r.id)) }));
+      persist();
+    },
+    setReportSortSpec(spec) {
+      set({ reportSortSpec: spec });
       persist();
     },
 
