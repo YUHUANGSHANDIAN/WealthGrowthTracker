@@ -333,6 +333,38 @@ export interface LevelTheme {
   heroGradient: string;
   particleColor: string;
   chartAccent: string;
+  // —— v1.3 主题包扩展（可选，向后兼容）——
+  /** 悬浮/抬升表面。 */
+  surfaceElevated?: string;
+  /** 次要文字色。 */
+  muted?: string;
+  /** Hero 主视觉背景。 */
+  hero?: string;
+  /** 庆祝动效色。 */
+  celebration?: string;
+  /** 背景纹理/母题。 */
+  backgroundMotif?: string;
+  /** 未来暗色 token（dark mode 专用）。 */
+  dark?: { primary: string; surface: string; surfaceElevated: string; border: string; text: string };
+}
+
+/** 财富等级逻辑定义（与视觉主题解耦）。 */
+export interface WealthLevelDefinition {
+  id: string;
+  name: string;
+  minAmount: Money;
+  maxAmount: Money;
+  badge: string;
+  description: string;
+  /** 关联的主题 key。 */
+  themeId: string;
+  milestones: { percentage: number; name: string; emoji: string }[];
+}
+
+/** 财富等级视觉主题（与等级逻辑解耦）。 */
+export interface WealthTheme {
+  id: string;
+  tokens: LevelTheme;
 }
 
 /** 财富等级。 */
@@ -348,6 +380,24 @@ export interface WealthLevel {
   /** 结构化视觉 Token（映射为 CSS Variables）。 */
   tokens: LevelTheme;
   milestones: { percentage: number; name: string; emoji: string }[];
+}
+
+/** 一次等级成就（首次真实跨越某等级阈值）。 */
+export interface LevelAchievement {
+  /** 等级 name（或 id，稳定标识）。 */
+  levelId: string;
+  levelName: string;
+  /** 首次达到时间（ISO）。 */
+  reachedAt: string;
+  /** 首次达到时的资产金额。 */
+  firstAmount: Money;
+  /** 无法从历史确定真实日期时为 true。 */
+  unknownTime?: boolean;
+}
+
+/** 等级成就集合的存储形状。 */
+export interface LevelAchievementState {
+  achievements: LevelAchievement[];
 }
 
 export type PredictionModelType =

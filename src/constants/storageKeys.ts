@@ -26,6 +26,7 @@ export const STORAGE_KEYS = {
   currentWealthLevel: 'current_wealth_level',
   goalAchievementStatus: 'goal_achievement_status',
   timeRangeHistory: 'time_range_history',
+  levelAchievements: 'level_achievements',
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];

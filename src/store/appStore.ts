@@ -11,6 +11,7 @@ import type {
   FinancialReport,
   GoalAchievementStatus,
   HistoryPoint,
+  LevelAchievement,
   ReportType,
   SmartSortConfig,
   SortHistory,
@@ -63,6 +64,11 @@ import { DEFAULT_SMART_CONFIG } from '../utils/smartSort';
 import { mergeData } from '../utils/mergeData';
 import { checkDataHealth, applyHealthFixes } from '../utils/dataHealth';
 import { createAuthRecord, verifySecret, type AuthRecord } from '../utils/auth';
+import {
+  crossedLevelAchievements,
+  deriveLevelAchievements,
+  mergeLevelAchievements,
+} from '../utils/levelAchievements';
 
 export type ToastKind = 'success' | 'error' | 'info';
 export interface Toast {
@@ -108,6 +114,7 @@ interface AppState {
   countdownProgressHistory: CountdownProgressPoint[];
   currentWealthLevel: CurrentWealthLevel;
   wealthTrackerHistory: HistoryPoint[];
+  levelAchievements: LevelAchievement[];
 
   // 数据管理弹窗状态
   importModalOpen: boolean;
@@ -204,6 +211,7 @@ const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
   { key: STORAGE_KEYS.countdownProgressHistory, pick: (s) => s.countdownProgressHistory },
   { key: STORAGE_KEYS.currentWealthLevel, pick: (s) => s.currentWealthLevel },
   { key: STORAGE_KEYS.wealthTrackerHistory, pick: (s) => s.wealthTrackerHistory },
+  { key: STORAGE_KEYS.levelAchievements, pick: (s) => s.levelAchievements },
 ];
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -279,6 +287,7 @@ export const useAppStore = create<AppState>()((set, get) => {
     countdownProgressHistory: [],
     currentWealthLevel: { level: '' },
     wealthTrackerHistory: [],
+    levelAchievements: [],
 
     importModalOpen: false,
 
@@ -304,6 +313,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         appearance,
         authData,
         reportSortSettings,
+        levelAchievements,
       ] = await Promise.all([
         storageService.getJSON<{ channels: Channel[]; history: HistoryPoint[] }>(STORAGE_KEYS.wealthTrackerData),
         storageService.getJSON<FinancialReport[]>(STORAGE_KEYS.financialReports),
@@ -324,6 +334,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         storageService.getJSON<AppearanceSettings>(STORAGE_KEYS.appearanceSettings),
         storageService.getJSON<{ account: LocalAccount | null; authRecord: AuthRecord | null }>(STORAGE_KEYS.authData),
         storageService.getJSON<ReportSortSpec>(STORAGE_KEYS.reportSortSettings),
+        storageService.getJSON<LevelAchievement[]>(STORAGE_KEYS.levelAchievements),
       ]);
 
       const isFirstRun = !wtd;
@@ -354,6 +365,12 @@ export const useAppStore = create<AppState>()((set, get) => {
           : `已规范化 ${reportMigration.changed} 份历史报告`;
       }
 
+      // v1.2 → v1.3 迁移：等级成就从历史安全回推（幂等，不伪造日期）。
+      const mergedAchievements = mergeLevelAchievements(
+        levelAchievements ?? [],
+        history.length > 0 ? deriveLevelAchievements(history) : [],
+      );
+
       set({
         channels: normalizeChannelAmounts(channels),
         history,
@@ -378,6 +395,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         countdownProgressHistory: progressHistory ?? [],
         currentWealthLevel: level ?? { level: '' },
         wealthTrackerHistory: linkedHistory ?? [],
+        levelAchievements: mergedAchievements,
         hydrated: true,
       });
 
@@ -461,6 +479,11 @@ export const useAppStore = create<AppState>()((set, get) => {
         return { channels, history };
       });
       const newTotal = totalAssets(get().channels);
+      // 记录新达成的等级成就（首次跨越阈值）
+      const crossed = crossedLevelAchievements(prevTotal, newTotal);
+      if (crossed.length > 0) {
+        set((s) => ({ levelAchievements: mergeLevelAchievements(s.levelAchievements, crossed) }));
+      }
       // 检测并触发等级升级 / 目标达成庆祝（仅真实的金额编辑触发，导入/重启不触发）
       const { event, newGoalAchieved } = detectCelebrations(prevTotal, newTotal, get().countdown, get().goalAchieved);
       if (event) {
@@ -735,6 +758,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         countdownProgressHistory: d.countdownProgressHistory ?? [],
         currentWealthLevel: d.currentWealthLevel ?? { level: '' },
         wealthTrackerHistory: d.wealthTrackerHistory ?? [],
+        levelAchievements: deriveLevelAchievements(d.history),
       });
       persist();
       return {

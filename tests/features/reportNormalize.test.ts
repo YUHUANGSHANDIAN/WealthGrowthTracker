@@ -49,7 +49,7 @@ describe('报告规范化（normalizeFinancialReport）', () => {
   it('从 totalAmount 推导 wealthLevel（不依赖今天状态）', () => {
     const n = normalizeFinancialReport(legacyWeekly({ wealthLevel: undefined, wealthLevelName: undefined }));
     expect(n.wealthLevelName).toBe('投资专家'); // 500000 → 投资专家
-    expect(n.wealthLevelTheme).toBe('red-royal');
+    expect(n.wealthLevelTheme).toBe('navy-gold');
   });
 
   it('缺 topChannels 但有 channelDetails → 补齐 TOP3', () => {

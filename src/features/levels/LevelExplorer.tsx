@@ -3,9 +3,10 @@ import { useAppStore } from '../../store/appStore';
 import { totalAssets } from '../../utils/channels';
 import { formatCNY } from '../../utils/money';
 import { WEALTH_LEVELS, getLevelByAmount, getLevelIndex } from '../../constants/levels';
+import { applyLevelTheme, applyNeutralTheme } from '../../utils/theme';
 import type { WealthLevel } from '../../types';
 import { Modal } from '../../components/ui/Modal';
-import { Badge } from '../../components/ui/primitives';
+import { Badge, Button } from '../../components/ui/primitives';
 
 /** 格式化等级资产范围（最高级显示 +，不显示 Infinity）。 */
 function formatLevelRange(level: WealthLevel): string {
@@ -15,30 +16,72 @@ function formatLevelRange(level: WealthLevel): string {
 
 export function LevelExplorer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const channels = useAppStore((s) => s.channels);
+  const levelAchievements = useAppStore((s) => s.levelAchievements);
+  const followWealthTheme = useAppStore((s) => s.appearance.followWealthTheme);
   const [detail, setDetail] = useState<WealthLevel | null>(null);
+  const [previewing, setPreviewing] = useState<string | null>(null);
 
   const total = totalAssets(channels);
   const current = getLevelByAmount(total);
   const currentIdx = getLevelIndex(current);
 
+  function close() {
+    setDetail(null);
+    setPreviewing(null);
+    // 恢复真实主题
+    if (followWealthTheme) applyLevelTheme(getLevelByAmount(totalAssets(useAppStore.getState().channels)));
+    else applyNeutralTheme();
+    onClose();
+  }
+
+  function preview(level: WealthLevel) {
+    applyLevelTheme(level);
+    setPreviewing(level.name);
+  }
+
+  const achievedMap = new Map(levelAchievements.map((a) => [a.levelName, a]));
+
   if (detail) {
     return (
-      <Modal open={open} onClose={() => { setDetail(null); onClose(); }} title="等级详情" size="sm">
-        <LevelDetail level={detail} total={total} currentIdx={currentIdx} onBack={() => setDetail(null)} />
+      <Modal open={open} onClose={close} title="等级详情" size="sm">
+        <LevelDetail
+          level={detail}
+          total={total}
+          currentIdx={currentIdx}
+          achievement={achievedMap.get(detail.name)}
+          previewing={previewing === detail.name}
+          onPreview={() => preview(detail)}
+          onBack={() => { setDetail(null); setPreviewing(null); }}
+        />
       </Modal>
     );
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="财富等级体系" size="lg">
+    <Modal open={open} onClose={close} title="财富等级体系" size="lg">
       <p className="text-xs text-slate-500 mb-3">
         本等级体系是应用的<strong>游戏化成长体系</strong>，不代表投资能力评级、信用评级或真实社会财富地位。
       </p>
+      {/* 财富成长护照 */}
+      {levelAchievements.length > 0 && (
+        <div className="bg-slate-50 rounded-xl p-3 mb-3">
+          <div className="text-xs font-medium text-slate-600 mb-2">🌱 财富成长护照 · 已达成 {levelAchievements.length} 级</div>
+          <div className="flex flex-wrap gap-1.5">
+            {levelAchievements.map((a) => (
+              <span key={a.levelId} className="text-xs bg-white border border-slate-200 rounded-full px-2 py-0.5 text-slate-600">
+                {WEALTH_LEVELS.find((l) => l.name === a.levelName)?.badge ?? '🏅'} {a.levelName}
+                <span className="text-slate-400"> · {a.reachedAt}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="space-y-2 max-h-[65vh] overflow-y-auto pr-1">
         {WEALTH_LEVELS.map((level) => {
           const idx = getLevelIndex(level);
           const isCurrent = idx === currentIdx;
           const done = idx < currentIdx;
+          const ach = achievedMap.get(level.name);
           return (
             <button
               key={level.name}
@@ -60,6 +103,7 @@ export function LevelExplorer({ open, onClose }: { open: boolean; onClose: () =>
                   {done && <span className="text-emerald-500" aria-label="已完成">✓</span>}
                 </div>
                 <div className="text-xs text-slate-500 tabular">{formatLevelRange(level)}</div>
+                {ach && <div className="text-[11px] text-slate-400">首次达成 {ach.reachedAt}</div>}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <span className="h-4 w-4 rounded-full" style={{ background: level.tokens.primary }} aria-hidden />
@@ -77,11 +121,17 @@ function LevelDetail({
   level,
   total,
   currentIdx,
+  achievement,
+  previewing,
+  onPreview,
   onBack,
 }: {
   level: WealthLevel;
   total: number;
   currentIdx: number;
+  achievement?: { reachedAt: string; firstAmount: number };
+  previewing: boolean;
+  onPreview: () => void;
   onBack: () => void;
 }) {
   const idx = getLevelIndex(level);
@@ -103,6 +153,12 @@ function LevelDetail({
         <p className="text-sm text-slate-700">{level.description}</p>
       </div>
 
+      {achievement && (
+        <div className="bg-slate-50 rounded-xl p-3 text-sm text-slate-600">
+          🌱 首次达成：<span className="font-medium">{achievement.reachedAt}</span>（当时资产 {formatCNY(achievement.firstAmount)}）
+        </div>
+      )}
+
       <div>
         <div className="text-xs text-slate-400 mb-2">主题色</div>
         <div className="flex flex-wrap gap-2">
@@ -110,6 +166,10 @@ function LevelDetail({
             <span key={i} className="h-8 w-8 rounded-lg border border-slate-200" style={{ background: c }} aria-label={c} />
           ))}
         </div>
+        <Button variant="outline" size="sm" className="mt-2" onClick={onPreview}>
+          {previewing ? '✓ 正在预览此主题' : '👁 预览主题'}
+        </Button>
+        <p className="text-[11px] text-slate-400 mt-1">预览仅临时切换视觉，不改变真实财富等级；关闭后恢复。</p>
       </div>
 
       <div>
