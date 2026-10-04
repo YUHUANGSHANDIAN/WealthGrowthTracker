@@ -2,6 +2,39 @@
 
 本文件记录「财富成长记 / 财富梦想实现家」各版本的变更。
 
+## [1.4.0] - 2026-10-04
+
+### 财务报告（Reports）
+- **同周期报告不再静默覆盖**：生成冲突时弹 ReportConflictDialog（更新 / 另存 / 取消），归档报告绝不静默覆盖。
+- **可编辑元数据**：自定义标题（titleMode auto/custom + standardTitle）、标签、自定义摘要、归档说明；更新报告时保留用户标题。
+- **历史报告修复**：`repairReportFromHistory` 用真实 HistoryPoint 恢复 previousTotal / 极值 / 渠道构成，记录 fieldProvenance + repairAudit，绝不编造。
+
+### 数据健康（Data Health Center）
+- 升级为交互式健康中心：按域分组、展开详情、定位到数据、忽略、安全修复（修复前自动备份）。
+- DataIssue 增加 domain / entityId / title / evidence / fixStrategies / safeAutoFix / possiblyDestructive。
+- 新增彩票健康检查（Pool 为负是合法的，交易金额 <=0 是错误）。
+
+### 图标（Icons）
+- `featureMeta.ts` 集中管理功能/动作/彩票类别/交易类型 Emoji，语义统一。
+
+### 分析（Analytics）
+- 历史渠道构成支持金额模式 / 100% 占比模式、父渠道 / 叶子渠道、TOP N、缺快照日期显示为缺口（不当作 0）。
+
+### 彩票（Lottery）
+- 新增独立资金池账本（Pool / Project / Transaction / Settings），完全排除财富资产 / 等级 / 目标 / 预测 / 标准报告。
+- 净盈亏 = 中奖 − 投注（注入非盈利、取出非亏损）；净盈亏率（ROI）指标。
+- 每日统计、累计净盈亏、项目汇总全部由交易动态推导。
+- **旧彩票 Excel 导入**：识别 汇总表 / 每日统计 / 交易明细，收入→prize、支出→stake、其他→adjustment，summary-only 项目保留 legacySummary、detailed 项目从交易推导；幂等指纹防重复。
+- 彩票 CSV（交易 / 项目汇总）导出。
+
+### 连通性（Connectivity）
+- 统一 Navigation Layer（hash 路由 + 跨 Feature 深链）。
+- Data 概览卡片可点击（报告/历史/目标/彩票）、Health Issue 可定位、Report→Analysis、Goal→Prediction。
+
+### 其它
+- 活动日志（本地，记录事件类型/时间/实体/描述，不记录完整资产 JSON 或密码）。
+- Backup 升级到 v1.4（含 lottery/goals/achievements），旧备份仍兼容。
+
 ## [1.3.0] - 2026-10-04
 
 ### 财务报告（Reports）

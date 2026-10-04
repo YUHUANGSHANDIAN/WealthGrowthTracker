@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useAppStore } from '../../store/appStore';
+import { useNavigationStore } from '../../store/navigationStore';
 import type { FinancialReport, ReportType } from '../../types';
 import { formatCNY, diffMoney } from '../../utils/money';
 import { assetAtDate, generateReport } from './generate';
@@ -432,6 +433,7 @@ function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, 
   onRepair: (r: FinancialReport) => void;
 }) {
   const [shareOpen, setShareOpen] = useState(false);
+  const navigate = useNavigationStore((s) => s.navigate);
   const positive = report.changeAmount >= 0;
   const level = getLevelByAmount(report.totalAmount);
 
@@ -574,6 +576,7 @@ function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, 
           <Button onClick={() => setShareOpen(true)}>📤 分享报告</Button>
           <Button variant="outline" onClick={() => onEditMetadata(report)}>✏️ 编辑元数据</Button>
           <Button variant="outline" onClick={() => onRepair(report)}>🧰 数据修复</Button>
+          <Button variant="outline" onClick={() => { onClose(); navigate({ tab: 'analysis', startDate: report.startDate, endDate: report.endDate }); }}>📊 深入分析本周期</Button>
         </div>
       </div>
       {shareOpen && <ShareReportModal report={report} onClose={() => setShareOpen(false)} />}

@@ -8,6 +8,7 @@ import { getLevelByAmount } from '../../constants/levels';
 import { useNow } from '../../hooks/useNow';
 import { computeCountdownState, countdownDuration, formatCountdown, getDefaultTimezone, TIMEZONE_OPTIONS } from '../../utils/countdown';
 import { goalAmountProgress, goalStatusOf, validateGoal, makeGoal } from '../../utils/goals';
+import { useNavigationStore } from '../../store/navigationStore';
 import { Card, Button, Badge, ProgressBar, EmptyState } from '../../components/ui/primitives';
 import { Modal } from '../../components/ui/Modal';
 import { MoneyField, TextField, SelectField } from '../../components/ui/form';
@@ -82,6 +83,7 @@ export function GoalsPanel() {
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => triggerCoinRain()}>🪙 金币雨</Button>
+            <Button variant="outline" size="sm" onClick={() => useNavigationStore.getState().navigate({ tab: 'prediction', goalId: primary?.id })}>🔭 查看预测</Button>
             <Button variant="outline" size="sm" onClick={() => setEditor({ open: true, goal: primary })}>✎ 编辑主目标</Button>
           </div>
         </div>
