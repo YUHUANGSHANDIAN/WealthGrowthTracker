@@ -58,6 +58,7 @@ import {
 import { saveTextFile, backupFilename } from '../services/export/download';
 import { generateReport, toggleReportArchive } from '../features/reports/generate';
 import { reportFileBase, reportHtml } from '../features/reports/reportFile';
+import { buildReportIndex } from '../features/reports/reportIndex';
 import { migrateChannelsV12, migrateReportsV13, needsV12Migration } from '../services/migration';
 import { DEFAULT_REPORT_SORT, type ReportSortSpec } from '../features/reports/reportSort';
 import { detectCelebrations, type CelebrationEvent } from '../utils/celebrate';
@@ -442,6 +443,7 @@ export const useAppStore = create<AppState>()((set, get) => {
             for (const r of normalizedReports) {
               void mgr.writeReport(r.reportType, reportFileBase(r), JSON.stringify(r, null, 2), reportHtml(r)).catch(() => {});
             }
+            void mgr.writeReportIndex(JSON.stringify(buildReportIndex(normalizedReports), null, 2)).catch(() => {});
           }
         }
         if (migrationNote) get().pushToast(migrationNote, 'info');
@@ -588,6 +590,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         void (async () => {
           try {
             await mgr.writeReport(reportType, reportFileBase(report), JSON.stringify(report, null, 2), reportHtml(report));
+            await mgr.writeReportIndex(JSON.stringify(buildReportIndex(reports), null, 2));
           } catch (err) {
             console.warn('[reports] 报告写盘失败:', err);
           }

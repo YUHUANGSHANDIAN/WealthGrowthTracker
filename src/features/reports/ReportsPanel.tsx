@@ -11,6 +11,8 @@ import { SelectField } from '../../components/ui/form';
 import { BarChart } from '../../components/charts/BarChart';
 import { LineChart } from '../../components/charts/LineChart';
 import { saveTextFile, backupFilename } from '../../services/export/download';
+import { downloadCSV } from '../../components/charts/export';
+import { buildReportsIndexCsv, buildReportsBatchHtml } from './reportIndex';
 import { ShareReportModal } from './ShareReportModal';
 import {
   sortReports,
@@ -108,9 +110,25 @@ export function ReportsPanel() {
     });
   }
 
-  async function exportSelected() {
-    const items = reports.filter((r) => selected.has(r.id));
+  function selectedItems(): FinancialReport[] {
+    return reports.filter((r) => selected.has(r.id));
+  }
+
+  async function exportSelected(format: 'json' | 'csv' | 'html' = 'json') {
+    const items = selectedItems();
     if (items.length === 0) return;
+    if (format === 'csv') {
+      const { header, rows } = buildReportsIndexCsv(items);
+      downloadCSV(backupFilename('financial_reports_index'), header, rows);
+      pushToast(`已导出 ${items.length} 份报告的 CSV 索引`, 'success');
+      return;
+    }
+    if (format === 'html') {
+      const html = buildReportsBatchHtml(items);
+      await saveTextFile(backupFilename('financial_reports_batch_html', '.html'), html);
+      pushToast(`已导出 ${items.length} 份报告的 HTML 合集`, 'success');
+      return;
+    }
     const payload = {
       version: '1.3.0',
       exportDate: new Date().toISOString(),
@@ -217,7 +235,9 @@ export function ReportsPanel() {
         <Button variant="outline" size="sm" onClick={() => setSortEditorOpen(true)}>⇶ 多维排序</Button>
         {selected.size > 0 && (
           <>
-            <Button variant="outline" size="sm" onClick={exportSelected}>⬇ 导出所选</Button>
+            <Button variant="outline" size="sm" onClick={() => exportSelected('json')}>⬇ JSON</Button>
+            <Button variant="outline" size="sm" onClick={() => exportSelected('html')}>HTML</Button>
+            <Button variant="outline" size="sm" onClick={() => exportSelected('csv')}>CSV 索引</Button>
             <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>删除所选 ({selected.size})</Button>
           </>
         )}

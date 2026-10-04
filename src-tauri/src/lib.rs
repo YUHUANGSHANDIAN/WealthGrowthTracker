@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "android", target_os = "ios"))]
 use tauri::Manager;
 
 /// 数据根目录：
@@ -57,12 +58,10 @@ fn fs_mkdir(app: tauri::AppHandle, rel_path: String) -> Result<(), String> {
 #[tauri::command]
 fn fs_read_dir(app: tauri::AppHandle, rel_path: String) -> Result<Vec<String>, String> {
     let entries = fs::read_dir(safe_path(&app, &rel_path)?).map_err(|e| e.to_string())?;
-    let mut names = Vec::new();
-    for e in entries {
-        if let Ok(e) = e {
-            names.push(e.file_name().to_string_lossy().to_string());
-        }
-    }
+    let names = entries
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
     Ok(names)
 }
 

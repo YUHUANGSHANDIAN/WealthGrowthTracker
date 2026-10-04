@@ -110,6 +110,12 @@ export class DesktopDataManager {
     await atomicWrite(this.fs, `${dir}/${fileName}.json`, jsonContent);
     if (htmlContent) await atomicWrite(this.fs, `${dir}/${fileName}.html`, htmlContent);
   }
+
+  /** 写入 reports/index.json（报告索引，供维护，不作为第二数据库）。 */
+  async writeReportIndex(indexJson: string): Promise<void> {
+    await this.fs.mkdir(REPORTS_DIR);
+    await atomicWrite(this.fs, `${REPORTS_DIR}/index.json`, indexJson);
+  }
 }
 
 /**

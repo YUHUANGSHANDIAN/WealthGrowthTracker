@@ -61,12 +61,22 @@ export function computeChannelGrowths(history: HistoryPoint[], channels: Channel
   return result;
 }
 
-/** 某个父渠道（含其子渠道）的 30 日增长率摘要；无快照返回 null。 */
-export function channelGrowth30d(channel: Channel, growths: Map<string, ChannelGrowth>): number | null {
+/** 某个父渠道（含其子渠道）在指定时间范围的增长率摘要；无快照返回 null。 */
+export function channelGrowthFor(
+  channel: Channel,
+  growths: Map<string, ChannelGrowth>,
+  window: '7d' | '30d' | '90d' | '365d' = '30d',
+): number | null {
   const ids = channel.children && channel.children.length > 0 ? channel.children.map((s) => s.id) : [channel.id];
-  const values = ids.map((id) => growths.get(id)?.g30d).filter((v): v is number => v !== null && v !== undefined);
+  const key = window === '7d' ? 'g7d' : window === '90d' ? 'g90d' : window === '365d' ? 'g365d' : 'g30d';
+  const values = ids.map((id) => growths.get(id)?.[key]).filter((v): v is number => v !== null && v !== undefined);
   if (values.length === 0) return null;
   return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+/** 兼容旧调用：30 日增长率摘要。 */
+export function channelGrowth30d(channel: Channel, growths: Map<string, ChannelGrowth>): number | null {
+  return channelGrowthFor(channel, growths, '30d');
 }
 
 export interface SmartScoreBreakdown {
@@ -83,6 +93,7 @@ export const DEFAULT_SMART_CONFIG: SmartSortConfig = {
   activityWeight: 20,
   updatedAtWeight: 10,
   preset: 'balanced',
+  timeRange: '30d',
 };
 
 /** 计算父渠道的综合评分（本地评分算法，非 AI），含可解释分解。 */
@@ -95,9 +106,9 @@ export function computeSmartScore(
   const amount = channelAmount(channel);
   const amountShare = totalAmount > 0 ? (amount / totalAmount) * 100 : 0;
 
-  const g30 = channelGrowth30d(channel, growths);
+  const g = channelGrowthFor(channel, growths, config.timeRange ?? '30d');
   // 增长率映射到 0-100：+20% 及以上 → 100，-20% 及以下 → 0；无数据 → 50（中性）
-  const growth = g30 === null ? 50 : Math.max(0, Math.min(100, ((g30 + 0.2) / 0.4) * 100));
+  const growth = g === null ? 50 : Math.max(0, Math.min(100, ((g + 0.2) / 0.4) * 100));
 
   const hasChildren = (channel.children?.length ?? 0) > 0;
   const activity = Math.max(0, Math.min(100, amount * 0.02 + (hasChildren ? 20 : 10)));

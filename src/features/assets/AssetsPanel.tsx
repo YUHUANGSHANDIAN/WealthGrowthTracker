@@ -38,6 +38,7 @@ export function AssetsPanel() {
     recordSortHistory,
     setActiveSortKey,
     togglePinChannel,
+    setSmartSortConfig,
   } = useAppStore();
 
   const [sortConfig, setSortConfig] = useState<SortConfig>(
@@ -166,6 +167,19 @@ export function AssetsPanel() {
         <Button variant="outline" size="sm" onClick={() => setMultiOpen(true)}>
           ⇶ 多维排序
         </Button>
+        {sortConfig.mode === 'smart' && (
+          <select
+            value={smartSortConfig.timeRange ?? '30d'}
+            onChange={(e) => setSmartSortConfig({ ...smartSortConfig, timeRange: e.target.value as typeof smartSortConfig.timeRange })}
+            className="px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
+            aria-label="智能排序增长时间范围"
+          >
+            <option value="7d">近 7 天增长</option>
+            <option value="30d">近 30 天增长</option>
+            <option value="90d">近 90 天增长</option>
+            <option value="365d">近 1 年增长</option>
+          </select>
+        )}
         <Button variant="outline" size="sm" onClick={() => setRulesOpen(true)}>
           ⚙ 排序规则
         </Button>

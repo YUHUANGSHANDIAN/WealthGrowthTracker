@@ -44,7 +44,7 @@ export async function saveTextFile(
 }
 
 /** 生成带时间戳的备份文件名（与旧版格式一致）。 */
-export function backupFilename(prefix = 'wealth_tracker_backup'): string {
+export function backupFilename(prefix = 'wealth_tracker_backup', ext = 'json'): string {
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
-  return `${prefix}_${stamp}.json`;
+  return `${prefix}_${stamp}.${ext}`;
 }

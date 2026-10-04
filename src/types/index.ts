@@ -340,6 +340,8 @@ export interface SmartSortConfig {
   activityWeight: number;
   updatedAtWeight: number;
   preset?: 'size' | 'growth' | 'recent' | 'balanced';
+  /** 增长率计算的时间范围（默认 30d）。 */
+  timeRange?: '7d' | '30d' | '90d' | '365d';
 }
 
 /** 渠道增长（用于增长率排序与智能排序，来自历史快照）。 */
