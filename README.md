@@ -160,41 +160,42 @@ npm run build        # 产物在 dist/
 
 ---
 
-## 🖥 Windows 桌面版
+## 📥 平台下载
 
-### 下载安装
+所有安装包都在 [GitHub Releases](../../releases) 页面，随 `SHA256SUMS.txt` 一起发布。各平台数据存储、导入导出、分享、更新支持情况见 [PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md)。
 
-1. 打开 [GitHub Releases](../../releases) 页面。
-2. 下载最新 `WealthGrowthTracker_*_x64-setup.exe`（NSIS，按用户安装、无需管理员权限），或 `.msi`。
-3. 双击安装即可（首次安装 SmartScreen 可能提示「未知发布者」，见下方说明）。
+### Windows（Stable）
 
-### 数据与备份
+- `WealthGrowthTracker_*_x64-setup.exe`（NSIS，按用户安装、无需管理员权限，推荐）
+- `WealthGrowthTracker_*_x64.msi`
+- 数据目录：`文档\财富成长记\`。卸载**不会**删除该目录。
+- 首次安装 SmartScreen 可能提示「未知发布者」：点击「更多信息 → 仍要运行」即可（当前未商业代码签名）。
 
-- 数据默认保存在 `文档\财富成长记\`（见上「数据保存在哪里」）。
-- 自动备份：每天首次保存、版本升级前、导入覆盖前各备份一次，保留最近 60 个自动备份。
-- 「数据」页可：打开数据/备份文件夹、手动备份、从备份恢复。
+### macOS（Stable build，未签名）
 
-### 从 Web 版迁移到 Windows
+- `WealthGrowthTracker_*_universal.dmg`（Apple Silicon + Intel 通用）。
+- **当前为 ad-hoc 未签名构建**：首次打开若被 Gatekeeper 拦截，请在「系统设置 → 隐私与安全性」中点击「仍要打开」。正式 Developer ID 签名 + 公证见 `docs/FUTURE.md`。
 
-1. Web 版「数据」页 → **导出 JSON 备份**。
-2. Windows 版「数据」页 → **导入 JSON 文件**。
+### Linux（Stable）
 
-### 卸载
+- `WealthGrowthTracker_*_x86_64.AppImage`：`chmod +x *.AppImage` 后运行。
+- `*.deb`：系统安装器或 `sudo apt install ./xxx.deb`。
+- `*.rpm`：`sudo rpm -i xxx.rpm`。
 
-卸载程序**不会**删除 `文档\财富成长记\` 中的财富数据；如需彻底清除，请手动删除该文件夹。
+### Android（构建可用，正式签名待配置）
 
-### 代码签名说明
+- `*.apk`：从 GitHub Release 下载安装，需允许「安装未知来源应用」。
+- 当前 APK 为 **debug 签名的预览版**；正式 release 签名（Play Store / 通用 AAB）待配置密钥后提供。
 
-当前安装包**未进行商业代码签名**，Windows SmartScreen 首次安装时可能显示「未知发布者」提示，点击「更多信息 → 仍要运行」即可。详见 `docs/FUTURE.md`。
+### Web / PWA（Stable）
 
-### 本地构建桌面版（可选）
+- 直接部署 `dist/`（`base: './'` 已配置相对路径），可安装为 PWA（离线外壳）。
+- 浏览器数据存于 `localStorage`，跨设备不互通（本应用无云同步）。
 
-需要 Rust 工具链 + Windows MSVC 构建工具：
+### HarmonyOS（见 docs/HARMONYOS.md）
 
-```bash
-npm install
-npm run tauri:build   # 产出 src-tauri/target/release/bundle/*.exe / *.msi
-```
+- **无 Stable 原生 HAP**：Tauri 官方尚未 stable 支持 HarmonyOS。
+- 提供 **Web/PWA 兼容方案**（HarmonyOS 兼容浏览器可安装 PWA 使用）。
 
 ---
 

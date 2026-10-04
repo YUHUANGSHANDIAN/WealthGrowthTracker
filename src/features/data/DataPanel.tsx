@@ -6,7 +6,7 @@ import { storageService, getDocumentsDir, openPathInSystem } from '../../service
 import { parseBackup } from '../../services/export';
 import { downloadCSV } from '../../components/charts/export';
 import { buildChannelsCsv, buildHistoryCsv } from '../../utils/dataCsv';
-import { checkDataHealth } from '../../utils/dataHealth';
+import { checkDataHealth, checkReportHealth, checkGoalHealth, checkAchievementHealth } from '../../utils/dataHealth';
 import { previewMerge } from '../../utils/mergeData';
 import { platformCapabilities } from '../../utils/platform';
 
@@ -15,6 +15,9 @@ export function DataPanel() {
   const channels = useAppStore((s) => s.channels);
   const history = useAppStore((s) => s.history);
   const reports = useAppStore((s) => s.reports);
+  const goals = useAppStore((s) => s.goals);
+  const primaryGoalId = useAppStore((s) => s.primaryGoalId);
+  const levelAchievements = useAppStore((s) => s.levelAchievements);
 
   const [preview, setPreview] = useState<{ text: string; channels: number; history: number; reports: number; merge: ReturnType<typeof previewMerge> } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -30,7 +33,14 @@ export function DataPanel() {
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const health = useMemo(() => checkDataHealth(channels, history), [channels, history]);
+  const health = useMemo(() => {
+    const base = checkDataHealth(channels, history);
+    const report = checkReportHealth(reports);
+    const goal = checkGoalHealth(goals, primaryGoalId);
+    const achievement = checkAchievementHealth(levelAchievements);
+    const issues = [...base.issues, ...report, ...goal, ...achievement];
+    return { ...base, issues, ok: issues.length === 0 };
+  }, [channels, history, reports, goals, primaryGoalId, levelAchievements]);
   const subCount = channels.reduce((a, c) => a + (c.children?.length ?? 0), 0);
   const sortedHistory = useMemo(() => [...history].sort((a, b) => (a.date < b.date ? -1 : 1)), [history]);
 

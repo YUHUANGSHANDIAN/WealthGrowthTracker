@@ -105,7 +105,11 @@ fn document_dir(app: tauri::AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn open_path(app: tauri::AppHandle, rel_path: String) -> Result<(), String> {
     // 空相对路径 → 打开数据根目录本身（「打开数据文件夹」）
-    let p = if rel_path.is_empty() { base_dir(&app)? } else { safe_path(&app, &rel_path)? };
+    let p = if rel_path.is_empty() {
+        base_dir(&app)?
+    } else {
+        safe_path(&app, &rel_path)?
+    };
     #[cfg(target_os = "windows")]
     {
         if p.is_dir() {

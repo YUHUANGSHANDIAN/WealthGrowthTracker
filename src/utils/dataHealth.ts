@@ -1,5 +1,6 @@
-import type { Channel, HistoryPoint } from '../types';
+import type { Channel, FinancialReport, Goal, HistoryPoint, LevelAchievement } from '../types';
 import { round2 } from './money';
+import { isValidTimezone } from './goals';
 
 export interface DataIssue {
   severity: 'warning' | 'error';
@@ -95,4 +96,60 @@ export function applyHealthFixes(
   }
 
   return { channels: nextChannels, history: nextHistory, fixed };
+}
+
+// ---------------------------------------------------------------------------
+// v1.3 扩展健康检查：报告 / 目标 / 等级成就（仅报告，不自动修复）
+// ---------------------------------------------------------------------------
+
+/** 报告健康：periodKey 缺失 / 重复 / 周编号非法 / 标题缺失。 */
+export function checkReportHealth(reports: FinancialReport[]): DataIssue[] {
+  const issues: DataIssue[] = [];
+  const byPeriod = new Map<string, number>();
+  for (const r of reports) {
+    if (!r.periodKey) issues.push({ severity: 'warning', category: '报告', message: `报告「${r.title || r.id}」缺少 periodKey`, fixable: false, fix: null });
+    else byPeriod.set(r.periodKey, (byPeriod.get(r.periodKey) ?? 0) + 1);
+    if (r.reportType === 'weekly' && r.weekNumber !== undefined && (r.weekNumber < 1 || r.weekNumber > 53)) {
+      issues.push({ severity: 'warning', category: '报告', message: `报告「${r.title}」周编号非法（${r.weekNumber}）`, fixable: false, fix: null });
+    }
+    if (!r.title?.trim()) issues.push({ severity: 'warning', category: '报告', message: `报告 ${r.id} 缺少标题`, fixable: false, fix: null });
+  }
+  for (const [key, count] of byPeriod) {
+    if (count > 1) issues.push({ severity: 'warning', category: '报告', message: `存在重复周期报告：${key}（${count} 份）`, fixable: false, fix: null });
+  }
+  return issues;
+}
+
+/** 目标健康：金额非法 / 时间顺序 / 时区 / 主目标缺失。 */
+export function checkGoalHealth(goals: Goal[], primaryGoalId: string | null): DataIssue[] {
+  const issues: DataIssue[] = [];
+  for (const g of goals) {
+    if (!Number.isFinite(g.targetAmount) || g.targetAmount <= 0) {
+      issues.push({ severity: 'error', category: '目标', message: `目标「${g.name}」金额非法`, fixable: false, fix: null });
+    }
+    if (g.targetDateTime <= g.startDateTime) {
+      issues.push({ severity: 'warning', category: '目标', message: `目标「${g.name}」目标时间早于起始时间`, fixable: false, fix: null });
+    }
+    if (!isValidTimezone(g.timezone)) {
+      issues.push({ severity: 'warning', category: '目标', message: `目标「${g.name}」时区无效（${g.timezone}）`, fixable: false, fix: null });
+    }
+  }
+  if (goals.length > 0 && !primaryGoalId) {
+    issues.push({ severity: 'warning', category: '目标', message: '未设置主目标', fixable: false, fix: null });
+  }
+  return issues;
+}
+
+/** 等级成就健康：重复 / 未知等级。 */
+export function checkAchievementHealth(achievements: LevelAchievement[]): DataIssue[] {
+  const issues: DataIssue[] = [];
+  const seen = new Set<string>();
+  for (const a of achievements) {
+    if (seen.has(a.levelId)) issues.push({ severity: 'warning', category: '等级', message: `重复的等级成就：${a.levelName}`, fixable: false, fix: null });
+    seen.add(a.levelId);
+    if (a.firstAmount < 0 || !Number.isFinite(a.firstAmount)) {
+      issues.push({ severity: 'warning', category: '等级', message: `成就「${a.levelName}」金额非法`, fixable: false, fix: null });
+    }
+  }
+  return issues;
 }

@@ -2,6 +2,47 @@
 
 本文件记录「财富成长记 / 财富梦想实现家」各版本的变更。
 
+## [1.3.0] - 2026-10-04
+
+### 财务报告（Reports）
+- **Report Schema v2**：`reportSchemaVersion` / `reportRendererVersion` / `periodKey` / `dataCompleteness` / `dataWarnings` / `revision` / `sourceVersion`。
+- **规范化管线**：`normalizeFinancialReport`（纯函数、确定性、幂等），历史报告缺失 `title`/`weekNumber`/`year`/`wealthLevel`/`topChannels` 等字段时安全补齐，**绝不编造**渠道构成/期间极值。
+- **ISO-8601 周编号**：修正旧自定义算法（无 Week 0、跨年周一致），`periodKey` 统一为 `weekly:2026-W40` 等。
+- **历史报告自动升级**：hydrate 时检测 → 备份 → 持久化规范化报告 → 重渲染桌面 JSON/HTML。
+- **报告去重/更新**：同 `periodKey` 默认更新原报告（递增 `revision`），归档报告不静默覆盖。
+- **报告 Dashboard**：KPI（总数/本周/本月/本年变化/最近生成/完整度）、类型 Tabs、时间筛选、**多维排序**（强类型字段 + 预设）。
+- **报告详情分区**：概览/周期统计/趋势/资产构成/历史比较/财富等级/数据质量/备注/分享。
+- **Share Center**：4 种模板（简洁卡片/完整报告/社交 4:5/Story 9:16）、**隐私模式**（完整/金额模糊/仅百分比/隐藏金额）、实时预览、PNG/JPEG/WebP、透明背景。
+
+### 财富等级（Wealth Level）
+- **定义与主题解耦**：`WealthLevelDefinition`（逻辑）与 `WealthTheme`（视觉 token）分离。
+- **视觉优化**：高财富等级移除 crimson/red 主色（改为铜金/深蓝金），红色仅用于「下降/风险」语义。
+- **Level Achievement / 财富成长护照**：记录首次达成等级时间，从历史安全回推（不伪造日期）。
+- **主题预览**：Level Explorer 可预览主题（不改变真实等级）。
+
+### 分析（Analytics）
+- Analytics Dashboard：KPI（起点/变化/变化率/极值/覆盖率）、时间范围+粒度+平滑、**历史渠道构成**（堆叠图）、**渠道变化**、**资产集中度**（TOP1/TOP3/HHI）、**WoW/MoM/YoY**、可解释雷达。
+
+### 预测（Prediction）
+- **Training Window Stability**（90/180/365/全部）、**Horizon Backtest**（30/90/180）、**Model Disagreement**（非风险概率）、**Outlier Sensitivity**（绝不自动删数据）、**Goal Required Path**、**80/90/95 预测区间**（真正重算）、CSV 导出 metadata。
+
+### 目标（Goals）
+- **Goals V2**：多目标、Primary Goal、状态（未开始/进行中/已达成/已过期/已归档）、目标编辑器（名称/图标/金额/起止/时区/显示格式/备注/颜色）+ 校验。旧 `CountdownData` 幂等迁移为主目标。
+
+### 图表与 UI
+- 新增 `StackedBarChart`、统一 `ChartFrame` 基础（响应式 SVG、无障碍 aria-label、十字光标）。
+
+### 平台（Platforms）
+- **Platform Capability Layer**（`canOpenFolder`/`canNativeShare`/`canCopyImage` 等），Android 隐藏「打开数据文件夹」。
+- **跨平台存储**：Rust `open_path` 按 `cfg(target_os)` 分派（Windows/macOS/Linux），移动端使用 app_data_dir（Scoped Storage）。
+- **Windows / macOS / Linux / Android 发行**：GitHub Actions 多平台流水线 + SHA256SUMS。
+- **PWA**：manifest + 图标 + 离线 shell（Service Worker 只缓存外壳、不缓存用户数据）。
+- **HarmonyOS**：无 Stable 原生 HAP（如实说明），提供 Web/PWA 兼容，见 `docs/HARMONYOS.md`。
+
+### 安全（Security）
+- **CSP**：不再为 `null`，收紧为 `default-src 'self'` + 白名单。
+- 保持 Local-First / Privacy-First，无 analytics/telemetry/广告/云同步。
+
 ## [1.2.0] - 2026-10-03
 
 ### 财富等级（Wealth Level）
