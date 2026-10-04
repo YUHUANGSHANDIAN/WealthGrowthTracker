@@ -44,3 +44,7 @@ legacy-export/
 # 临时分析产物
 *.tmp
 .tmp/
+
+# 本地归档 / 导入（用户数据与冗余副本，不进入 Git）
+local-archives/
+local-imports/
