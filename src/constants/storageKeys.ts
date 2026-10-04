@@ -20,6 +20,7 @@ export const STORAGE_KEYS = {
   authData: 'auth_data',
   chartSettings: 'chart_settings',
   countdownData: 'countdown_data',
+  goals: 'goals',
   countdownOpacity: 'countdown_opacity',
   coinRainConfig: 'coin_rain_config',
   countdownProgressHistory: 'countdown_progress_history',

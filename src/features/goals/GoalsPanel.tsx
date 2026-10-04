@@ -1,38 +1,52 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
-import type { CountdownData } from '../../types';
+import type { Goal, GoalDisplayMode } from '../../types';
 import { totalAssets } from '../../utils/channels';
 import { formatCNY, parseMoney } from '../../utils/money';
-import { todayString } from '../../utils/date';
+import { todayString, addDays } from '../../utils/date';
 import { getLevelByAmount } from '../../constants/levels';
 import { useNow } from '../../hooks/useNow';
 import { computeCountdownState, countdownDuration, formatCountdown, getDefaultTimezone, TIMEZONE_OPTIONS } from '../../utils/countdown';
+import { goalAmountProgress, goalStatusOf, validateGoal, makeGoal } from '../../utils/goals';
 import { Card, Button, Badge, ProgressBar, EmptyState } from '../../components/ui/primitives';
 import { Modal } from '../../components/ui/Modal';
 import { MoneyField, TextField, SelectField } from '../../components/ui/form';
 import { LineChart } from '../../components/charts/LineChart';
 import { PREDICTION } from '../../components/charts/palette';
 
+const GOAL_ICONS = ['🎯', '💵', '🏠', '🚗', '✈️', '💎', '🎓', '💍', '🏖️', '🍼', '📱', '🎁'];
+const GOAL_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#06B6D4', '#EC4899', '#D4AF37'];
+
+const STATUS_META: Record<Goal['status'], { label: string; tone: 'emerald' | 'blue' | 'amber' | 'slate' | 'red' }> = {
+  'not-started': { label: '未开始', tone: 'slate' },
+  active: { label: '进行中', tone: 'blue' },
+  achieved: { label: '已达成', tone: 'emerald' },
+  expired: { label: '已过期', tone: 'red' },
+  archived: { label: '已归档', tone: 'slate' },
+};
+
 export function GoalsPanel() {
   const channels = useAppStore((s) => s.channels);
   const history = useAppStore((s) => s.history);
+  const goals = useAppStore((s) => s.goals);
+  const primaryGoalId = useAppStore((s) => s.primaryGoalId);
   const countdown = useAppStore((s) => s.countdown);
   const goalAchieved = useAppStore((s) => s.goalAchieved);
   const coinRainConfig = useAppStore((s) => s.coinRainConfig);
-  const { setCountdown, setCoinRainConfig, triggerCoinRain, markGoalAchieved, pushToast } = useAppStore();
+  const { setCoinRainConfig, triggerCoinRain, markGoalAchieved, upsertGoal, deleteGoal, setPrimaryGoal, pushToast } = useAppStore();
 
-  const [editOpen, setEditOpen] = useState(false);
+  const [editor, setEditor] = useState<{ open: boolean; goal: Goal | null }>({ open: false, goal: null });
   const now = useNow();
 
   const total = totalAssets(channels);
   const level = getLevelByAmount(total);
-  const amountProgress = countdown.targetAmount > 0 ? Math.min(100, (total / countdown.targetAmount) * 100) : 0;
+  const primary = goals.find((g) => g.id === primaryGoalId) ?? goals[0] ?? null;
 
+  const amountProgress = countdown.targetAmount > 0 ? Math.min(100, (total / countdown.targetAmount) * 100) : 0;
   const cdState = computeCountdownState(now, countdown);
   const cdDur = countdownDuration(now, countdown);
   const cdText = formatCountdown(cdDur, countdown.displayMode ?? 'calendar', countdown.showSeconds);
 
-  // 目标达成自动触发（跨越检测已在 store 的 setAmount 里完成；这里兜底处理已有状态）
   useEffect(() => {
     if (countdown.targetAmount > 0 && total >= countdown.targetAmount && !goalAchieved.hasAchievedGoal) {
       markGoalAchieved();
@@ -55,18 +69,20 @@ export function GoalsPanel() {
     ];
   }, [history, countdown.targetAmount]);
 
+  const activeGoals = goals.filter((g) => g.status !== 'archived');
+
   return (
     <div className="space-y-4">
-      {/* 目标进度 + 倒计时 */}
+      {/* 主目标 Hero */}
       <Card className="p-5">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
-            <h2 className="font-semibold text-slate-800">{countdown.targetName || '财富目标'}</h2>
-            <p className="text-xs text-slate-500">时区 {countdown.timezone || getDefaultTimezone()}</p>
+            <h2 className="font-semibold text-slate-800">{primary ? `${primary.icon} ${primary.name}` : '财富目标'}</h2>
+            <p className="text-xs text-slate-500">主目标 · 时区 {countdown.timezone || getDefaultTimezone()}</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => triggerCoinRain()}>🪙 金币雨</Button>
-            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>✎ 编辑目标</Button>
+            <Button variant="outline" size="sm" onClick={() => setEditor({ open: true, goal: primary })}>✎ 编辑主目标</Button>
           </div>
         </div>
 
@@ -86,24 +102,59 @@ export function GoalsPanel() {
           </div>
         </div>
 
-        {/* 时间进度 vs 金额进度 */}
         <div className="grid grid-cols-2 gap-4 mt-4">
           <div>
-            <div className="flex justify-between text-xs text-slate-500 mb-1">
-              <span>时间进度</span><span className="tabular">{cdState.timeProgress.toFixed(0)}%</span>
-            </div>
+            <div className="flex justify-between text-xs text-slate-500 mb-1"><span>时间进度</span><span className="tabular">{cdState.timeProgress.toFixed(0)}%</span></div>
             <ProgressBar value={cdState.timeProgress} barClassName="bg-gradient-to-r from-blue-400 to-cyan-500" />
           </div>
           <div>
-            <div className="flex justify-between text-xs text-slate-500 mb-1">
-              <span>金额进度</span><span className="tabular">{amountProgress.toFixed(0)}%</span>
-            </div>
+            <div className="flex justify-between text-xs text-slate-500 mb-1"><span>金额进度</span><span className="tabular">{amountProgress.toFixed(0)}%</span></div>
             <ProgressBar value={amountProgress} barClassName="bg-gradient-to-r from-emerald-400 to-emerald-600" />
           </div>
         </div>
 
         {goalAchieved.hasAchievedGoal && (
           <div className="mt-3 text-center"><Badge tone="amber">🏆 已达成目标！</Badge></div>
+        )}
+      </Card>
+
+      {/* 多目标列表 */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold text-slate-800">我的目标（{activeGoals.length}）</h2>
+          <Button size="sm" onClick={() => setEditor({ open: true, goal: null })}>＋ 新建目标</Button>
+        </div>
+        {activeGoals.length === 0 ? (
+          <EmptyState icon="🎯" title="还没有目标" description="建立百万目标、应急金目标、旅行资金等资产目标。" />
+        ) : (
+          <div className="space-y-2">
+            {activeGoals.map((g) => {
+              const status = goalStatusOf(g, now, total);
+              const pct = goalAmountProgress(total, g.targetAmount);
+              const isPrimary = g.id === primaryGoalId;
+              return (
+                <div key={g.id} className={`border rounded-xl p-3 ${isPrimary ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200 bg-white'}`}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xl" aria-hidden>{g.icon}</span>
+                    <span className="font-medium text-slate-800 flex-1 min-w-0 truncate">{g.name}</span>
+                    <Badge tone={STATUS_META[status].tone}>{STATUS_META[status].label}</Badge>
+                    {isPrimary && <Badge tone="emerald">主目标</Badge>}
+                  </div>
+                  <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
+                    <span className="tabular">{formatCNY(total)} / {formatCNY(g.targetAmount)}</span>
+                    <span className="tabular">{pct.toFixed(1)}%</span>
+                    <span className="ml-auto text-slate-400">{g.targetDateTime.slice(0, 10)}</span>
+                  </div>
+                  <ProgressBar value={pct} className="mt-2" barClassName="bg-gradient-to-r from-emerald-400 to-emerald-600" />
+                  <div className="flex gap-3 mt-2 text-xs">
+                    <button className="text-slate-500 hover:text-emerald-600" onClick={() => setEditor({ open: true, goal: g })}>编辑</button>
+                    {!isPrimary && <button className="text-slate-500 hover:text-blue-600" onClick={() => { setPrimaryGoal(g.id); pushToast(`已设为主目标：${g.name}`, 'success'); }}>设为主目标</button>}
+                    <button className="text-slate-400 hover:text-red-500" onClick={() => deleteGoal(g.id)}>删除</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </Card>
 
@@ -151,85 +202,112 @@ export function GoalsPanel() {
             ]}
           />
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              风力 <span className="text-slate-400 tabular">{Math.round(coinRainConfig.windStrength * 100)}%</span>
-            </label>
-            <input type="range" min={0} max={1} step={0.05} value={coinRainConfig.windStrength}
-              onChange={(e) => setCoinRainConfig({ ...coinRainConfig, windStrength: Number(e.target.value) })}
-              className="w-full accent-emerald-600" aria-label="风力" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              弹跳系数 <span className="text-slate-400 tabular">{Math.round(coinRainConfig.bounceFactor * 100)}%</span>
-            </label>
-            <input type="range" min={0} max={1} step={0.05} value={coinRainConfig.bounceFactor}
-              onChange={(e) => setCoinRainConfig({ ...coinRainConfig, bounceFactor: Number(e.target.value) })}
-              className="w-full accent-emerald-600" aria-label="弹跳系数" />
+            <label className="block text-sm font-medium text-slate-700 mb-1">风力 <span className="text-slate-400 tabular">{Math.round(coinRainConfig.windStrength * 100)}%</span></label>
+            <input type="range" min={0} max={1} step={0.05} value={coinRainConfig.windStrength} onChange={(e) => setCoinRainConfig({ ...coinRainConfig, windStrength: Number(e.target.value) })} className="w-full accent-emerald-600" aria-label="风力" />
           </div>
         </div>
       </Card>
 
-      <CountdownEditor open={editOpen} onClose={() => setEditOpen(false)} onSave={(cd) => { setCountdown(cd); setEditOpen(false); pushToast('目标已更新', 'success'); }} />
+      <GoalEditor
+        open={editor.open}
+        goal={editor.goal}
+        total={total}
+        onClose={() => setEditor({ open: false, goal: null })}
+        onSave={(g) => { upsertGoal(g); setEditor({ open: false, goal: null }); pushToast('目标已保存', 'success'); }}
+      />
     </div>
   );
 }
 
-function CountdownEditor({ open, onClose, onSave }: { open: boolean; onClose: () => void; onSave: (cd: CountdownData) => void }) {
-  const countdown = useAppStore((s) => s.countdown);
-  const [targetName, setTargetName] = useState('');
+function GoalEditor({ open, goal, total, onClose, onSave }: {
+  open: boolean;
+  goal: Goal | null;
+  total: number;
+  onClose: () => void;
+  onSave: (g: Goal) => void;
+}) {
+  const [name, setName] = useState('');
+  const [icon, setIcon] = useState('🎯');
+  const [color, setColor] = useState('#3B82F6');
   const [targetAmount, setTargetAmount] = useState('');
   const [startDate, setStartDate] = useState(todayString());
   const [startTime, setStartTime] = useState('00:00');
-  const [targetDate, setTargetDate] = useState(todayString());
+  const [targetDate, setTargetDate] = useState(addDays(todayString(), 365));
   const [targetTime, setTargetTime] = useState('00:00');
   const [timezone, setTimezone] = useState(getDefaultTimezone());
-  const [displayMode, setDisplayMode] = useState<CountdownData['displayMode']>('calendar');
+  const [displayMode, setDisplayMode] = useState<GoalDisplayMode>('calendar');
   const [showSeconds, setShowSeconds] = useState(true);
-  const [amountError, setAmountError] = useState('');
+  const [notes, setNotes] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open) return;
-    setTargetName(countdown.targetName ?? '');
-    setTargetAmount(String(countdown.targetAmount));
-    setStartDate(countdown.startDate ?? todayString());
-    setStartTime((countdown.startDateTime ?? `${countdown.startDate ?? todayString()}T00:00`).slice(11, 16));
-    setTargetDate(countdown.targetDate ?? todayString());
-    setTargetTime((countdown.targetDateTime ?? `${countdown.targetDate ?? todayString()}T00:00`).slice(11, 16));
-    setTimezone(countdown.timezone || getDefaultTimezone());
-    setDisplayMode(countdown.displayMode ?? 'calendar');
-    setShowSeconds(countdown.showSeconds ?? true);
-    setAmountError('');
-  }, [open, countdown]);
+    if (goal) {
+      setName(goal.name);
+      setIcon(goal.icon);
+      setColor(goal.color);
+      setTargetAmount(String(goal.targetAmount));
+      setStartDate(goal.startDateTime.slice(0, 10));
+      setStartTime(goal.startDateTime.slice(11, 16));
+      setTargetDate(goal.targetDateTime.slice(0, 10));
+      setTargetTime(goal.targetDateTime.slice(11, 16));
+      setTimezone(goal.timezone || getDefaultTimezone());
+      setDisplayMode(goal.displayMode);
+      setShowSeconds(goal.showSeconds);
+      setNotes(goal.notes ?? '');
+    } else {
+      setName('');
+      setIcon('🎯');
+      setColor('#3B82F6');
+      setTargetAmount('');
+      setStartDate(todayString());
+      setStartTime('00:00');
+      setTargetDate(addDays(todayString(), 365));
+      setTargetTime('00:00');
+      setTimezone(getDefaultTimezone());
+      setDisplayMode('calendar');
+      setShowSeconds(true);
+      setNotes('');
+    }
+    setError('');
+  }, [open, goal]);
 
   function submit() {
     const amt = parseMoney(targetAmount);
-    if (amt === null || amt <= 0) {
-      setAmountError('请输入有效的目标金额');
-      return;
-    }
-    const cd: CountdownData = {
+    if (amt === null) { setError('请输入有效的目标金额'); return; }
+    const startDateTime = `${startDate}T${startTime}`;
+    const targetDateTime = `${targetDate}T${targetTime}`;
+    const v = validateGoal({ targetAmount: amt, startDateTime, targetDateTime, timezone });
+    if (!v.ok) { setError(v.errors[0] ?? '目标信息无效'); return; }
+    const g = goal ?? makeGoal();
+    onSave({
+      ...g,
+      name: name.trim() || '财富目标',
+      icon,
+      color,
       targetAmount: amt,
-      targetDate,
-      startDate,
-      targetName: targetName.trim() || undefined,
+      startDateTime,
+      targetDateTime,
       timezone,
-      startDateTime: `${startDate}T${startTime}`,
-      targetDateTime: `${targetDate}T${targetTime}`,
       displayMode,
       showSeconds,
-    };
-    onSave(cd);
+      notes: notes.trim() || undefined,
+    });
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="编辑目标与倒计时" size="md"
+    <Modal open={open} onClose={onClose} title={goal ? '编辑目标' : '新建目标'} size="md"
       footer={<>
         <Button variant="ghost" onClick={onClose}>取消</Button>
         <Button onClick={submit}>保存</Button>
       </>}>
       <div className="space-y-4">
-        <TextField label="目标名称（可选）" value={targetName} onChange={(e) => setTargetName(e.target.value)} placeholder="例如：存下第一个一百万" />
-        <MoneyField label="目标金额" value={targetAmount === '' ? '' : Number(targetAmount)} onChange={(v) => setTargetAmount(v === '' ? '' : String(v))} error={amountError} />
+        {amtBelowTotal(total, targetAmount) && <p className="text-xs text-amber-600">提示：当前资产已达或超过目标金额，保存后该目标将被视为「已达成」。</p>}
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="目标名称" value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：存下第一个一百万" />
+          <SelectField label="图标" value={icon} onChange={(e) => setIcon(e.target.value)} options={GOAL_ICONS.map((i) => ({ value: i, label: i }))} />
+        </div>
+        <MoneyField label="目标金额" value={targetAmount === '' ? '' : Number(targetAmount)} onChange={(v) => setTargetAmount(v === '' ? '' : String(v))} error={error} />
         <div className="grid grid-cols-2 gap-3">
           <TextField label="起始日期" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           <TextField label="起始时间" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
@@ -238,18 +316,34 @@ function CountdownEditor({ open, onClose, onSave }: { open: boolean; onClose: ()
         </div>
         <SelectField label="时区" value={timezone} onChange={(e) => setTimezone(e.target.value)}
           options={[...new Set([timezone, getDefaultTimezone(), ...TIMEZONE_OPTIONS])].map((t) => ({ value: t, label: t }))} />
-        <SelectField label="显示格式" value={displayMode ?? 'calendar'} onChange={(e) => setDisplayMode(e.target.value as CountdownData['displayMode'])}
-          options={[
-            { value: 'calendar', label: '年/月/日/时分秒（如 1年 2个月 16天 08:35:42）' },
-            { value: 'days', label: '日/时分秒（如 441天 08:35:42）' },
-            { value: 'hours', label: '总小时（如 10,592 小时）' },
-            { value: 'simple', label: '简洁（如 441 天）' },
-          ]} />
+        <div className="grid grid-cols-2 gap-3">
+          <SelectField label="显示格式" value={displayMode} onChange={(e) => setDisplayMode(e.target.value as GoalDisplayMode)}
+            options={[
+              { value: 'calendar', label: '年/月/日/时分秒' },
+              { value: 'days', label: '日/时分秒' },
+              { value: 'hours', label: '总小时' },
+              { value: 'simple', label: '简洁（天）' },
+            ]} />
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">颜色</label>
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {GOAL_COLORS.map((c) => (
+                <button key={c} onClick={() => setColor(c)} className="h-7 w-7 rounded-full border-2" style={{ background: c, borderColor: color === c ? '#0f172a' : 'transparent' }} aria-label={c} />
+              ))}
+            </div>
+          </div>
+        </div>
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={showSeconds} onChange={(e) => setShowSeconds(e.target.checked)} className="h-4 w-4 text-emerald-600 rounded" />
           <span className="text-sm text-slate-700">显示秒</span>
         </label>
+        <TextField label="备注（可选）" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="如：应急金、旅行基金…" />
       </div>
     </Modal>
   );
+}
+
+function amtBelowTotal(total: number, targetAmount: string): boolean {
+  const amt = parseMoney(targetAmount);
+  return amt !== null && total >= amt;
 }

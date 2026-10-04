@@ -10,6 +10,7 @@ import type {
   CustomSortRule,
   FinancialReport,
   GoalAchievementStatus,
+  Goal,
   HistoryPoint,
   LevelAchievement,
   ReportType,
@@ -69,6 +70,7 @@ import {
   deriveLevelAchievements,
   mergeLevelAchievements,
 } from '../utils/levelAchievements';
+import { countdownFromGoal, countdownToGoal } from '../utils/goals';
 
 export type ToastKind = 'success' | 'error' | 'info';
 export interface Toast {
@@ -107,6 +109,8 @@ interface AppState {
   locked: boolean;
   chartSettings: ChartSettings;
   countdown: CountdownData;
+  goals: Goal[];
+  primaryGoalId: string | null;
   countdownOpacity: number;
   coinRainConfig: CoinRainConfig;
   goalAchieved: GoalAchievementStatus;
@@ -176,6 +180,11 @@ interface AppState {
   markGoalAchieved: () => void;
   resetGoal: () => void;
 
+  // ---- Goals V2 ----
+  upsertGoal: (goal: Goal) => void;
+  deleteGoal: (id: string) => void;
+  setPrimaryGoal: (id: string | null) => void;
+
   // ---- 金币雨 / 图表 ----
   setCoinRainConfig: (config: CoinRainConfig) => void;
   setChartSettings: (settings: ChartSettings) => void;
@@ -204,6 +213,7 @@ const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
   { key: STORAGE_KEYS.authData, pick: (s) => ({ account: s.account, authRecord: s.authRecord }) },
   { key: STORAGE_KEYS.chartSettings, pick: (s) => s.chartSettings },
   { key: STORAGE_KEYS.countdownData, pick: (s) => s.countdown },
+  { key: STORAGE_KEYS.goals, pick: (s) => ({ goals: s.goals, primaryGoalId: s.primaryGoalId }) },
   { key: STORAGE_KEYS.countdownOpacity, pick: (s) => s.countdownOpacity },
   { key: STORAGE_KEYS.coinRainConfig, pick: (s) => s.coinRainConfig },
   { key: STORAGE_KEYS.goalAchievementStatus, pick: (s) => s.goalAchieved },
@@ -280,6 +290,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     locked: false,
     chartSettings: defaultChartSettings(),
     countdown: defaultCountdownData(),
+    goals: [],
+    primaryGoalId: null,
     countdownOpacity: 1,
     coinRainConfig: defaultCoinRainConfig(),
     goalAchieved: { hasAchievedGoal: false },
@@ -314,6 +326,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         authData,
         reportSortSettings,
         levelAchievements,
+        goalsData,
       ] = await Promise.all([
         storageService.getJSON<{ channels: Channel[]; history: HistoryPoint[] }>(STORAGE_KEYS.wealthTrackerData),
         storageService.getJSON<FinancialReport[]>(STORAGE_KEYS.financialReports),
@@ -335,6 +348,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         storageService.getJSON<{ account: LocalAccount | null; authRecord: AuthRecord | null }>(STORAGE_KEYS.authData),
         storageService.getJSON<ReportSortSpec>(STORAGE_KEYS.reportSortSettings),
         storageService.getJSON<LevelAchievement[]>(STORAGE_KEYS.levelAchievements),
+        storageService.getJSON<{ goals: Goal[]; primaryGoalId: string | null }>(STORAGE_KEYS.goals),
       ]);
 
       const isFirstRun = !wtd;
@@ -371,6 +385,21 @@ export const useAppStore = create<AppState>()((set, get) => {
         history.length > 0 ? deriveLevelAchievements(history) : [],
       );
 
+      // v1.2 → v1.3 迁移：CountdownData → Goals V2（幂等：已有 goals 则不重建）。
+      let goals = goalsData?.goals ?? [];
+      let primaryGoalId = goalsData?.primaryGoalId ?? null;
+      if (goals.length === 0 && countdown && countdown.targetAmount > 0) {
+        const primary = countdownToGoal(countdown);
+        goals = [primary];
+        primaryGoalId = primary.id;
+      }
+      if (primaryGoalId && !goals.some((g) => g.id === primaryGoalId)) {
+        primaryGoalId = goals[0]?.id ?? null;
+      }
+      // 同步 legacy countdown 为主目标（庆祝检测/倒计时/预测目标路径继续可用）
+      const primaryGoal = primaryGoalId ? goals.find((g) => g.id === primaryGoalId) : undefined;
+      const effectiveCountdown = primaryGoal ? countdownFromGoal(primaryGoal) : countdown;
+
       set({
         channels: normalizeChannelAmounts(channels),
         history,
@@ -387,7 +416,9 @@ export const useAppStore = create<AppState>()((set, get) => {
         authRecord: authData?.authRecord ?? null,
         locked: authData?.account?.requireOnLaunch && authData?.authRecord ? true : false,
         chartSettings: chartSettings ?? defaultChartSettings(),
-        countdown: countdown ?? defaultCountdownData(),
+        countdown: effectiveCountdown ?? defaultCountdownData(),
+        goals,
+        primaryGoalId,
         countdownOpacity: opacity != null ? Number(opacity) || 1 : 1,
         coinRainConfig: coinRain ?? defaultCoinRainConfig(),
         goalAchieved: goal ?? { hasAchievedGoal: false },
@@ -670,6 +701,35 @@ export const useAppStore = create<AppState>()((set, get) => {
     setCountdownOpacity(opacity) {
       const clamped = Math.max(0, Math.min(1, opacity));
       set({ countdownOpacity: clamped });
+      persist();
+    },
+    upsertGoal(goal) {
+      set((s) => {
+        const exists = s.goals.some((g) => g.id === goal.id);
+        const goals = exists
+          ? s.goals.map((g) => (g.id === goal.id ? { ...goal, updatedAt: new Date().toISOString() } : g))
+          : [...s.goals, { ...goal, updatedAt: new Date().toISOString() }];
+        const primaryGoalId = s.primaryGoalId ?? goal.id;
+        const primary = goals.find((g) => g.id === primaryGoalId);
+        return { goals, primaryGoalId, countdown: primary ? countdownFromGoal(primary) : s.countdown };
+      });
+      persist();
+    },
+    deleteGoal(id) {
+      set((s) => {
+        const goals = s.goals.filter((g) => g.id !== id);
+        let primaryGoalId = s.primaryGoalId;
+        if (primaryGoalId === id) primaryGoalId = goals[0]?.id ?? null;
+        const primary = primaryGoalId ? goals.find((g) => g.id === primaryGoalId) : undefined;
+        return { goals, primaryGoalId, countdown: primary ? countdownFromGoal(primary) : s.countdown };
+      });
+      persist();
+    },
+    setPrimaryGoal(id) {
+      set((s) => {
+        const primary = s.goals.find((g) => g.id === id);
+        return { primaryGoalId: id, countdown: primary ? countdownFromGoal(primary) : s.countdown };
+      });
       persist();
     },
     markGoalAchieved() {

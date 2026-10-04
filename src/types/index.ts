@@ -192,6 +192,39 @@ export interface CountdownProgressPoint {
   totalAmount: Money;
 }
 
+export type GoalStatus = 'not-started' | 'active' | 'achieved' | 'expired' | 'archived';
+export type GoalDisplayMode = 'calendar' | 'days' | 'hours' | 'simple';
+
+/** 财富目标（v1.3 Goals V2，可多个）。都是「资产目标」，不扩展为借贷/股票/投资建议。 */
+export interface Goal {
+  id: string;
+  name: string;
+  icon: string;
+  targetAmount: Money;
+  /** 起始日期时间（YYYY-MM-DDTHH:mm，本地无时区语义）。 */
+  startDateTime: string;
+  /** 目标日期时间。 */
+  targetDateTime: string;
+  /** IANA 时区。 */
+  timezone: string;
+  displayMode: GoalDisplayMode;
+  status: GoalStatus;
+  priority: number;
+  color: string;
+  showSeconds: boolean;
+  createdAt: string;
+  updatedAt: string;
+  achievedAt?: string;
+  archivedAt?: string;
+  notes?: string;
+}
+
+/** 目标集合（primaryGoalId 唯一主目标，用于 Dashboard/金币雨/预测路径）。 */
+export interface GoalState {
+  goals: Goal[];
+  primaryGoalId: string | null;
+}
+
 export type CoinRainIntensity = 'off' | 'low' | 'medium' | 'high';
 
 export interface CoinRainConfig {
