@@ -10,12 +10,44 @@ import { Modal, ConfirmDialog } from '../../components/ui/Modal';
 import { TextField, SelectField } from '../../components/ui/form';
 import { ChannelItem, type AmountTarget, type ChannelHandlers } from './ChannelItem';
 import { ChannelFormModal, SubChannelFormModal, AmountModal } from './channelModals';
+import type { ChannelGrowth } from '../../types';
 
 type SortConfig =
   | { mode: 'default' }
   | { mode: 'smart' }
   | { mode: 'single'; ruleId: string }
   | { mode: 'multi'; ruleIds: string[] };
+
+type SubSort = { field: 'amount' | 'name' | 'g7d' | 'g30d' | 'g90d' | 'g365d'; direction: 'asc' | 'desc' };
+
+/** 子渠道排序（金额/名称/各周期增长）。 */
+function sortSubChildren(children: SubChannel[], sort: SubSort, growths: Map<string, ChannelGrowth>): SubChannel[] {
+  const dir = sort.direction === 'asc' ? 1 : -1;
+  const value = (s: SubChannel): number | string | null => {
+    switch (sort.field) {
+      case 'name':
+        return s.name;
+      case 'g7d':
+      case 'g30d':
+      case 'g90d':
+      case 'g365d':
+        return growths.get(s.id)?.[sort.field] ?? null;
+      case 'amount':
+      default:
+        return s.amount;
+    }
+  };
+  return [...children].sort((a, b) => {
+    const va = value(a);
+    const vb = value(b);
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    if (typeof va === 'string' && typeof vb === 'string') return dir * va.localeCompare(vb, 'zh');
+    if (typeof va === 'number' && typeof vb === 'number') return dir * (va - vb);
+    return 0;
+  });
+}
 
 export function AssetsPanel() {
   const channels = useAppStore((s) => s.channels);
@@ -47,6 +79,7 @@ export function AssetsPanel() {
   const [multiOpen, setMultiOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [levelExplorerOpen, setLevelExplorerOpen] = useState(false);
+  const [subSort, setSubSort] = useState<{ field: 'amount' | 'name' | 'g7d' | 'g30d' | 'g90d' | 'g365d'; direction: 'asc' | 'desc' }>({ field: 'amount', direction: 'desc' });
 
   // 渠道表单
   const [channelForm, setChannelForm] = useState<{ open: boolean; editing: Channel | null }>({ open: false, editing: null });
@@ -84,9 +117,13 @@ export function AssetsPanel() {
     } else {
       base = sortChannels(channels);
     }
-    if (pinned.size === 0) return base;
-    return [...base].sort((a, b) => (pinned.has(a.id) ? 0 : 1) - (pinned.has(b.id) ? 0 : 1));
-  }, [channels, sortConfig, sortRules, total, growthByChannel, growths, pinned, smartSortConfig]);
+    // 子渠道排序
+    const withSortedChildren = base.map((c) =>
+      c.children && c.children.length > 0 ? { ...c, children: sortSubChildren(c.children, subSort, growths) } : c,
+    );
+    if (pinned.size === 0) return withSortedChildren;
+    return [...withSortedChildren].sort((a, b) => (pinned.has(a.id) ? 0 : 1) - (pinned.has(b.id) ? 0 : 1));
+  }, [channels, sortConfig, sortRules, total, growthByChannel, growths, pinned, smartSortConfig, subSort]);
 
   function applySingle(ruleId: string) {
     if (ruleId === 'smart') {
@@ -180,6 +217,20 @@ export function AssetsPanel() {
             <option value="365d">近 1 年增长</option>
           </select>
         )}
+        <select
+          value={subSort.field}
+          onChange={(e) => setSubSort((s) => ({ ...s, field: e.target.value as SubSort['field'] }))}
+          className="px-2 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
+          aria-label="子渠道排序"
+          title="子渠道排序"
+        >
+          <option value="amount">子渠道：金额↓</option>
+          <option value="name">子渠道：名称</option>
+          <option value="g7d">子渠道：近7天增长</option>
+          <option value="g30d">子渠道：近30天增长</option>
+          <option value="g90d">子渠道：近90天增长</option>
+          <option value="g365d">子渠道：近1年增长</option>
+        </select>
         <Button variant="outline" size="sm" onClick={() => setRulesOpen(true)}>
           ⚙ 排序规则
         </Button>
