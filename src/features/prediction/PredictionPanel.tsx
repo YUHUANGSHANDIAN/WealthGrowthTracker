@@ -11,6 +11,7 @@ import { PREDICTION_MODELS, HORIZON_OPTIONS, defaultHorizonDays, runPrediction, 
 import { DiagnosticsModal } from './DiagnosticsModal';
 import { aggregateHistory, filterHistoryRange, filterTrainingWindow } from '../../utils/timeDimension';
 import { ChartControls } from './ChartControls';
+import { goalRequiredPath, modelDisagreement, type IntervalLevel } from './diagnostics';
 
 export function PredictionPanel() {
   const history = useAppStore((s) => s.history);
@@ -20,6 +21,7 @@ export function PredictionPanel() {
   const [horizon, setHorizon] = useState(defaultHorizonDays());
   const [mode, setMode] = useState<'single' | 'compare'>('single');
   const [selected, setSelected] = useState<PredictionModelType>('hybrid');
+  const [intervalLevel, setIntervalLevel] = useState<IntervalLevel>(95);
   const [diagModel, setDiagModel] = useState<PredictionModelType | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
 
@@ -27,7 +29,7 @@ export function PredictionPanel() {
     () => filterTrainingWindow(history, chartSettings.trainingWindow ?? 'all', chartSettings.customTrainingDays),
     [history, chartSettings.trainingWindow, chartSettings.customTrainingDays],
   );
-  const result = useMemo(() => runPrediction(trainingHistory, horizon), [trainingHistory, horizon]);
+  const result = useMemo(() => runPrediction(trainingHistory, horizon, intervalLevel), [trainingHistory, horizon, intervalLevel]);
   const sortedHistory = useMemo(
     () => aggregateHistory(filterHistoryRange(history, chartSettings.timeRange ?? 'all', chartSettings.customTimeRangeStart, chartSettings.customTimeRangeEnd), chartSettings.timeDimension ?? 'raw'),
     [history, chartSettings.timeRange, chartSettings.customTimeRangeStart, chartSettings.customTimeRangeEnd, chartSettings.timeDimension],
@@ -47,6 +49,20 @@ export function PredictionPanel() {
     }
     return { status: 'unreachable' as const };
   }, [countdown.targetAmount, sortedHistory, activeForecast]);
+
+  const requiredPath = useMemo(() => {
+    const target = countdown.targetAmount;
+    const targetDate = countdown.targetDateTime?.slice(0, 10) ?? countdown.targetDate;
+    if (!target || target <= 0 || sortedHistory.length === 0 || !targetDate) return [];
+    const last = sortedHistory[sortedHistory.length - 1]!;
+    return goalRequiredPath(last.totalAmount, target, last.date, targetDate);
+  }, [countdown.targetAmount, countdown.targetDateTime, countdown.targetDate, sortedHistory]);
+
+  const disagreement = useMemo(() => {
+    const forecasts = [result.forecasts.linear, result.forecasts.exponential, result.forecasts.conservative, result.forecasts.aggressive, result.hybrid];
+    const dis = modelDisagreement(forecasts);
+    return dis.length ? dis[dis.length - 1]!.spread : 0;
+  }, [result]);
 
   // 构建图表序列
   const chart = useMemo(() => {
@@ -97,6 +113,16 @@ export function PredictionPanel() {
           strokeWidth: 2,
         });
       }
+      if (requiredPath.length > 1) {
+        series.push({
+          id: 'required',
+          name: '目标所需轨迹',
+          color: '#e34948',
+          points: requiredPath.map((p) => ({ date: p.date, value: p.value })),
+          dashed: true,
+          strokeWidth: 1.5,
+        });
+      }
       return series;
     }
 
@@ -109,7 +135,7 @@ export function PredictionPanel() {
       series.push({ id: m.type, name: m.shortName, color: m.color, points: pts, dashed: true, strokeWidth: 2 });
     }
     return series;
-  }, [mode, sortedHistory, activeFit, activeForecast, meta, result, chartSettings]);
+  }, [mode, sortedHistory, activeFit, activeForecast, meta, result, chartSettings, requiredPath]);
 
   const referenceLines: ReferenceLine[] =
     countdown.targetAmount > 0 && chartSettings.showTarget !== false
@@ -128,11 +154,20 @@ export function PredictionPanel() {
     if (format === 'svg' && svg) downloadSVG(svg, `${base}.svg`);
     else if (format === 'png' && svg) void downloadPNG(svg, `${base}.png`);
     else if (format === 'csv') {
-      const header = ['date', 'historical', 'fitted', 'forecast', 'lower95', 'upper95', 'model'];
+      const header = ['date', 'historical', 'fitted', 'forecast', 'lower', 'upper', 'model'];
       const rows: (string | number)[][] = [];
       for (const h of sortedHistory) rows.push([h.date, h.totalAmount, '', '', '', '', selected]);
       for (const f of activeForecast.points) rows.push([f.date, '', '', f.value, f.lower95 ?? '', f.upper95 ?? '', selected]);
-      downloadCSV(`${base}.csv`, header, rows);
+      const meta: [string, string][] = [
+        ['model', selected],
+        ['trainingWindow', chartSettings.trainingWindow ?? 'all'],
+        ['displayRange', chartSettings.timeRange ?? 'all'],
+        ['horizon', String(horizon)],
+        ['intervalLevel', String(intervalLevel)],
+        ['generatedAt', new Date().toISOString()],
+        ['appVersion', '1.3.0'],
+      ];
+      downloadCSV(`${base}.csv`, header, rows, meta);
     }
   }
 
@@ -206,7 +241,19 @@ export function PredictionPanel() {
             </button>
           ))}
         </div>
-        <div className="flex gap-1.5 ml-auto">
+        <div className="flex items-center gap-1 ml-auto" role="group" aria-label="预测区间">
+          {([80, 90, 95] as IntervalLevel[]).map((l) => (
+            <button
+              key={l}
+              onClick={() => setIntervalLevel(l)}
+              aria-pressed={intervalLevel === l}
+              className={`px-2 py-1 text-xs rounded-lg ${intervalLevel === l ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'}`}
+            >
+              {l}%
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-1.5">
           <button
             onClick={() => setMode('single')}
             aria-pressed={mode === 'single'}
@@ -267,7 +314,7 @@ export function PredictionPanel() {
           <p className="text-xs text-slate-400 mt-2">{activeForecast.intervalNote}</p>
         )}
         {mode === 'single' && activeForecast.intervalType !== 'none' && (
-          <p className="text-xs text-slate-400 mt-2">阴影带为 95% 预测区间（{activeForecast.intervalType === 'analytic' ? '解析' : '残差 bootstrap'}法）。</p>
+          <p className="text-xs text-slate-400 mt-2">阴影带为 {intervalLevel}% 预测区间（{activeForecast.intervalType === 'analytic' ? '解析' : '残差 bootstrap'}法）。</p>
         )}
       </Card>
 
@@ -329,6 +376,9 @@ export function PredictionPanel() {
               混合模型动态权重：线性 {(result.weights.linear * 100).toFixed(0)}% · 指数 {(result.weights.exponential * 100).toFixed(0)}% · 保守 {(result.weights.conservative * 100).toFixed(0)}% · 积极 {(result.weights.aggressive * 100).toFixed(0)}%
             </p>
           )}
+          <p className="text-xs text-slate-400 mt-2">
+            模型分歧（同一预测日期五种模型最高值 − 最低值）：<span className="tabular font-medium">{formatCNY(disagreement)}</span>。分歧越大表示模型不确定性越高（非风险概率）。
+          </p>
         </Card>
       )}
 

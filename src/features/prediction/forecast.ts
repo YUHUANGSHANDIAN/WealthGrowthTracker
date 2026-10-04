@@ -4,8 +4,16 @@ import { mean, quantile, SeededRng } from '../../utils/math';
 import type { Forecast, ForecastPoint, GoalReachEstimate, ModelFit, TimedPoint } from './types';
 import { BOOTSTRAP_ITERATIONS, DEFAULT_SEED } from './fit';
 
-/** 正态近似 95% 分位。 */
-const Z95 = 1.96;
+/** 各预测区间置信水平对应的正态分位。 */
+export const Z_FOR_LEVEL: Record<number, number> = { 80: 1.282, 90: 1.645, 95: 1.96 };
+
+function zFor(level?: number): number {
+  return Z_FOR_LEVEL[level ?? 95] ?? 1.96;
+}
+
+function alphaFor(level?: number): number {
+  return (1 - (level ?? 95) / 100) / 2;
+}
 
 /** 根据预测跨度选择合适的采样间隔，控制 SVG 点数（约 20~28 个预测点）。 */
 export function niceInterval(horizonDays: number): number {
@@ -43,6 +51,7 @@ function analyticLinearInterval(
   points: TimedPoint[],
   fit: ModelFit,
   grid: { date: string; t: number }[],
+  level?: number,
 ): Map<number, { lower: number; upper: number }> {
   const n = points.length;
   if (n < 3 || fit.slope === undefined || fit.intercept === undefined) return new Map();
@@ -53,11 +62,12 @@ function analyticLinearInterval(
   const sxx = points.reduce((a, p) => a + (p.t - tMean) * (p.t - tMean), 0);
   if (sxx <= 0) return new Map();
 
+  const z = zFor(level);
   const map = new Map<number, { lower: number; upper: number }>();
   for (const g of grid) {
     const se = s * Math.sqrt(1 + 1 / n + ((g.t - tMean) * (g.t - tMean)) / sxx);
     const center = fit.intercept! + fit.slope! * g.t;
-    map.set(g.t, { lower: round2(center - Z95 * se), upper: round2(center + Z95 * se) });
+    map.set(g.t, { lower: round2(center - z * se), upper: round2(center + z * se) });
   }
   return map;
 }
@@ -69,6 +79,7 @@ function analyticExpInterval(
   positive: TimedPoint[],
   fit: ModelFit,
   grid: { date: string; t: number }[],
+  level?: number,
 ): Map<number, { lower: number; upper: number }> {
   const n = positive.length;
   if (n < 3 || fit.expA === undefined || fit.expB === undefined) return new Map();
@@ -81,11 +92,12 @@ function analyticExpInterval(
   const sxx = positive.reduce((acc, p) => acc + (p.t - tMean) * (p.t - tMean), 0);
   if (sxx <= 0) return new Map();
 
+  const z = zFor(level);
   const map = new Map<number, { lower: number; upper: number }>();
   for (const g of grid) {
     const se = s * Math.sqrt(1 + 1 / n + ((g.t - tMean) * (g.t - tMean)) / sxx);
     const centerLog = a + b * g.t;
-    map.set(g.t, { lower: round2(Math.exp(centerLog - Z95 * se)), upper: round2(Math.exp(centerLog + Z95 * se)) });
+    map.set(g.t, { lower: round2(Math.exp(centerLog - z * se)), upper: round2(Math.exp(centerLog + z * se)) });
   }
   return map;
 }
@@ -100,9 +112,11 @@ export function bootstrapPredictionInterval(
   forecastFn: (t: number) => number,
   grid: { date: string; t: number }[],
   seed = DEFAULT_SEED,
+  level?: number,
 ): Map<number, { lower: number; upper: number }> {
   const map = new Map<number, { lower: number; upper: number }>();
   if (residuals.length === 0) return map;
+  const alpha = alphaFor(level);
   const rng = new SeededRng(seed);
   const paths: number[][] = grid.map(() => []);
   for (let b = 0; b < BOOTSTRAP_ITERATIONS; b++) {
@@ -115,8 +129,8 @@ export function bootstrapPredictionInterval(
     const sorted = paths[i]!.sort((x, y) => x - y);
     if (sorted.length >= 2) {
       map.set(g.t, {
-        lower: round2(Math.max(0, quantile(sorted, 0.025))),
-        upper: round2(quantile(sorted, 0.975)),
+        lower: round2(Math.max(0, quantile(sorted, alpha))),
+        upper: round2(quantile(sorted, 1 - alpha)),
       });
     }
   });
@@ -135,8 +149,10 @@ export function buildForecast(
     bootstrapResiduals?: number[];
     positive?: TimedPoint[];
     seed?: number;
+    intervalLevel?: number;
   },
 ): Forecast {
+  const level = opts.intervalLevel ?? 95;
   const grid = futureGrid(fit.lastDate, points.length ? points[points.length - 1]!.t : 0, horizonDays);
   const central = centralForecast(grid, opts.valueFn);
 
@@ -146,15 +162,15 @@ export function buildForecast(
 
   switch (opts.interval) {
     case 'analytic-linear':
-      intervalMap = analyticLinearInterval(points, fit, grid);
+      intervalMap = analyticLinearInterval(points, fit, grid, level);
       intervalType = 'analytic';
       break;
     case 'analytic-exp':
-      intervalMap = analyticExpInterval(opts.positive ?? points.filter((p) => p.value > 0), fit, grid);
+      intervalMap = analyticExpInterval(opts.positive ?? points.filter((p) => p.value > 0), fit, grid, level);
       intervalType = 'analytic';
       break;
     case 'bootstrap':
-      intervalMap = bootstrapPredictionInterval(opts.bootstrapResiduals ?? [], opts.valueFn, grid, opts.seed);
+      intervalMap = bootstrapPredictionInterval(opts.bootstrapResiduals ?? [], opts.valueFn, grid, opts.seed, level);
       intervalType = 'bootstrap';
       break;
     default:
@@ -171,7 +187,7 @@ export function buildForecast(
     return iv ? { ...p, lower95: iv.lower, upper95: iv.upper } : p;
   });
 
-  return { model, fit, horizonDays, intervalType, intervalNote, points: pointsWithInterval };
+  return { model, fit, horizonDays, intervalType, intervalLevel: level, intervalNote, points: pointsWithInterval };
 }
 
 /**

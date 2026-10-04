@@ -131,6 +131,7 @@ export function forecastForModel(
   fit: ModelFit,
   points: TimedPoint[],
   horizonDays: number,
+  intervalLevel = 95,
 ): Forecast {
   const valueFn = valueFnOf(model, fit);
   switch (model) {
@@ -138,12 +139,14 @@ export function forecastForModel(
       return buildForecast('linear', fit, points, horizonDays, {
         valueFn,
         interval: 'analytic-linear',
+        intervalLevel,
       });
     case 'exponential':
       return buildForecast('exponential', fit, points, horizonDays, {
         valueFn,
         interval: 'analytic-exp',
         positive: points.filter((p) => p.value > 0),
+        intervalLevel,
       });
     case 'conservative':
     case 'aggressive':
@@ -151,6 +154,7 @@ export function forecastForModel(
       return buildForecast(model, fit, points, horizonDays, {
         valueFn,
         interval: 'none',
+        intervalLevel,
       });
   }
 }
@@ -165,6 +169,7 @@ export function forecastHybrid(
   points: TimedPoint[],
   weights: EnsembleWeights,
   horizonDays: number,
+  intervalLevel = 95,
 ): Forecast {
   const comps = [
     { model: 'linear' as const, fit: fits.linear, w: weights.linear },
@@ -220,6 +225,7 @@ export function forecastHybrid(
     interval: 'bootstrap',
     bootstrapResiduals: residuals,
     seed: DEFAULT_SEED,
+    intervalLevel,
   });
   return forecast;
 }
@@ -229,7 +235,7 @@ export function forecastHybrid(
 // ---------------------------------------------------------------------------
 
 /** 生成完整预测结果（含数据质量、拟合、预测、回测、推荐、混合）。 */
-export function runPrediction(history: HistoryPoint[], horizonDays = defaultHorizonDays()): PredictionResult {
+export function runPrediction(history: HistoryPoint[], horizonDays = defaultHorizonDays(), intervalLevel = 95): PredictionResult {
   const { points, quality } = prepareSeries(history);
 
   const fits = {
@@ -240,10 +246,10 @@ export function runPrediction(history: HistoryPoint[], horizonDays = defaultHori
   };
 
   const forecasts = {
-    linear: forecastForModel('linear', fits.linear, points, horizonDays),
-    exponential: forecastForModel('exponential', fits.exponential, points, horizonDays),
-    conservative: forecastForModel('conservative', fits.conservative, points, horizonDays),
-    aggressive: forecastForModel('aggressive', fits.aggressive, points, horizonDays),
+    linear: forecastForModel('linear', fits.linear, points, horizonDays, intervalLevel),
+    exponential: forecastForModel('exponential', fits.exponential, points, horizonDays, intervalLevel),
+    conservative: forecastForModel('conservative', fits.conservative, points, horizonDays, intervalLevel),
+    aggressive: forecastForModel('aggressive', fits.aggressive, points, horizonDays, intervalLevel),
   };
 
   const backtests = [
@@ -254,7 +260,7 @@ export function runPrediction(history: HistoryPoint[], horizonDays = defaultHori
   ];
 
   const weights = computeEnsembleWeights(backtests);
-  const hybrid = forecastHybrid(fits, points, weights, horizonDays);
+  const hybrid = forecastHybrid(fits, points, weights, horizonDays, intervalLevel);
   const recommendation = recommendModel(points, backtests, quality);
 
   return {

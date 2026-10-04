@@ -53,7 +53,7 @@ function round(v: number): number {
 }
 
 /** 用训练集拟合后，返回在任意未来 t 的预测值函数。 */
-function forecastFn(train: TimedPoint[], model: Exclude<PredictionModelType, 'hybrid'>): (t: number) => number {
+export function forecastFn(train: TimedPoint[], model: Exclude<PredictionModelType, 'hybrid'>): (t: number) => number {
   const pts = train.map((p) => ({ x: p.t, y: p.value }));
   const reg = linearRegression(pts);
   const last = train[train.length - 1]!;

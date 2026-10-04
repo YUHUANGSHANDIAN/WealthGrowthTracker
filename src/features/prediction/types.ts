@@ -92,6 +92,8 @@ export interface Forecast {
   /** 预测区间类型。 */
   intervalType: 'analytic' | 'bootstrap' | 'none';
   intervalNote?: string;
+  /** 预测区间置信水平（80/90/95，默认 95）。 */
+  intervalLevel?: number;
   points: ForecastPoint[];
 }
 

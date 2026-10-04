@@ -57,14 +57,16 @@ export async function downloadPNG(svg: SVGSVGElement, filename: string): Promise
   triggerDownload(dataUrl, filename);
 }
 
-/** 下载 CSV。header 为表头，rows 为数据行。 */
-export function downloadCSV(filename: string, header: string[], rows: (string | number)[][]): void {
+/** 下载 CSV。header 为表头，rows 为数据行；meta 为可选的键值元数据行（置于表头之后）。 */
+export function downloadCSV(filename: string, header: string[], rows: (string | number)[][], meta?: [string, string][]): void {
   const escape = (v: string | number) => {
     const s = String(v);
     if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
     return s;
   };
-  const lines = [header.map(escape).join(','), ...rows.map((r) => r.map(escape).join(','))];
+  const lines = [header.map(escape).join(',')];
+  if (meta && meta.length) lines.push(...meta.map(([k, v]) => `#${escape(k)},${escape(v)}`));
+  lines.push(...rows.map((r) => r.map(escape).join(',')));
   const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' }); // BOM 便于 Excel 识别
   const url = URL.createObjectURL(blob);
   triggerDownload(url, filename);
