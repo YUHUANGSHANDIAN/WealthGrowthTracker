@@ -203,6 +203,8 @@ jobs:
         run: |
           mkdir -p release-assets
           find artifacts -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.apk' -o -name '*.app.tar.gz' \) -exec cp {} release-assets/ \;
+          VERSION="${GITHUB_REF_NAME#v}"
+          for f in release-assets/*.apk; do [ -e "$f" ] && mv "$f" "release-assets/WealthGrowthTracker_${VERSION}_android-preview.apk"; done
           cd release-assets
           sha256sum * > SHA256SUMS.txt
           ls -la
@@ -212,7 +214,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: '财富成长记 ${{ github.ref_name }}'
           body: |
-            ## 财富成长记 v${{ github.ref_name }}（多平台）
+            ## 财富成长记 ${{ github.ref_name }}（多平台）
 
             Local-First / Privacy-First 的个人财富管理工具。
 
