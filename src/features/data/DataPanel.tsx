@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { Card, Button, Badge } from '../../components/ui/primitives';
 import { Modal, ConfirmDialog } from '../../components/ui/Modal';
-import { storageService, getDocumentsDir, openPathInSystem, DATA_FOLDER } from '../../services/storage';
+import { storageService, getDocumentsDir, openPathInSystem } from '../../services/storage';
 import { parseBackup } from '../../services/export';
 import { downloadCSV } from '../../components/charts/export';
 import { buildChannelsCsv, buildHistoryCsv } from '../../utils/dataCsv';
 import { checkDataHealth } from '../../utils/dataHealth';
 import { previewMerge } from '../../utils/mergeData';
+import { platformCapabilities } from '../../utils/platform';
 
 export function DataPanel() {
   const { exportData, importData, applyDataFixes, pushToast, hydrate } = useAppStore();
@@ -21,6 +22,7 @@ export function DataPanel() {
 
   const adapterName = storageService.getAdapterName();
   const isDesktop = adapterName === 'desktop';
+  const canOpenFolder = platformCapabilities().canOpenFolder;
 
   const [dataPath, setDataPath] = useState('');
   const [backups, setBackups] = useState<string[]>([]);
@@ -36,7 +38,7 @@ export function DataPanel() {
     if (!isDesktop) return;
     void (async () => {
       const dir = await getDocumentsDir();
-      if (dir) setDataPath(`${dir}\\${DATA_FOLDER}`);
+      if (dir) setDataPath(dir);
     })();
   }, [isDesktop]);
 
@@ -182,11 +184,11 @@ export function DataPanel() {
         <input ref={fileRef} type="file" accept=".json,application/json" onChange={onFileChosen} className="hidden" aria-label="选择导入文件" />
       </Card>
 
-      {isDesktop && (
+      {canOpenFolder && (
         <Card className="p-4">
           <h2 className="font-semibold text-slate-800 mb-2">本地数据与备份</h2>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => void openPathInSystem(DATA_FOLDER)}>📂 打开数据文件夹</Button>
+            <Button size="sm" variant="outline" onClick={() => void openPathInSystem('')}>📂 打开数据文件夹</Button>
             <Button size="sm" variant="outline" onClick={() => void openPathInSystem('backups')}>🗄 打开备份文件夹</Button>
             <Button size="sm" variant="outline" onClick={() => void doManualBackup()} disabled={busy}>💾 立即备份</Button>
             <Button size="sm" variant="outline" onClick={() => { void refreshBackups().then(() => setRestoreOpen(true)); }}>♻ 从备份恢复</Button>

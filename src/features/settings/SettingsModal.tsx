@@ -2,7 +2,10 @@ import { useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { APP_VERSION } from '../../constants/version';
 import { getDefaultTimezone, TIMEZONE_OPTIONS } from '../../utils/countdown';
-import { checkForUpdate } from '../../utils/updateCheck';
+import { checkForUpdate, recommendAsset, type ReleaseAsset } from '../../utils/updateCheck';
+import { platformCapabilities } from '../../utils/platform';
+import { REPORT_SCHEMA_VERSION } from '../reports/normalize';
+import { storageService } from '../../services/storage';
 import { Modal } from '../../components/ui/Modal';
 import { Button, Badge } from '../../components/ui/primitives';
 import { TextField, SelectField, TextArea } from '../../components/ui/form';
@@ -176,14 +179,17 @@ function UpdateSection() {
   const [result, setResult] = useState<string | null>(null);
   const [isNewer, setIsNewer] = useState(false);
   const [url, setUrl] = useState('');
+  const [asset, setAsset] = useState<ReleaseAsset | null>(null);
 
   async function check() {
     setChecking(true);
     setResult(null);
+    setAsset(null);
     try {
       const r = await checkForUpdate(APP_VERSION);
       setUrl(r.url);
       setIsNewer(r.isNewer);
+      setAsset(recommendAsset(r.assets));
       setResult(r.isNewer ? `发现新版本 v${r.latest}` : '当前已是最新版');
     } catch (err) {
       setResult(`检查更新失败：${err instanceof Error ? err.message : '网络错误'}`);
@@ -202,8 +208,13 @@ function UpdateSection() {
         <div className="text-sm text-slate-700">
           {result}
           {isNewer && url && (
-            <div className="mt-2">
-              <Button size="sm" onClick={() => window.open(url, '_blank')}>查看更新并下载</Button>
+            <div className="mt-2 space-y-2">
+              {asset && (
+                <Button size="sm" onClick={() => window.open(asset.downloadUrl, '_blank')}>⬇ 下载 {asset.name}</Button>
+              )}
+              <div>
+                <Button size="sm" variant="outline" onClick={() => window.open(url, '_blank')}>查看 Release 全部资产</Button>
+              </div>
             </div>
           )}
         </div>
@@ -226,15 +237,33 @@ function PrivacySection() {
 }
 
 function AboutSection() {
+  const caps = platformCapabilities();
   return (
     <div className="space-y-2 text-sm text-slate-600">
       <div className="flex items-center gap-2">
         <span className="text-2xl" aria-hidden>🌱</span>
         <span className="font-semibold text-slate-800">财富成长记 / 财富梦想实现家</span>
       </div>
-      <p>版本 v{APP_VERSION}</p>
       <p>本地优先的个人财富管理工具（Local-First, Privacy-First）。</p>
+      <div className="bg-slate-50 rounded-lg p-3 space-y-1 text-xs text-slate-600">
+        <div>应用版本：<span className="font-medium">v{APP_VERSION}</span></div>
+        <div>平台：<span className="font-medium">{platformLabel(caps.platform)}</span></div>
+        <div>架构：<span className="font-medium">{caps.arch}</span></div>
+        <div>存储后端：<span className="font-medium">{storageService.getAdapterName()}</span></div>
+        <div>报告 Schema 版本：<span className="font-medium">{REPORT_SCHEMA_VERSION}</span></div>
+      </div>
       <p>本应用的财富等级是游戏化成长体系，不代表投资能力评级或真实社会财富地位。</p>
     </div>
   );
+}
+
+function platformLabel(p: string): string {
+  switch (p) {
+    case 'windows': return 'Windows';
+    case 'macos': return 'macOS';
+    case 'linux': return 'Linux';
+    case 'android': return 'Android';
+    case 'ios': return 'iOS';
+    default: return 'Web';
+  }
 }
