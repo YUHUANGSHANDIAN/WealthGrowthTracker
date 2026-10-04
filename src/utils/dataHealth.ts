@@ -1,13 +1,73 @@
-import type { Channel, FinancialReport, Goal, HistoryPoint, LevelAchievement } from '../types';
+import type { Channel, FinancialReport, Goal, HistoryPoint, LevelAchievement, LotteryState } from '../types';
 import { round2 } from './money';
 import { isValidTimezone } from './goals';
 
+export type HealthDomain = 'assets' | 'history' | 'reports' | 'goals' | 'levels' | 'lottery' | 'storage' | 'settings';
+
+export interface FixStrategy {
+  id: string;
+  label: string;
+  description: string;
+  /** 修复动作标识（对应 applyHealthFixes 的 fix 值）。 */
+  action?: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history';
+}
+
 export interface DataIssue {
+  id: string;
+  domain: HealthDomain;
+  entityId?: string;
   severity: 'warning' | 'error';
-  category: string;
+  title: string;
+  description: string;
   message: string;
+  evidence?: string[];
+  fixStrategies: FixStrategy[];
+  safeAutoFix: boolean;
+  possiblyDestructive: boolean;
   fixable: boolean;
   fix: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history' | null;
+  category: string;
+}
+
+let issueSeq = 0;
+function makeIssue(
+  domain: HealthDomain,
+  severity: 'warning' | 'error',
+  title: string,
+  description: string,
+  fix: DataIssue['fix'],
+  opts: Partial<Pick<DataIssue, 'entityId' | 'evidence' | 'fixStrategies' | 'safeAutoFix' | 'possiblyDestructive'>> = {},
+): DataIssue {
+  issueSeq += 1;
+  return {
+    id: `${domain}-${issueSeq}`,
+    domain,
+    entityId: opts.entityId,
+    severity,
+    title,
+    description,
+    message: `${title}${description ? '：' + description : ''}`,
+    evidence: opts.evidence,
+    fixStrategies: opts.fixStrategies ?? (fix ? [{ id: fix, label: '安全修复', description: '应用安全修复（修复前自动备份）' }] : []),
+    safeAutoFix: opts.safeAutoFix ?? (fix !== null),
+    possiblyDestructive: opts.possiblyDestructive ?? false,
+    fixable: fix !== null || (opts.fixStrategies?.length ?? 0) > 0,
+    fix,
+    category: domainLabel(domain),
+  };
+}
+
+export function domainLabel(d: HealthDomain): string {
+  switch (d) {
+    case 'assets': return '资产渠道';
+    case 'history': return '历史记录';
+    case 'reports': return '财务报告';
+    case 'goals': return '财富目标';
+    case 'levels': return '财富等级';
+    case 'lottery': return '彩票';
+    case 'storage': return '存储与备份';
+    case 'settings': return '设置';
+  }
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -26,13 +86,13 @@ export function checkDataHealth(
 
   for (const c of channels) {
     if (channelIds.has(c.id)) {
-      issues.push({ severity: 'error', category: '渠道', message: `重复的父渠道 ID：${c.id}`, fixable: false, fix: null });
+      issues.push(makeIssue('assets', 'error', `重复的父渠道 ID`, `渠道「${c.id}」出现多次`, null, { entityId: c.id, evidence: [c.name] }));
     }
     channelIds.add(c.id);
     if (!Number.isFinite(c.amount) || c.amount < 0) badAmount = true;
     for (const s of c.children ?? []) {
       if (subIds.has(s.id)) {
-        issues.push({ severity: 'error', category: '渠道', message: `重复的子渠道 ID：${s.id}`, fixable: false, fix: null });
+        issues.push(makeIssue('assets', 'error', `重复的子渠道 ID`, `子渠道「${s.id}」出现多次`, null, { entityId: s.id, evidence: [s.name] }));
       }
       subIds.add(s.id);
       if (!Number.isFinite(s.amount) || s.amount < 0) badAmount = true;
@@ -43,19 +103,19 @@ export function checkDataHealth(
   const dates = new Set<string>();
   for (const h of history) {
     if (!DATE_RE.test(h.date)) {
-      issues.push({ severity: 'warning', category: '历史', message: `异常日期：${h.date}`, fixable: false, fix: null });
+      issues.push(makeIssue('history', 'warning', `异常日期`, `历史记录日期「${h.date}」不符合 YYYY-MM-DD 格式`, null, { entityId: h.date, evidence: [h.date] }));
     }
     if (dates.has(h.date)) dupHistory = true;
     dates.add(h.date);
     if (!Number.isFinite(h.totalAmount)) badAmount = true;
     if (h.totalAmount < 0) {
-      issues.push({ severity: 'warning', category: '历史', message: `历史总资产为负：${h.date}（${h.totalAmount}）`, fixable: false, fix: null });
+      issues.push(makeIssue('history', 'warning', `历史总资产为负`, `日期 ${h.date} 的总资产为 ${h.totalAmount}`, null, { entityId: h.date, evidence: [String(h.totalAmount)] }));
     }
   }
 
-  if (badAmount) issues.push({ severity: 'error', category: '金额', message: '存在非法金额（NaN/Infinity/负数）', fixable: true, fix: 'sanitize-amounts' });
-  if (orphan) issues.push({ severity: 'warning', category: '渠道', message: '存在孤立子渠道（parentId 不匹配）', fixable: true, fix: 'remove-orphans' });
-  if (dupHistory) issues.push({ severity: 'warning', category: '历史', message: '存在重复日期的历史记录', fixable: true, fix: 'dedupe-history' });
+  if (badAmount) issues.push(makeIssue('assets', 'error', '存在非法金额', 'NaN / Infinity / 负数会被安全处理（负值按 0 处理，请确认）', 'sanitize-amounts'));
+  if (orphan) issues.push(makeIssue('assets', 'warning', '存在孤立子渠道', '子渠道 parentId 与其父渠道不匹配，可移除孤立项', 'remove-orphans'));
+  if (dupHistory) issues.push(makeIssue('history', 'warning', '存在重复日期的历史记录', '同一天出现多条记录，可保留最新一条', 'dedupe-history', { fixStrategies: [{ id: 'dedupe-history', label: '保留最新记录', description: '合并同日期，保留最后一条', action: 'dedupe-history' }] }));
 
   return { issues, ok: issues.length === 0 };
 }
@@ -107,15 +167,15 @@ export function checkReportHealth(reports: FinancialReport[]): DataIssue[] {
   const issues: DataIssue[] = [];
   const byPeriod = new Map<string, number>();
   for (const r of reports) {
-    if (!r.periodKey) issues.push({ severity: 'warning', category: '报告', message: `报告「${r.title || r.id}」缺少 periodKey`, fixable: false, fix: null });
+    if (!r.periodKey) issues.push(makeIssue('reports', 'warning', '报告缺少 periodKey', `报告「${r.title || r.id}」缺少周期标识`, null, { entityId: r.id }));
     else byPeriod.set(r.periodKey, (byPeriod.get(r.periodKey) ?? 0) + 1);
     if (r.reportType === 'weekly' && r.weekNumber !== undefined && (r.weekNumber < 1 || r.weekNumber > 53)) {
-      issues.push({ severity: 'warning', category: '报告', message: `报告「${r.title}」周编号非法（${r.weekNumber}）`, fixable: false, fix: null });
+      issues.push(makeIssue('reports', 'warning', '周编号非法', `报告「${r.title}」周编号为 ${r.weekNumber}`, null, { entityId: r.id }));
     }
-    if (!r.title?.trim()) issues.push({ severity: 'warning', category: '报告', message: `报告 ${r.id} 缺少标题`, fixable: false, fix: null });
+    if (!r.title?.trim()) issues.push(makeIssue('reports', 'warning', '报告缺少标题', `报告 ${r.id} 标题为空`, null, { entityId: r.id }));
   }
   for (const [key, count] of byPeriod) {
-    if (count > 1) issues.push({ severity: 'warning', category: '报告', message: `存在重复周期报告：${key}（${count} 份）`, fixable: false, fix: null });
+    if (count > 1) issues.push(makeIssue('reports', 'warning', '存在重复周期报告', `periodKey ${key} 有 ${count} 份报告`, null, { entityId: key }));
   }
   return issues;
 }
@@ -125,31 +185,57 @@ export function checkGoalHealth(goals: Goal[], primaryGoalId: string | null): Da
   const issues: DataIssue[] = [];
   for (const g of goals) {
     if (!Number.isFinite(g.targetAmount) || g.targetAmount <= 0) {
-      issues.push({ severity: 'error', category: '目标', message: `目标「${g.name}」金额非法`, fixable: false, fix: null });
+      issues.push(makeIssue('goals', 'error', '目标金额非法', `目标「${g.name}」金额为 ${g.targetAmount}`, null, { entityId: g.id }));
     }
     if (g.targetDateTime <= g.startDateTime) {
-      issues.push({ severity: 'warning', category: '目标', message: `目标「${g.name}」目标时间早于起始时间`, fixable: false, fix: null });
+      issues.push(makeIssue('goals', 'warning', '目标时间顺序错误', `目标「${g.name}」目标时间早于起始时间`, null, { entityId: g.id }));
     }
     if (!isValidTimezone(g.timezone)) {
-      issues.push({ severity: 'warning', category: '目标', message: `目标「${g.name}」时区无效（${g.timezone}）`, fixable: false, fix: null });
+      issues.push(makeIssue('goals', 'warning', '时区无效', `目标「${g.name}」时区 ${g.timezone} 无效`, null, { entityId: g.id }));
     }
   }
   if (goals.length > 0 && !primaryGoalId) {
-    issues.push({ severity: 'warning', category: '目标', message: '未设置主目标', fixable: false, fix: null });
+    issues.push(makeIssue('goals', 'warning', '未设置主目标', '存在目标但未指定主目标', null));
   }
   return issues;
 }
 
-/** 等级成就健康：重复 / 未知等级。 */
+/** 等级成就健康：重复 / 金额非法。 */
 export function checkAchievementHealth(achievements: LevelAchievement[]): DataIssue[] {
   const issues: DataIssue[] = [];
   const seen = new Set<string>();
   for (const a of achievements) {
-    if (seen.has(a.levelId)) issues.push({ severity: 'warning', category: '等级', message: `重复的等级成就：${a.levelName}`, fixable: false, fix: null });
+    if (seen.has(a.levelId)) issues.push(makeIssue('levels', 'warning', '重复的等级成就', `等级「${a.levelName}」的成就记录重复`, null, { entityId: a.levelId }));
     seen.add(a.levelId);
     if (a.firstAmount < 0 || !Number.isFinite(a.firstAmount)) {
-      issues.push({ severity: 'warning', category: '等级', message: `成就「${a.levelName}」金额非法`, fixable: false, fix: null });
+      issues.push(makeIssue('levels', 'warning', '成就金额非法', `成就「${a.levelName}」金额为 ${a.firstAmount}`, null, { entityId: a.levelId }));
     }
   }
+  return issues;
+}
+
+/** 彩票健康：重复交易 ID / 非法日期 / 金额<=0 / 缺失项目 / 未知类型。Pool 为负不是错误。 */
+export function checkLotteryHealth(lottery: LotteryState): DataIssue[] {
+  const issues: DataIssue[] = [];
+  const ids = new Set<string>();
+  const projectIds = new Set(lottery.projects.map((p) => p.id));
+  const validTypes = ['capital-injection', 'capital-withdrawal', 'stake', 'prize', 'adjustment'];
+  for (const t of lottery.transactions) {
+    if (ids.has(t.id)) issues.push(makeIssue('lottery', 'warning', '重复交易 ID', `彩票交易 ID ${t.id} 重复`, null, { entityId: t.id }));
+    ids.add(t.id);
+    if (!t.occurredAt || Number.isNaN(Date.parse(t.occurredAt))) {
+      issues.push(makeIssue('lottery', 'warning', '非法日期', `交易 ${t.id} 日期「${t.occurredAt}」非法`, null, { entityId: t.id }));
+    }
+    if (!Number.isFinite(t.amount) || t.amount <= 0) {
+      issues.push(makeIssue('lottery', 'error', '交易金额非法', `交易 ${t.id} 金额必须大于 0（当前 ${t.amount}）`, null, { entityId: t.id }));
+    }
+    if (t.projectId && !projectIds.has(t.projectId)) {
+      issues.push(makeIssue('lottery', 'warning', '交易缺少项目', `交易 ${t.id} 关联了不存在的项目`, null, { entityId: t.id }));
+    }
+    if (!validTypes.includes(t.type)) {
+      issues.push(makeIssue('lottery', 'warning', '未知交易类型', `交易 ${t.id} 类型「${t.type}」未知`, null, { entityId: t.id }));
+    }
+  }
+  // Pool Balance 为负：合法，不是 Health Error。
   return issues;
 }

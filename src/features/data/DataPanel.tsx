@@ -6,9 +6,10 @@ import { storageService, getDocumentsDir, openPathInSystem } from '../../service
 import { parseBackup } from '../../services/export';
 import { downloadCSV } from '../../components/charts/export';
 import { buildChannelsCsv, buildHistoryCsv } from '../../utils/dataCsv';
-import { checkDataHealth, checkReportHealth, checkGoalHealth, checkAchievementHealth } from '../../utils/dataHealth';
+import { checkDataHealth, checkReportHealth, checkGoalHealth, checkAchievementHealth, checkLotteryHealth, domainLabel, type DataIssue, type HealthDomain } from '../../utils/dataHealth';
 import { previewMerge } from '../../utils/mergeData';
 import { platformCapabilities } from '../../utils/platform';
+import { useNavigationStore } from '../../store/navigationStore';
 
 export function DataPanel() {
   const { exportData, importData, applyDataFixes, pushToast, hydrate } = useAppStore();
@@ -18,6 +19,8 @@ export function DataPanel() {
   const goals = useAppStore((s) => s.goals);
   const primaryGoalId = useAppStore((s) => s.primaryGoalId);
   const levelAchievements = useAppStore((s) => s.levelAchievements);
+  const lottery = useAppStore((s) => s.lottery);
+  const navigate = useNavigationStore((s) => s.navigate);
 
   const [preview, setPreview] = useState<{ text: string; channels: number; history: number; reports: number; merge: ReturnType<typeof previewMerge> } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -38,10 +41,10 @@ export function DataPanel() {
     const report = checkReportHealth(reports);
     const goal = checkGoalHealth(goals, primaryGoalId);
     const achievement = checkAchievementHealth(levelAchievements);
-    const issues = [...base.issues, ...report, ...goal, ...achievement];
+    const lotteryHealth = checkLotteryHealth(lottery);
+    const issues = [...base.issues, ...report, ...goal, ...achievement, ...lotteryHealth];
     return { ...base, issues, ok: issues.length === 0 };
-  }, [channels, history, reports, goals, primaryGoalId, levelAchievements]);
-  const subCount = channels.reduce((a, c) => a + (c.children?.length ?? 0), 0);
+  }, [channels, history, reports, goals, primaryGoalId, levelAchievements, lottery]);
   const sortedHistory = useMemo(() => [...history].sort((a, b) => (a.date < b.date ? -1 : 1)), [history]);
 
   useEffect(() => {
@@ -138,44 +141,21 @@ export function DataPanel() {
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-3">数据概览</h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-          <Stat label="父渠道" value={String(channels.length)} />
-          <Stat label="子渠道" value={String(subCount)} />
-          <Stat label="历史记录" value={String(history.length)} />
-          <Stat label="财务报告" value={String(reports.length)} />
+          <ClickableStat label="父渠道" value={String(channels.length)} onClick={() => navigate({ tab: 'assets' })} />
+          <ClickableStat label="历史记录" value={String(history.length)} onClick={() => navigate({ tab: 'history' })} />
+          <ClickableStat label="财务报告" value={String(reports.length)} onClick={() => navigate({ tab: 'reports' })} />
+          <ClickableStat label="财富目标" value={String(goals.length)} onClick={() => navigate({ tab: 'goals' })} />
+          <ClickableStat label="彩票交易" value={String(lottery.transactions.length)} onClick={() => navigate({ tab: 'lottery' })} />
           <Stat label="备份数" value={backups.length ? String(backups.length) : '—'} />
           <Stat label="最早历史" value={sortedHistory[0]?.date ?? '—'} />
           <Stat label="最新历史" value={sortedHistory[sortedHistory.length - 1]?.date ?? '—'} />
-          <Stat label="存储后端" value={adapterName === 'desktop' ? '文件' : adapterName === 'lingguang' ? '灵光' : '浏览器'} />
         </div>
         {isDesktop && dataPath && <p className="mt-3 text-xs text-slate-500 font-mono break-all">数据目录：{dataPath}</p>}
       </Card>
 
-      {/* 数据健康检查 */}
-      <Card className="p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="font-semibold text-slate-800">数据健康检查</h2>
-          <Badge tone={health.ok ? 'emerald' : health.issues.some((i) => i.severity === 'error') ? 'red' : 'amber'}>
-            {health.ok ? '正常' : `${health.issues.length} 个问题`}
-          </Badge>
-        </div>
-        {health.ok ? (
-          <p className="text-sm text-slate-500">未发现数据问题。</p>
-        ) : (
-          <>
-            <ul className="space-y-1 text-sm text-slate-600 mb-3">
-              {health.issues.map((i, idx) => (
-                <li key={idx} className="flex items-start gap-2">
-                  <span className={i.severity === 'error' ? 'text-red-500' : 'text-amber-500'} aria-hidden>{i.severity === 'error' ? '✖' : '⚠'}</span>
-                  <span>{i.message}{i.fixable ? '（可安全修复）' : ''}</span>
-                </li>
-              ))}
-            </ul>
-            {health.issues.some((i) => i.fixable) && (
-              <Button size="sm" onClick={doFix} disabled={busy}>🔧 安全修复（自动备份）</Button>
-            )}
-          </>
-        )}
-      </Card>
+      {/* 数据健康中心（交互式） */}
+      <DataHealthCenter issues={health.issues} onFixAll={doFix} busy={busy} />
+
 
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-2">导出数据</h2>
@@ -279,5 +259,115 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div className="text-[11px] text-slate-400">{label}</div>
       <div className="text-sm font-semibold text-slate-700 tabular break-all">{value}</div>
     </div>
+  );
+}
+
+function ClickableStat({ label, value, onClick }: { label: string; value: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="bg-slate-50 hover:bg-emerald-50 rounded-lg py-2 px-1 text-left transition-colors" title={`前往 ${label}`}>
+      <div className="text-[11px] text-slate-400">{label}</div>
+      <div className="text-sm font-semibold text-slate-700 tabular break-all">{value} ›</div>
+    </button>
+  );
+}
+
+const DOMAIN_ICONS: Record<HealthDomain, string> = {
+  assets: '💰', history: '🕰️', reports: '📑', goals: '🎯', levels: '🏅', lottery: '🎟️', storage: '🗄️', settings: '⚙️',
+};
+
+function issueNavigateTarget(i: DataIssue): { tab: import('../../store/navigationStore').TabId; extra?: Record<string, string> } | null {
+  switch (i.domain) {
+    case 'assets': return { tab: 'assets', ...(i.entityId ? { extra: { channelId: i.entityId } } : {}) };
+    case 'history': return { tab: 'history', ...(i.entityId ? { extra: { historyDate: i.entityId } } : {}) };
+    case 'reports': return { tab: 'reports', ...(i.entityId ? { extra: { reportId: i.entityId } } : {}) };
+    case 'goals': return { tab: 'goals' };
+    case 'lottery': return { tab: 'lottery' };
+    case 'levels': return { tab: 'assets' };
+    default: return null;
+  }
+}
+
+function DataHealthCenter({ issues, onFixAll, busy }: { issues: DataIssue[]; onFixAll: () => void; busy: boolean }) {
+  const navigate = useNavigationStore((s) => s.navigate);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [ignored, setIgnored] = useState<Set<string>>(new Set());
+
+  const visible = issues.filter((i) => !ignored.has(i.id));
+  const grouped = useMemo(() => {
+    const m = new Map<HealthDomain, DataIssue[]>();
+    for (const i of visible) {
+      const arr = m.get(i.domain) ?? [];
+      arr.push(i);
+      m.set(i.domain, arr);
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [visible]);
+
+  if (visible.length === 0) {
+    return (
+      <Card className="p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-semibold text-slate-800">🩺 数据健康中心</h2>
+          <Badge tone="emerald">正常</Badge>
+        </div>
+        <p className="text-sm text-slate-500">未发现数据问题。</p>
+      </Card>
+    );
+  }
+
+  const errorCount = visible.filter((i) => i.severity === 'error').length;
+  const fixable = visible.some((i) => i.fixable);
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="font-semibold text-slate-800">🩺 数据健康中心</h2>
+        <Badge tone={errorCount > 0 ? 'red' : 'amber'}>{visible.length} 个问题{errorCount > 0 ? `（${errorCount} 错误）` : ''}</Badge>
+      </div>
+
+      <div className="space-y-3">
+        {grouped.map(([domain, list]) => (
+          <div key={domain} className="border border-slate-100 rounded-lg overflow-hidden">
+            <div className="px-3 py-2 bg-slate-50 text-sm font-medium text-slate-700 flex items-center gap-2">
+              <span aria-hidden>{DOMAIN_ICONS[domain]}</span> {domainLabel(domain)}
+              <span className="text-xs text-slate-400">{list.length}</span>
+            </div>
+            <div className="divide-y divide-slate-50">
+              {list.map((i) => (
+                <div key={i.id} className="px-3 py-2">
+                  <div className="flex items-start gap-2">
+                    <button className="flex-1 text-left min-w-0" onClick={() => setExpanded(expanded === i.id ? null : i.id)} aria-expanded={expanded === i.id}>
+                      <div className="flex items-center gap-2">
+                        <span className={i.severity === 'error' ? 'text-red-500' : 'text-amber-500'} aria-hidden>{i.severity === 'error' ? '✖' : '⚠'}</span>
+                        <span className="text-sm text-slate-700 font-medium">{i.title}</span>
+                      </div>
+                    </button>
+                    {issueNavigateTarget(i) && (
+                      <button className="text-xs text-slate-400 hover:text-emerald-600" onClick={() => { const t = issueNavigateTarget(i)!; navigate({ tab: t.tab, ...(t.extra ?? {}) }); }}>定位 ›</button>
+                    )}
+                    <button className="text-xs text-slate-300 hover:text-slate-500" onClick={() => setIgnored((s) => new Set(s).add(i.id))}>忽略</button>
+                  </div>
+                  {expanded === i.id && (
+                    <div className="mt-1 pl-5 text-xs text-slate-500 space-y-1">
+                      <p>{i.description}</p>
+                      {i.evidence?.map((e, idx) => <p key={idx} className="text-slate-400">· {e}</p>)}
+                      {i.fixStrategies.map((s) => <p key={s.id} className="text-emerald-600">✓ {s.label}：{s.description}</p>)}
+                      {i.possiblyDestructive && <p className="text-red-500">此操作可能改变数据，修复前自动备份。</p>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {fixable && (
+        <div className="mt-3 flex items-center gap-2">
+          <Button size="sm" onClick={onFixAll} disabled={busy}>🔧 安全修复（自动备份）</Button>
+          <span className="text-xs text-slate-400">修复会先自动备份，成功后可撤销。</span>
+        </div>
+      )}
+    </Card>
   );
 }
