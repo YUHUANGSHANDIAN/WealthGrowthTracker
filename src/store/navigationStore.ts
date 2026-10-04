@@ -75,14 +75,15 @@ export const useNavigationStore = create<NavigationState>()((set) => ({
   ...initialRoute(),
   navigate(route) {
     set((s) => {
-      const next: Route = { ...s, ...route };
-      // 切 tab 时清除跨 tab 的定位参数（保留通用 query）
+      // 切 tab 时先清除旧的跨 tab 定位参数，再应用本次 route（保留本次显式传入的定位）
+      const base: Route = { ...s };
       if (route.tab && route.tab !== s.tab) {
-        next.reportId = undefined;
-        next.channelId = undefined;
-        next.lotteryProjectId = undefined;
-        next.goalId = undefined;
+        base.reportId = undefined;
+        base.channelId = undefined;
+        base.lotteryProjectId = undefined;
+        base.goalId = undefined;
       }
+      const next: Route = { ...base, ...route };
       if (typeof window !== 'undefined') {
         const hash = buildHash(next);
         if (window.location.hash !== hash) window.location.hash = hash;
