@@ -18,7 +18,8 @@ const H = 320;
 const M = { top: 16, right: 16, bottom: 40, left: 64 };
 
 /** 堆叠柱状图（用于历史渠道构成随时间的演变）。 */
-export function StackedBarChart({ data, ariaLabel = '堆叠柱状图' }: { data: StackedBarDatum[]; ariaLabel?: string }) {
+export function StackedBarChart({ data, ariaLabel = '堆叠柱状图', valueFormatter }: { data: StackedBarDatum[]; ariaLabel?: string; valueFormatter?: (v: number) => string }) {
+  const fmt = valueFormatter ?? formatMoneyTick;
   const model = useMemo(() => {
     const totals = data.map((d) => d.segments.reduce((a, s) => a + s.value, 0));
     const maxTotal = Math.max(1, ...totals);
@@ -36,7 +37,7 @@ export function StackedBarChart({ data, ariaLabel = '堆叠柱状图' }: { data:
         <g key={t}>
           <line x1={M.left} x2={W - M.right} y1={model.yScale(t)} y2={model.yScale(t)} stroke={CHART_INK.grid} strokeWidth={1} />
           <text x={M.left - 8} y={model.yScale(t)} textAnchor="end" dominantBaseline="middle" fontSize={11} fill={CHART_INK.muted} className="tabular">
-            {formatMoneyTick(t)}
+            {fmt(t)}
           </text>
         </g>
       ))}

@@ -156,6 +156,9 @@ export function DataPanel() {
       {/* 数据健康中心（交互式） */}
       <DataHealthCenter issues={health.issues} onFixAll={doFix} busy={busy} />
 
+      {/* 活动日志 */}
+      <ActivityLogCard />
+
 
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-2">导出数据</h2>
@@ -368,6 +371,33 @@ function DataHealthCenter({ issues, onFixAll, busy }: { issues: DataIssue[]; onF
           <span className="text-xs text-slate-400">修复会先自动备份，成功后可撤销。</span>
         </div>
       )}
+    </Card>
+  );
+}
+
+function ActivityLogCard() {
+  const activityLog = useAppStore((s) => s.activityLog);
+  const [open, setOpen] = useState(false);
+  if (activityLog.length === 0) return null;
+  const shown = open ? activityLog : activityLog.slice(0, 5);
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="font-semibold text-slate-800">🕰️ 活动日志</h2>
+        <span className="text-xs text-slate-400">{activityLog.length} 条</span>
+      </div>
+      <div className="space-y-1.5 text-sm">
+        {shown.map((e) => (
+          <div key={e.id} className="flex gap-2 text-xs text-slate-500">
+            <span className="shrink-0 tabular text-slate-400">{new Date(e.timestamp).toLocaleString('zh-CN')}</span>
+            <span className="min-w-0 truncate">{e.description}</span>
+          </div>
+        ))}
+      </div>
+      {activityLog.length > 5 && (
+        <button className="text-xs text-emerald-600 mt-2" onClick={() => setOpen(!open)}>{open ? '收起' : `查看全部 ${activityLog.length} 条`}</button>
+      )}
+      <p className="text-[11px] text-slate-400 mt-2">活动日志只记录事件类型/时间/实体 ID/描述，不记录完整资产 JSON、密码或 PIN。</p>
     </Card>
   );
 }

@@ -45,9 +45,10 @@ describe('分析系统', () => {
       { date: '2026-01-01', totalAmount: 500 },
       { date: '2026-02-01', totalAmount: 800, channels },
     ];
-    const comp = historicalChannelComposition(snapHistory, 5);
-    expect(comp).toHaveLength(1);
-    expect(comp[0]!.channels.length).toBe(2);
+    const comp = historicalChannelComposition(snapHistory, { level: 'leaf', topN: 5, mode: 'absolute' });
+    expect(comp).toHaveLength(2); // 包含缺快照的点（missing）
+    expect(comp[1]!.channels.length).toBe(2);
+    expect(comp[0]!.missing).toBe(true);
   });
 
   it('periodComparison 返回 WoW/MoM/YoY 或 null', () => {

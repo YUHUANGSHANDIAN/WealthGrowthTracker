@@ -101,7 +101,10 @@ export function AnalysisPanel() {
   const concentration = useMemo(() => assetConcentration(channels), [channels]);
   const comparison = useMemo(() => periodComparison(history), [history]);
   const changes = useMemo(() => channelChange(history, channels, changeDays), [history, channels, changeDays]);
-  const composition = useMemo(() => historicalChannelComposition(rangeHistory, 5), [rangeHistory]);
+  const [compLevel, setCompLevel] = useState<'parent' | 'leaf'>('leaf');
+  const [compMode, setCompMode] = useState<'absolute' | 'percent'>('absolute');
+  const [compTopN, setCompTopN] = useState(5);
+  const composition = useMemo(() => historicalChannelComposition(rangeHistory, { level: compLevel, topN: compTopN, mode: compMode }), [rangeHistory, compLevel, compMode, compTopN]);
 
   const radarAxes = useMemo(() => analyzeDimensions(history), [history]);
 
@@ -152,9 +155,29 @@ export function AnalysisPanel() {
       {/* 历史渠道构成 */}
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-1">历史渠道构成</h2>
-        <p className="text-xs text-slate-400 mb-3">渠道资产结构随时间变化（TOP 5 + 其他）。</p>
-        {composition.length > 0 ? (
-          <StackedBarChart data={composition.map((p) => ({ date: p.date, segments: p.channels.map((c, i) => ({ name: c.name, color: CATEGORICAL_SERIES[i % CATEGORICAL_SERIES.length]!, value: c.amount })) }))} ariaLabel="历史渠道构成" />
+        <p className="text-xs text-slate-400 mb-3">渠道资产结构随时间变化。缺快照的日期显示为缺口（不当作 0）。</p>
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <select value={compLevel} onChange={(e) => setCompLevel(e.target.value as 'parent' | 'leaf')} className="px-2 py-1 text-xs bg-white border border-slate-300 rounded-lg" aria-label="渠道层级">
+            <option value="leaf">叶子渠道</option>
+            <option value="parent">父渠道</option>
+          </select>
+          <select value={compMode} onChange={(e) => setCompMode(e.target.value as 'absolute' | 'percent')} className="px-2 py-1 text-xs bg-white border border-slate-300 rounded-lg" aria-label="构成模式">
+            <option value="absolute">金额模式</option>
+            <option value="percent">100% 占比模式</option>
+          </select>
+          <select value={String(compTopN)} onChange={(e) => setCompTopN(Number(e.target.value))} className="px-2 py-1 text-xs bg-white border border-slate-300 rounded-lg" aria-label="TOP N">
+            <option value="3">Top 3</option>
+            <option value="5">Top 5</option>
+            <option value="10">Top 10</option>
+            <option value="99">全部</option>
+          </select>
+        </div>
+        {composition.filter((p) => !p.missing).length > 0 ? (
+          <StackedBarChart
+            data={composition.filter((p) => !p.missing).map((p) => ({ date: p.date, segments: p.channels.map((c, i) => ({ name: c.name, color: CATEGORICAL_SERIES[i % CATEGORICAL_SERIES.length]!, value: c.amount })) }))}
+            valueFormatter={compMode === 'percent' ? (v) => `${v.toFixed(0)}%` : undefined}
+            ariaLabel="历史渠道构成"
+          />
         ) : (
           <EmptyState icon="🏦" title="历史渠道快照不足" description="旧版历史仅保存总资产，无渠道快照。" />
         )}

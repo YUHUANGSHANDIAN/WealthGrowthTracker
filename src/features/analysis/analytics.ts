@@ -128,17 +128,45 @@ function amountInSnapshot(channels: Channel[], id: string): number | null {
 export interface CompositionPoint {
   date: string;
   channels: { name: string; amount: number }[];
+  /** 该日期是否缺少渠道快照。 */
+  missing: boolean;
 }
 
-export function historicalChannelComposition(history: HistoryPoint[], topN = 5): CompositionPoint[] {
-  return history
-    .filter((p) => p.channels && p.channels.length > 0)
-    .sort((a, b) => (a.date < b.date ? -1 : 1))
-    .map((p) => {
-      const leaves = leafChannels(p.channels!).sort((a, b) => b.amount - a.amount);
-      const top = leaves.slice(0, topN).map((l) => ({ name: l.name, amount: l.amount }));
-      const rest = leaves.slice(topN).reduce((a, l) => a + l.amount, 0);
-      const list = rest > 0 ? [...top, { name: '其他', amount: round2(rest) }] : top;
-      return { date: p.date, channels: list };
-    });
+export interface CompositionOptions {
+  level: 'parent' | 'leaf';
+  topN: number;
+  mode: 'absolute' | 'percent';
+}
+
+/** 父渠道聚合：把子渠道金额汇总到父渠道（无子渠道的父渠道保留自身）。 */
+function parentChannels(channels: Channel[]): { name: string; amount: number }[] {
+  const map = new Map<string, number>();
+  for (const c of channels) {
+    if (c.isParent && c.children && c.children.length > 0) {
+      const sum = c.children.reduce((a, s) => a + s.amount, 0);
+      map.set(c.name, (map.get(c.name) ?? 0) + sum);
+    } else {
+      map.set(c.name, (map.get(c.name) ?? 0) + c.amount);
+    }
+  }
+  return [...map.entries()].map(([name, amount]) => ({ name, amount: round2(amount) }));
+}
+
+export function historicalChannelComposition(history: HistoryPoint[], opts: CompositionOptions = { level: 'leaf', topN: 5, mode: 'absolute' }): CompositionPoint[] {
+  const sorted = [...history].sort((a, b) => (a.date < b.date ? -1 : 1));
+  return sorted.map((p) => {
+    if (!p.channels || p.channels.length === 0) {
+      return { date: p.date, channels: [], missing: true };
+    }
+    const base = opts.level === 'parent' ? parentChannels(p.channels) : leafChannels(p.channels).map((l) => ({ name: l.name, amount: l.amount }));
+    const total = base.reduce((a, c) => a + c.amount, 0);
+    const sortedCh = [...base].sort((a, b) => b.amount - a.amount);
+    const top = sortedCh.slice(0, opts.topN);
+    const rest = sortedCh.slice(opts.topN).reduce((a, c) => a + c.amount, 0);
+    let list = rest > 0 ? [...top, { name: '其他', amount: round2(rest) }] : top;
+    if (opts.mode === 'percent') {
+      list = list.map((c) => ({ name: c.name, amount: total > 0 ? round2((c.amount / total) * 100) : 0 }));
+    }
+    return { date: p.date, channels: list, missing: false };
+  });
 }

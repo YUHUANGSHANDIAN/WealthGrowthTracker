@@ -56,6 +56,15 @@ export function LotteryPanel() {
     downloadCSV('lottery_transactions.csv', header, rows);
   }
 
+  function exportProjectCsv() {
+    const header = ['project', 'startDate', 'endDate', 'prizeIncome', 'stakeExpense', 'netProfitLoss', 'roi', 'transactionCount', 'dataCompleteness'];
+    const rows = lottery.projects.map((p) => {
+      const s = projectSummary(lottery, p.id);
+      return [p.name, p.startDate ?? '', p.endDate ?? '', s.prizeIncome, s.stakeExpense, s.netProfitLoss, s.roi != null ? s.roi : '', s.transactionCount, p.dataCompleteness];
+    });
+    downloadCSV('lottery_project_summary.csv', header, rows);
+  }
+
   const tone = balance > 0 ? 'up' : balance < 0 ? 'down' : undefined;
 
   return (
@@ -67,7 +76,8 @@ export function LotteryPanel() {
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={() => setPoolOpen(true)}>💼 注入 / 取出</Button>
             <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>📥 导入旧 Excel</Button>
-            <Button size="sm" variant="outline" onClick={exportCsv}>⬇ CSV</Button>
+            <Button size="sm" variant="outline" onClick={exportCsv}>⬇ 交易 CSV</Button>
+            <Button size="sm" variant="outline" onClick={exportProjectCsv}>⬇ 项目 CSV</Button>
           </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

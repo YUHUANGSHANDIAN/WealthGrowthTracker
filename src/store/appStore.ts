@@ -645,6 +645,12 @@ export const useAppStore = create<AppState>()((set, get) => {
       }
       const verb = shouldUpdate ? '已更新' : '已生成';
       get().pushToast(`${verb}报告「${report.title}」`, 'success');
+      get().logActivity(
+        shouldUpdate ? 'report-update' : 'report-create',
+        shouldUpdate ? `更新报告「${report.title}」至 Revision ${report.revision}` : `生成报告「${report.title}」`,
+        'report',
+        report.id,
+      );
       return report;
     },
     updateReportMetadata(id, patch) {
@@ -993,6 +999,7 @@ export const useAppStore = create<AppState>()((set, get) => {
       const { channels, history, fixed } = applyHealthFixes(s.channels, s.history, issues);
       set({ channels: normalizeChannelAmounts(channels), history });
       persist();
+      get().logActivity('data-repair', `数据健康修复：${fixed} 类问题（修复前已备份）`, 'data');
       return { fixed };
     },
   };
