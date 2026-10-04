@@ -21,14 +21,15 @@ export function systemShareAvailable(): boolean {
   return typeof navigator !== 'undefined' && !!navigator.share && !!navigator.canShare;
 }
 
-/** 系统分享（Web Share API）。 */
-export async function systemShare(report: FinancialReport, file?: File): Promise<boolean> {
+/** 系统分享（Web Share API）。text 覆盖默认文字摘要（隐私模式）。 */
+export async function systemShare(report: FinancialReport, file?: File, text?: string): Promise<boolean> {
   if (!systemShareAvailable()) return false;
+  const body = text ?? reportTextSummary(report);
   try {
     if (file && navigator.canShare({ files: [file] })) {
-      await navigator.share({ title: report.title, text: reportTextSummary(report), files: [file] });
+      await navigator.share({ title: report.title, text: body, files: [file] });
     } else {
-      await navigator.share({ title: report.title, text: reportTextSummary(report) });
+      await navigator.share({ title: report.title, text: body });
     }
     return true;
   } catch {
@@ -65,6 +66,7 @@ export function renderSvgToBlob(
   format: ImageFormat,
   scale = 2,
   quality = 0.9,
+  transparent = false,
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -76,8 +78,11 @@ export function renderSvgToBlob(
       canvas.height = Math.round(h * scale);
       const ctx = canvas.getContext('2d');
       if (!ctx) return reject(new Error('无法创建画布'));
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // JPEG 不支持透明；PNG/WebP 在 transparent 模式下不填白底
+      if (!transparent || format === 'jpeg') {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp';
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('栅格化失败'))), mime, quality);

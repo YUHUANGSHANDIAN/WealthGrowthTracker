@@ -3,7 +3,6 @@ import type { Channel, FinancialReport } from '../../src/types';
 import {
   normalizeFinancialReport,
   normalizeFinancialReports,
-  computeCompleteness,
   periodKeyOf,
   buildTitle,
   REPORT_SCHEMA_VERSION,

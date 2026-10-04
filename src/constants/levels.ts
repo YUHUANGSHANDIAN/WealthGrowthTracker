@@ -223,6 +223,11 @@ export function getLevelIndex(level: WealthLevel): number {
   return WEALTH_LEVELS.indexOf(level);
 }
 
+/** 按主题 key 查找等级（用于报告按保存的 theme 还原视觉，而非今天等级）。 */
+export function getLevelByTheme(theme: string): WealthLevel | undefined {
+  return WEALTH_LEVELS.find((l) => l.theme === theme);
+}
+
 /** 下一等级（最高级返回 null）。 */
 export function getNextLevel(level: WealthLevel): WealthLevel | null {
   const idx = getLevelIndex(level);
