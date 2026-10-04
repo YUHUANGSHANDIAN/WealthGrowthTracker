@@ -1,10 +1,12 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { useAppStore } from './store/appStore';
+import { useNavigationStore, initNavigation, type TabId } from './store/navigationStore';
 import { storageService } from './services/storage';
 import { totalAssets } from './utils/channels';
 import { getLevelByAmount } from './constants/levels';
 import { applyLevelTheme, applyNeutralTheme } from './utils/theme';
 import { formatCNY } from './utils/money';
+import { FEATURE_META } from './constants/featureMeta';
 import { ToastHost } from './components/ui/ToastHost';
 import { Spinner } from './components/ui/primitives';
 import { AssetsPanel } from './features/assets/AssetsPanel';
@@ -29,20 +31,22 @@ const PredictionPanel = lazy(() =>
 const GoalsPanel = lazy(() =>
   import('./features/goals/GoalsPanel').then((m) => ({ default: m.GoalsPanel })),
 );
+const LotteryPanel = lazy(() =>
+  import('./features/lottery/LotteryPanel').then((m) => ({ default: m.LotteryPanel })),
+);
 const DataPanel = lazy(() =>
   import('./features/data/DataPanel').then((m) => ({ default: m.DataPanel })),
 );
 
-type TabId = 'assets' | 'history' | 'reports' | 'analysis' | 'prediction' | 'goals' | 'data';
-
 const TABS: { id: TabId; label: string; icon: string }[] = [
-  { id: 'assets', label: '资产', icon: '💰' },
-  { id: 'history', label: '历史', icon: '📊' },
-  { id: 'reports', label: '报告', icon: '📄' },
-  { id: 'analysis', label: '分析', icon: '🔍' },
-  { id: 'prediction', label: '预测', icon: '🔮' },
-  { id: 'goals', label: '目标', icon: '🎯' },
-  { id: 'data', label: '数据', icon: '💾' },
+  { id: 'assets', label: FEATURE_META.assets.label, icon: FEATURE_META.assets.icon },
+  { id: 'history', label: FEATURE_META.history.label, icon: FEATURE_META.history.icon },
+  { id: 'reports', label: FEATURE_META.reports.label, icon: FEATURE_META.reports.icon },
+  { id: 'analysis', label: FEATURE_META.analysis.label, icon: FEATURE_META.analysis.icon },
+  { id: 'prediction', label: FEATURE_META.prediction.label, icon: FEATURE_META.prediction.icon },
+  { id: 'goals', label: FEATURE_META.goals.label, icon: FEATURE_META.goals.icon },
+  { id: 'lottery', label: FEATURE_META.lottery.label, icon: FEATURE_META.lottery.icon },
+  { id: 'data', label: FEATURE_META.data.label, icon: FEATURE_META.data.icon },
 ];
 
 function PanelFallback() {
@@ -60,7 +64,8 @@ export default function App() {
   const channels = useAppStore((s) => s.channels);
   const locked = useAppStore((s) => s.locked);
   const followWealthTheme = useAppStore((s) => s.appearance.followWealthTheme);
-  const [tab, setTab] = useState<TabId>('assets');
+  const tab = useNavigationStore((s) => s.tab);
+  const navigate = useNavigationStore((s) => s.navigate);
   const [levelExplorerOpen, setLevelExplorerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -69,6 +74,7 @@ export default function App() {
 
   useEffect(() => {
     void hydrate();
+    initNavigation();
   }, [hydrate]);
 
   // 退出前确保桌面文件存储已落盘
@@ -148,7 +154,7 @@ export default function App() {
           {TABS.map((t) => (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => navigate({ tab: t.id })}
               aria-current={tab === t.id ? 'page' : undefined}
               className={`shrink-0 px-3 py-2 flex items-center gap-1.5 text-sm font-medium transition-colors border-b-2 ${
                 tab === t.id
@@ -173,6 +179,7 @@ export default function App() {
           {tab === 'analysis' && <AnalysisPanel />}
           {tab === 'prediction' && <PredictionPanel />}
           {tab === 'goals' && <GoalsPanel />}
+          {tab === 'lottery' && <LotteryPanel />}
           {tab === 'data' && <DataPanel />}
         </Suspense>
       </main>

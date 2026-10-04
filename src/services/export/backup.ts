@@ -9,7 +9,10 @@ import type {
   CustomSortRule,
   FinancialReport,
   GoalAchievementStatus,
+  Goal,
   HistoryPoint,
+  LevelAchievement,
+  LotteryState,
   SortHistory,
   SubChannel,
   TimeRangeHistory,
@@ -19,8 +22,9 @@ import { randomId } from '../../utils/id';
 import { todayString } from '../../utils/date';
 import { defaultChannels, defaultCountdownData } from '../../constants/defaults';
 import { getLevelByAmount } from '../../constants/levels';
+import { defaultLotteryState } from '../../features/lottery/lotteryMath';
 
-export const BACKUP_VERSION = '1.2.0';
+export const BACKUP_VERSION = '1.4.0';
 export const APP_NAME = '财富成长记';
 
 /** 导出/导入时需要用到的完整应用状态（由 store 提供）。 */
@@ -39,6 +43,9 @@ export interface BackupSource {
   countdownProgressHistory: CountdownProgressPoint[];
   currentWealthLevel: CurrentWealthLevel;
   wealthTrackerHistory: HistoryPoint[];
+  lottery?: LotteryState;
+  goals?: { goals: Goal[]; primaryGoalId: string | null };
+  levelAchievements?: LevelAchievement[];
 }
 
 /** 解析+归一化后的可导入数据。 */
@@ -57,6 +64,9 @@ export interface ImportedData {
   countdownProgressHistory?: CountdownProgressPoint[];
   currentWealthLevel?: CurrentWealthLevel;
   wealthTrackerHistory?: HistoryPoint[];
+  lottery?: LotteryState;
+  goals?: { goals: Goal[]; primaryGoalId: string | null };
+  levelAchievements?: LevelAchievement[];
 }
 
 export type ParseResult =
@@ -200,6 +210,32 @@ function normalizeReport(raw: unknown): FinancialReport | null {
     ...(r.archivedAt !== undefined ? { archivedAt: toStr(r.archivedAt, '') } : {}),
     ...(r.archiveNote !== undefined ? { archiveNote: toStr(r.archiveNote, '') } : {}),
     createdAt: toStr(r.createdAt, new Date().toISOString()),
+    // v1.3+ 字段
+    ...(r.periodKey !== undefined ? { periodKey: toStr(r.periodKey, '') } : {}),
+    ...(r.revision !== undefined ? { revision: toNumber(r.revision, 1) } : {}),
+    ...(r.updatedAt !== undefined ? { updatedAt: toStr(r.updatedAt, '') } : {}),
+    ...(r.reportSchemaVersion !== undefined ? { reportSchemaVersion: toNumber(r.reportSchemaVersion, 2) } : {}),
+    ...(r.dataCompleteness !== undefined ? { dataCompleteness: toNumber(r.dataCompleteness, 0) } : {}),
+    ...(r.dataWarnings !== undefined ? { dataWarnings: toArray(r.dataWarnings).map((w) => toStr(w, '')) } : {}),
+    ...(r.sourceVersion !== undefined ? { sourceVersion: toStr(r.sourceVersion, '') } : {}),
+    // v1.4 字段
+    ...(r.titleMode !== undefined ? { titleMode: (r.titleMode === 'custom' ? 'custom' : 'auto') as FinancialReport['titleMode'] } : {}),
+    ...(r.standardTitle !== undefined ? { standardTitle: toStr(r.standardTitle, '') } : {}),
+    ...(r.customTitle !== undefined ? { customTitle: toStr(r.customTitle, '') } : {}),
+    ...(Array.isArray(r.tags) ? { tags: r.tags.map((t) => toStr(t, '')) } : {}),
+    ...(r.customSummary !== undefined ? { customSummary: toStr(r.customSummary, '') } : {}),
+    ...(r.copyOfReportId !== undefined ? { copyOfReportId: toStr(r.copyOfReportId, '') } : {}),
+    ...(isRecord(r.fieldProvenance) ? { fieldProvenance: r.fieldProvenance as FinancialReport['fieldProvenance'] } : {}),
+    ...(Array.isArray(r.repairAudit)
+      ? { repairAudit: r.repairAudit.filter(isRecord).map((a) => ({
+          field: toStr(a.field, ''),
+          oldValue: a.oldValue,
+          newValue: a.newValue,
+          reason: toStr(a.reason, ''),
+          source: toStr(a.source, 'manual-repair') as NonNullable<FinancialReport['repairAudit']>[number]['source'],
+          repairedAt: toStr(a.repairedAt, ''),
+        })) }
+      : {}),
   };
 }
 
@@ -218,6 +254,79 @@ function normalizeSortRule(raw: unknown): CustomSortRule | null {
     tags: toArray(r.tags).map((t) => toStr(t, '')),
     ...(r.isSystem !== undefined ? { isSystem: toBool(r.isSystem, false) } : {}),
     ...(r.createdAt !== undefined ? { createdAt: toStr(r.createdAt, '') } : {}),
+  };
+}
+
+function normalizeLotteryTransaction(raw: unknown): LotteryState['transactions'][number] | null {
+  const r = isRecord(raw) ? raw : {};
+  const type = ['capital-injection', 'capital-withdrawal', 'stake', 'prize', 'adjustment'].includes(toStr(r.type))
+    ? (toStr(r.type) as LotteryState['transactions'][number]['type'])
+    : null;
+  if (!type) return null;
+  return {
+    id: toStr(r.id, randomId('ltx')),
+    projectId: r.projectId === null || r.projectId === undefined ? null : toStr(r.projectId, ''),
+    occurredAt: toStr(r.occurredAt, new Date().toISOString()),
+    type,
+    amount: Math.abs(round2(toNumber(r.amount, 0))),
+    ...(r.direction !== undefined ? { direction: (toNumber(r.direction, 1) >= 0 ? 1 : -1) as 1 | -1 } : {}),
+    ...(r.paymentMethod !== undefined ? { paymentMethod: toStr(r.paymentMethod, '') } : {}),
+    ...(r.description !== undefined ? { description: toStr(r.description, '') } : {}),
+    ...(r.status !== undefined ? { status: toStr(r.status, '') } : {}),
+    ...(r.notes !== undefined ? { notes: toStr(r.notes, '') } : {}),
+    source: ['manual', 'excel-lottery', 'legacy-import'].includes(toStr(r.source))
+      ? (toStr(r.source) as LotteryState['transactions'][number]['source'])
+      : 'manual',
+    ...(r.importFingerprint !== undefined ? { importFingerprint: toStr(r.importFingerprint, '') } : {}),
+    createdAt: toStr(r.createdAt, new Date().toISOString()),
+    updatedAt: toStr(r.updatedAt, new Date().toISOString()),
+  };
+}
+
+function normalizeLotteryProject(raw: unknown): LotteryState['projects'][number] | null {
+  const r = isRecord(raw) ? raw : {};
+  const id = toStr(r.id, '');
+  if (!id) return null;
+  return {
+    id,
+    name: toStr(r.name, '未命名项目'),
+    category: ['sports-football', 'lotto', 'other'].includes(toStr(r.category))
+      ? (toStr(r.category) as LotteryState['projects'][number]['category'])
+      : 'other',
+    ...(r.startDate !== undefined ? { startDate: toStr(r.startDate, '') } : {}),
+    ...(r.endDate !== undefined ? { endDate: toStr(r.endDate, '') } : {}),
+    status: ['active', 'closed', 'archived'].includes(toStr(r.status))
+      ? (toStr(r.status) as LotteryState['projects'][number]['status'])
+      : 'active',
+    ...(r.emoji !== undefined ? { emoji: toStr(r.emoji, '') } : {}),
+    ...(r.notes !== undefined ? { notes: toStr(r.notes, '') } : {}),
+    dataCompleteness: toStr(r.dataCompleteness, 'detailed') === 'summary-only' ? 'summary-only' : 'detailed',
+    ...(isRecord(r.legacySummary)
+      ? { legacySummary: { income: round2(toNumber(r.legacySummary.income, 0)), expense: round2(toNumber(r.legacySummary.expense, 0)), netProfitLoss: round2(toNumber(r.legacySummary.netProfitLoss, 0)) } }
+      : {}),
+    createdAt: toStr(r.createdAt, new Date().toISOString()),
+    updatedAt: toStr(r.updatedAt, new Date().toISOString()),
+  };
+}
+
+function normalizeLotteryState(raw: unknown): LotteryState {
+  if (!isRecord(raw)) return defaultLotteryState();
+  const pool = isRecord(raw.pool)
+    ? {
+        id: toStr(raw.pool.id, 'lottery_pool'),
+        name: toStr(raw.pool.name, '彩票资金池'),
+        openingBalance: round2(toNumber(raw.pool.openingBalance, 0)),
+        createdAt: toStr(raw.pool.createdAt, new Date().toISOString()),
+        ...(raw.pool.notes !== undefined ? { notes: toStr(raw.pool.notes, '') } : {}),
+      }
+    : defaultLotteryState().pool;
+  return {
+    pool,
+    projects: toArray(raw.projects).map(normalizeLotteryProject).filter((p): p is LotteryState['projects'][number] => p !== null),
+    transactions: toArray(raw.transactions).map(normalizeLotteryTransaction).filter((t): t is LotteryState['transactions'][number] => t !== null),
+    settings: isRecord(raw.settings)
+      ? { showLotteryAppendix: toBool(raw.settings.showLotteryAppendix, false) }
+      : { showLotteryAppendix: false },
   };
 }
 
@@ -247,6 +356,9 @@ export function buildBackup(src: BackupSource): BackupData {
       countdown_progress_history: src.countdownProgressHistory,
       current_wealth_level: src.currentWealthLevel,
       wealth_tracker_history: src.wealthTrackerHistory,
+      lottery_state: src.lottery,
+      goals: src.goals,
+      level_achievements: src.levelAchievements,
     },
     metadata: {
       totalRecords: {
@@ -406,6 +518,44 @@ export function parseBackup(text: string): ParseResult {
     imported.wealthTrackerHistory = data.wealth_tracker_history
       .map(normalizeHistoryPoint)
       .filter((p): p is HistoryPoint => p !== null);
+  }
+  if (data.lottery_state !== undefined) {
+    imported.lottery = normalizeLotteryState(data.lottery_state);
+  }
+  if (isRecord(data.goals)) {
+    imported.goals = {
+      goals: toArray(data.goals.goals)
+        .filter(isRecord)
+        .map((g) => ({
+          id: toStr(g.id, randomId('goal')),
+          name: toStr(g.name, '财富目标'),
+          icon: toStr(g.icon, '🎯'),
+          targetAmount: round2(toNumber(g.targetAmount, 0)),
+          startDateTime: toStr(g.startDateTime, todayString() + 'T00:00'),
+          targetDateTime: toStr(g.targetDateTime, todayString() + 'T00:00'),
+          timezone: toStr(g.timezone, 'Asia/Shanghai'),
+          displayMode: ['calendar', 'days', 'hours', 'simple'].includes(toStr(g.displayMode)) ? (toStr(g.displayMode) as Goal['displayMode']) : 'calendar',
+          status: ['not-started', 'active', 'achieved', 'expired', 'archived'].includes(toStr(g.status)) ? (toStr(g.status) as Goal['status']) : 'active',
+          priority: toNumber(g.priority, 0),
+          color: toStr(g.color, '#3B82F6'),
+          showSeconds: toBool(g.showSeconds, true),
+          createdAt: toStr(g.createdAt, new Date().toISOString()),
+          updatedAt: toStr(g.updatedAt, new Date().toISOString()),
+          ...(g.achievedAt !== undefined ? { achievedAt: toStr(g.achievedAt, '') } : {}),
+          ...(g.archivedAt !== undefined ? { archivedAt: toStr(g.archivedAt, '') } : {}),
+          ...(g.notes !== undefined ? { notes: toStr(g.notes, '') } : {}),
+        })),
+      primaryGoalId: data.goals.primaryGoalId != null ? toStr(data.goals.primaryGoalId, '') : null,
+    };
+  }
+  if (Array.isArray(data.level_achievements)) {
+    imported.levelAchievements = data.level_achievements.filter(isRecord).map((a) => ({
+      levelId: toStr(a.levelId, ''),
+      levelName: toStr(a.levelName, ''),
+      reachedAt: toStr(a.reachedAt, ''),
+      firstAmount: round2(toNumber(a.firstAmount, 0)),
+      ...(a.unknownTime !== undefined ? { unknownTime: toBool(a.unknownTime, false) } : {}),
+    }));
   }
 
   const metaRaw = isRecord(raw.metadata) ? raw.metadata : undefined;

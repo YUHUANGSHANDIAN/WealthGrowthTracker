@@ -20,6 +20,10 @@ import type {
   TimeRangeHistory,
   UserProfile,
   LocalAccount,
+  LotteryState,
+  LotteryTransaction,
+  LotteryProject,
+  ActivityLogEntry,
 } from '../types';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { getLevelByAmount } from '../constants/levels';
@@ -72,6 +76,7 @@ import {
   mergeLevelAchievements,
 } from '../utils/levelAchievements';
 import { countdownFromGoal, countdownToGoal } from '../utils/goals';
+import { defaultLotteryState } from '../features/lottery/lotteryMath';
 
 export type ToastKind = 'success' | 'error' | 'info';
 export interface Toast {
@@ -120,6 +125,8 @@ interface AppState {
   currentWealthLevel: CurrentWealthLevel;
   wealthTrackerHistory: HistoryPoint[];
   levelAchievements: LevelAchievement[];
+  lottery: LotteryState;
+  activityLog: ActivityLogEntry[];
 
   // 数据管理弹窗状态
   importModalOpen: boolean;
@@ -190,6 +197,18 @@ interface AppState {
   deleteGoal: (id: string) => void;
   setPrimaryGoal: (id: string | null) => void;
 
+  // ---- Lottery ----
+  addLotteryTransaction: (tx: LotteryTransaction) => void;
+  deleteLotteryTransaction: (id: string) => void;
+  importLotteryTransactions: (txs: LotteryTransaction[]) => number;
+  upsertLotteryProject: (project: LotteryProject) => void;
+  deleteLotteryProject: (id: string) => void;
+  setLotteryPool: (pool: LotteryState['pool']) => void;
+  setLotterySettings: (settings: LotteryState['settings']) => void;
+
+  // ---- Activity Log ----
+  logActivity: (type: string, description: string, entityType?: string, entityId?: string) => void;
+
   // ---- 金币雨 / 图表 ----
   setCoinRainConfig: (config: CoinRainConfig) => void;
   setChartSettings: (settings: ChartSettings) => void;
@@ -227,6 +246,8 @@ const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
   { key: STORAGE_KEYS.currentWealthLevel, pick: (s) => s.currentWealthLevel },
   { key: STORAGE_KEYS.wealthTrackerHistory, pick: (s) => s.wealthTrackerHistory },
   { key: STORAGE_KEYS.levelAchievements, pick: (s) => s.levelAchievements },
+  { key: STORAGE_KEYS.lotteryState, pick: (s) => s.lottery },
+  { key: STORAGE_KEYS.activityLog, pick: (s) => s.activityLog },
 ];
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -305,6 +326,8 @@ export const useAppStore = create<AppState>()((set, get) => {
     currentWealthLevel: { level: '' },
     wealthTrackerHistory: [],
     levelAchievements: [],
+    lottery: defaultLotteryState(),
+    activityLog: [],
 
     importModalOpen: false,
 
@@ -332,6 +355,8 @@ export const useAppStore = create<AppState>()((set, get) => {
         reportSortSettings,
         levelAchievements,
         goalsData,
+        lotteryData,
+        activityLogData,
       ] = await Promise.all([
         storageService.getJSON<{ channels: Channel[]; history: HistoryPoint[] }>(STORAGE_KEYS.wealthTrackerData),
         storageService.getJSON<FinancialReport[]>(STORAGE_KEYS.financialReports),
@@ -354,6 +379,8 @@ export const useAppStore = create<AppState>()((set, get) => {
         storageService.getJSON<ReportSortSpec>(STORAGE_KEYS.reportSortSettings),
         storageService.getJSON<LevelAchievement[]>(STORAGE_KEYS.levelAchievements),
         storageService.getJSON<{ goals: Goal[]; primaryGoalId: string | null }>(STORAGE_KEYS.goals),
+        storageService.getJSON<LotteryState>(STORAGE_KEYS.lotteryState),
+        storageService.getJSON<ActivityLogEntry[]>(STORAGE_KEYS.activityLog),
       ]);
 
       const isFirstRun = !wtd;
@@ -432,6 +459,8 @@ export const useAppStore = create<AppState>()((set, get) => {
         currentWealthLevel: level ?? { level: '' },
         wealthTrackerHistory: linkedHistory ?? [],
         levelAchievements: mergedAchievements,
+        lottery: lotteryData ?? defaultLotteryState(),
+        activityLog: activityLogData ?? [],
         hydrated: true,
       });
 
@@ -778,6 +807,62 @@ export const useAppStore = create<AppState>()((set, get) => {
       });
       persist();
     },
+
+    // ---------------------------------------------------------------------
+    // Lottery（独立资金池，不影响财富资产）
+    addLotteryTransaction(tx) {
+      set((s) => ({ lottery: { ...s.lottery, transactions: [tx, ...s.lottery.transactions] } }));
+      persist();
+    },
+    deleteLotteryTransaction(id) {
+      set((s) => ({ lottery: { ...s.lottery, transactions: s.lottery.transactions.filter((t) => t.id !== id) } }));
+      persist();
+    },
+    importLotteryTransactions(txs) {
+      const existingFps = new Set(get().lottery.transactions.map((t) => t.importFingerprint).filter((f): f is string => !!f));
+      const added = txs.filter((t) => !t.importFingerprint || !existingFps.has(t.importFingerprint));
+      if (added.length === 0) return 0;
+      set((s) => ({ lottery: { ...s.lottery, transactions: [...added, ...s.lottery.transactions] } }));
+      persist();
+      return added.length;
+    },
+    upsertLotteryProject(project) {
+      set((s) => {
+        const exists = s.lottery.projects.some((p) => p.id === project.id);
+        const projects = exists
+          ? s.lottery.projects.map((p) => (p.id === project.id ? { ...project, updatedAt: new Date().toISOString() } : p))
+          : [...s.lottery.projects, { ...project, updatedAt: new Date().toISOString() }];
+        return { lottery: { ...s.lottery, projects } };
+      });
+      persist();
+    },
+    deleteLotteryProject(id) {
+      set((s) => ({ lottery: { ...s.lottery, projects: s.lottery.projects.filter((p) => p.id !== id) } }));
+      persist();
+    },
+    setLotteryPool(pool) {
+      set((s) => ({ lottery: { ...s.lottery, pool } }));
+      persist();
+    },
+    setLotterySettings(settings) {
+      set((s) => ({ lottery: { ...s.lottery, settings } }));
+      persist();
+    },
+
+    // ---------------------------------------------------------------------
+    // Activity Log（不记录完整资产 JSON / 密码 / PIN）
+    logActivity(type, description, entityType, entityId) {
+      const entry: ActivityLogEntry = {
+        id: uuid(),
+        type,
+        timestamp: new Date().toISOString(),
+        entityType,
+        entityId,
+        description,
+      };
+      set((s) => ({ activityLog: [entry, ...s.activityLog].slice(0, 500) }));
+      persist();
+    },
     markGoalAchieved() {
       set({ goalAchieved: { hasAchievedGoal: true } });
       persist();
@@ -822,6 +907,9 @@ export const useAppStore = create<AppState>()((set, get) => {
         countdownProgressHistory: s.countdownProgressHistory,
         currentWealthLevel: s.currentWealthLevel,
         wealthTrackerHistory: s.wealthTrackerHistory,
+        lottery: s.lottery,
+        goals: { goals: s.goals, primaryGoalId: s.primaryGoalId },
+        levelAchievements: s.levelAchievements,
       };
       const backup = buildBackup(source);
       const text = JSON.stringify(backup, null, 2);
@@ -864,7 +952,10 @@ export const useAppStore = create<AppState>()((set, get) => {
         countdownProgressHistory: d.countdownProgressHistory ?? [],
         currentWealthLevel: d.currentWealthLevel ?? { level: '' },
         wealthTrackerHistory: d.wealthTrackerHistory ?? [],
-        levelAchievements: deriveLevelAchievements(d.history),
+        levelAchievements: d.levelAchievements ?? deriveLevelAchievements(d.history),
+        lottery: d.lottery ?? defaultLotteryState(),
+        goals: d.goals?.goals ?? [],
+        primaryGoalId: d.goals?.primaryGoalId ?? null,
       });
       persist();
       return {

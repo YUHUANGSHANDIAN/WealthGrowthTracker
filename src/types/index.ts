@@ -496,6 +496,84 @@ export interface PredictionStats {
   confidence: number; // 0-1
 }
 
+// ---------------------------------------------------------------------------
+// 彩票领域（Lottery，v1.4）—— 完全独立于财富资产的资金池
+// ---------------------------------------------------------------------------
+
+export type LotteryTxType = 'capital-injection' | 'capital-withdrawal' | 'stake' | 'prize' | 'adjustment';
+export type LotteryProjectCategory = 'sports-football' | 'lotto' | 'other';
+export type LotteryProjectStatus = 'active' | 'closed' | 'archived';
+
+/** 彩票交易（amount 始终 >= 0，正负意义由 type / direction 决定）。 */
+export interface LotteryTransaction {
+  id: string;
+  /** 关联项目；null = 资金池级（注入/取出/调整）。 */
+  projectId: string | null;
+  occurredAt: string; // ISO 日期时间
+  type: LotteryTxType;
+  amount: Money;
+  /** 调整方向（仅 adjustment 类型有意义，默认 +1）。 */
+  direction?: 1 | -1;
+  paymentMethod?: string;
+  description?: string;
+  status?: string;
+  notes?: string;
+  source: 'manual' | 'excel-lottery' | 'legacy-import';
+  /** 幂等去重指纹（Excel 导入使用）。 */
+  importFingerprint?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 彩票项目（按不同彩票项目分组管理）。 */
+export interface LotteryProject {
+  id: string;
+  name: string;
+  category: LotteryProjectCategory;
+  startDate?: string;
+  endDate?: string;
+  status: LotteryProjectStatus;
+  emoji?: string;
+  notes?: string;
+  /** 是否有明细交易；summary-only 项目只保存 legacySummary。 */
+  dataCompleteness: 'detailed' | 'summary-only';
+  /** summary-only 项目的历史汇总（绝不伪造明细交易）。 */
+  legacySummary?: { income: Money; expense: Money; netProfitLoss: Money };
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 彩票资金池（全局一个）。 */
+export interface LotteryPool {
+  id: string;
+  name: string;
+  openingBalance: Money;
+  createdAt: string;
+  notes?: string;
+}
+
+export interface LotterySettings {
+  /** 是否在财富报告中显示彩票摘要（默认 false）。 */
+  showLotteryAppendix: boolean;
+}
+
+export interface LotteryState {
+  pool: LotteryPool | null;
+  projects: LotteryProject[];
+  transactions: LotteryTransaction[];
+  settings: LotterySettings;
+}
+
+/** 本地活动日志（不记录完整资产 JSON / 密码 / PIN）。 */
+export interface ActivityLogEntry {
+  id: string;
+  type: string;
+  timestamp: string;
+  entityType?: string;
+  entityId?: string;
+  description: string;
+}
+
 /** 完整导出/导入用的备份结构（version 1.0.0，与旧版兼容）。 */
 export interface BackupData {
   version: string;
@@ -518,6 +596,9 @@ export interface BackupData {
     countdown_progress_history?: CountdownProgressPoint[];
     current_wealth_level?: CurrentWealthLevel;
     wealth_tracker_history?: HistoryPoint[];
+    lottery_state?: LotteryState;
+    level_achievements?: LevelAchievement[];
+    goals?: GoalState;
   };
   metadata?: {
     totalRecords?: Record<string, number>;

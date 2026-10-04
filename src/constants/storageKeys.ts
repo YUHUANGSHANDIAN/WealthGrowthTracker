@@ -28,6 +28,8 @@ export const STORAGE_KEYS = {
   goalAchievementStatus: 'goal_achievement_status',
   timeRangeHistory: 'time_range_history',
   levelAchievements: 'level_achievements',
+  lotteryState: 'lottery_state',
+  activityLog: 'activity_log',
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
