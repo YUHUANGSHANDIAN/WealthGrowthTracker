@@ -205,6 +205,7 @@ interface AppState {
   deleteLotteryProject: (id: string) => void;
   setLotteryPool: (pool: LotteryState['pool']) => void;
   setLotterySettings: (settings: LotteryState['settings']) => void;
+  applyLotteryExcelImport: (preview: { projects: LotteryProject[]; transactions: LotteryTransaction[] }) => { projectsAdded: number; transactionsAdded: number };
 
   // ---- Activity Log ----
   logActivity: (type: string, description: string, entityType?: string, entityId?: string) => void;
@@ -847,6 +848,24 @@ export const useAppStore = create<AppState>()((set, get) => {
     setLotterySettings(settings) {
       set((s) => ({ lottery: { ...s.lottery, settings } }));
       persist();
+    },
+    applyLotteryExcelImport(preview) {
+      const s = get();
+      const existingProjectIds = new Set(s.lottery.projects.map((p) => p.id));
+      const newProjects = preview.projects.filter((p) => !existingProjectIds.has(p.id));
+      const existingFps = new Set(s.lottery.transactions.map((t) => t.importFingerprint).filter((f): f is string => !!f));
+      const newTxs = preview.transactions.filter((t) => !t.importFingerprint || !existingFps.has(t.importFingerprint));
+      if (newProjects.length === 0 && newTxs.length === 0) return { projectsAdded: 0, transactionsAdded: 0 };
+      set((state) => ({
+        lottery: {
+          ...state.lottery,
+          projects: [...state.lottery.projects, ...newProjects],
+          transactions: [...newTxs, ...state.lottery.transactions],
+        },
+      }));
+      persist();
+      get().logActivity('lottery-import', `导入彩票 Excel：新增 ${newProjects.length} 个项目、${newTxs.length} 笔交易`, 'lottery', undefined);
+      return { projectsAdded: newProjects.length, transactionsAdded: newTxs.length };
     },
 
     // ---------------------------------------------------------------------

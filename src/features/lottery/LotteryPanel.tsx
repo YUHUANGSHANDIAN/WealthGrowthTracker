@@ -11,6 +11,7 @@ import { downloadCSV } from '../../components/charts/export';
 import { poolBalance, netPL, roi, totalPrize, totalStake, dailyStats, projectSummary, type ProjectSummary } from './lotteryMath';
 import { makeLotteryTransaction } from './lotteryTx';
 import { LOTTERY_TX_META, LOTTERY_CATEGORY_META } from '../../constants/featureMeta';
+import { LotteryExcelImportModal } from './LotteryExcelImportModal';
 import { todayString } from '../../utils/date';
 
 export function LotteryPanel() {
@@ -19,6 +20,7 @@ export function LotteryPanel() {
 
   const [txOpen, setTxOpen] = useState(false);
   const [poolOpen, setPoolOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const balance = poolBalance(lottery);
   const prize = totalPrize(lottery);
@@ -64,6 +66,7 @@ export function LotteryPanel() {
           <h2 className="font-semibold text-slate-800">🎟️ 彩票资金池</h2>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={() => setPoolOpen(true)}>💼 注入 / 取出</Button>
+            <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>📥 导入旧 Excel</Button>
             <Button size="sm" variant="outline" onClick={exportCsv}>⬇ CSV</Button>
           </div>
         </div>
@@ -188,6 +191,7 @@ export function LotteryPanel() {
 
       <LotteryTxModal open={txOpen} onClose={() => setTxOpen(false)} onSave={(t) => { addLotteryTransaction(t); setTxOpen(false); }} />
       <PoolModal open={poolOpen} onClose={() => setPoolOpen(false)} onSave={(pool) => { setLotteryPool(pool); setPoolOpen(false); }} />
+      <LotteryExcelImportModal open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );
 }
