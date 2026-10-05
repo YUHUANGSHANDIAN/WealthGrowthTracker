@@ -27,12 +27,34 @@ function esc(s: string): string {
 export function reportHtml(report: FinancialReport): string {
   const positive = report.changeAmount >= 0;
   const pct = Math.abs(report.changePercentage);
-  const rows = [...report.channelDetails]
-    .sort((a, b) => b.amount - a.amount)
-    .map(
-      (c) => `<tr><td>${esc(c.emoji ?? '')} ${esc(c.name)}</td><td class="num">${formatCNY(c.amount)}</td><td class="num">${c.percentage.toFixed(1)}%</td></tr>`,
-    )
-    .join('');
+  const comp = report.assetComposition;
+
+  // 层级资产构成（父渠道粗体 + 子渠道缩进）；无层级时回退扁平叶子列表。
+  let rows = '';
+  if (comp && comp.parents.length > 0) {
+    rows = comp.parents
+      .map((p) => {
+        const parentRow = `<tr class="parent"><td><b>${esc(p.emoji ?? '')} ${esc(p.name)}</b></td><td class="num">${formatCNY(p.amount)}</td><td class="num">${p.percentageOfTotal.toFixed(1)}%</td><td class="num">—</td></tr>`;
+        const childRows = p.children
+          .map(
+            (c) => `<tr><td class="child">└ ${esc(c.emoji ?? '')} ${esc(c.name)}</td><td class="num">${formatCNY(c.amount)}</td><td class="num">${c.percentageOfTotal.toFixed(1)}%</td><td class="num">${c.percentageOfParent.toFixed(1)}%</td></tr>`,
+          )
+          .join('');
+        return parentRow + childRows;
+      })
+      .join('');
+  } else {
+    rows = [...report.channelDetails]
+      .sort((a, b) => b.amount - a.amount)
+      .map(
+        (c) => `<tr><td>${esc(c.emoji ?? '')} ${esc(c.name)}</td><td class="num">${formatCNY(c.amount)}</td><td class="num">${c.percentage.toFixed(1)}%</td><td class="num">—</td></tr>`,
+      )
+      .join('');
+  }
+
+  const dataAsOfLine = report.dataAsOf
+    ? ` · 数据截至 ${esc(report.dataAsOf)}`
+    : '';
 
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"/>
@@ -48,19 +70,22 @@ h1{font-size:24px;margin-bottom:4px} .sub{color:#64748b;font-size:13px;margin-bo
 table{width:100%;border-collapse:collapse;margin-top:8px}
 th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e2e8f0;font-size:14px}
 th{color:#64748b;font-weight:500;font-size:12px}
+tr.parent td{background:#f8fafc;border-top:1px solid #e2e8f0}
+td.child{padding-left:26px;color:#475569;font-size:13px}
 .num{text-align:right;font-variant-numeric:tabular-nums}
 .note{font-size:12px;color:#94a3b8;margin-top:24px}
 </style></head><body>
 <h1>${esc(report.title)}</h1>
-<div class="sub">${esc(report.startDate)} ~ ${esc(report.endDate)}${report.wealthLevelName ? ' · 财富等级：' + esc(report.wealthLevelName) : ''}</div>
+<div class="sub">${esc(report.startDate)} ~ ${esc(report.endDate)}${report.wealthLevelName ? ' · 财富等级：' + esc(report.wealthLevelName) : ''}${dataAsOfLine}</div>
 <div class="grid">
   <div class="card"><div class="label">期末总资产</div><div class="value">${formatCNY(report.totalAmount)}</div></div>
   <div class="card"><div class="label">期初总资产</div><div class="value">${formatCNY(report.previousTotalAmount ?? 0)}</div></div>
   <div class="card"><div class="label">本期变化</div><div class="value ${positive ? 'up' : 'down'}">${positive ? '+' : ''}${formatCNY(report.changeAmount)}</div></div>
   <div class="card"><div class="label">变化率</div><div class="value ${positive ? 'up' : 'down'}">${positive ? '+' : ''}${pct.toFixed(1)}%</div></div>
 </div>
-<table><thead><tr><th>渠道</th><th>金额</th><th>占比</th></tr></thead><tbody>${rows}</tbody></table>
+<table><thead><tr><th>渠道</th><th>金额</th><th>占总资产</th><th>占父渠道</th></tr></thead><tbody>${rows}</tbody></table>
 ${report.channelSnapshotMissing ? '<p class="note">注：旧版历史记录仅保存总资产，无法还原该日期的渠道构成。</p>' : ''}
+${report.compositionWarnings?.length ? `<p class="note">${report.compositionWarnings.map((w) => esc(w)).join('；')}</p>` : ''}
 <p class="note">由「财富成长记」生成 · ${esc(new Date(report.createdAt).toLocaleString('zh-CN'))}。预测/报告仅供个人参考，不构成投资建议。</p>
 </body></html>`;
 }

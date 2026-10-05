@@ -82,7 +82,7 @@ describe('彩票资金池数学', () => {
   });
 
   it('交易指纹幂等：相同字段得到相同 id', () => {
-    const a = { occurredAt: '2026-07-21T10:00', type: 'stake' as const, amount: 20, paymentMethod: '零钱通', description: 'x', status: '已收款' };
+    const a = { occurredAt: '2030-01-01T10:00', type: 'stake' as const, amount: 20, paymentMethod: '支付方式A', description: 'x', status: '已收款' };
     const b = { ...a };
     expect(lotteryTxFingerprint(a)).toBe(lotteryTxFingerprint(b));
     expect(lotteryTxIdFromFingerprint(lotteryTxFingerprint(a))).toBe(lotteryTxIdFromFingerprint(lotteryTxFingerprint(b)));

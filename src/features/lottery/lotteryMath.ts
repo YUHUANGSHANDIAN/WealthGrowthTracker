@@ -65,6 +65,64 @@ export function roi(state: LotteryState): number | null {
   return round2((netPL(state) / stake) * 100);
 }
 
+/**
+ * 全生命周期彩票历史表现（区别于当前资金池余额）。
+ * - Detailed 项目：从 transactions 推导。
+ * - Summary-only 项目：使用 legacySummary（无明细交易，绝不伪造）。
+ * - 无 projectId 的 prize/stake：归入「未归属交易」。
+ * - 绝不 double-count：summary-only 项目的交易（若异常存在）会被跳过。
+ */
+export interface LifetimeStats {
+  prize: number;
+  stake: number;
+  net: number;
+  roi: number | null;
+  projectCount: number;
+  detailedCount: number;
+  summaryOnlyCount: number;
+  unassignedCount: number;
+}
+
+export function lifetimeStats(state: LotteryState): LifetimeStats {
+  const summaryOnlyIds = new Set(
+    state.projects.filter((p) => p.dataCompleteness === 'summary-only').map((p) => p.id),
+  );
+
+  let prize = 0;
+  let stake = 0;
+
+  // summary-only 项目：只用 legacySummary
+  for (const p of state.projects) {
+    if (p.dataCompleteness === 'summary-only' && p.legacySummary) {
+      prize += p.legacySummary.income;
+      stake += p.legacySummary.expense;
+    }
+  }
+
+  // transactions：detailed 项目 + 未归属交易（跳过 summary-only 项目的异常交易避免双计数）
+  for (const t of state.transactions) {
+    if (t.projectId && summaryOnlyIds.has(t.projectId)) continue;
+    if (t.type === 'prize') prize += t.amount;
+    if (t.type === 'stake') stake += t.amount;
+  }
+
+  const net = round2(prize - stake);
+  const roi = stake > 0 ? round2((net / stake) * 100) : null;
+
+  return {
+    prize: round2(prize),
+    stake: round2(stake),
+    net,
+    roi,
+    projectCount: state.projects.length,
+    detailedCount: state.projects.filter((p) => p.dataCompleteness === 'detailed').length,
+    summaryOnlyCount: state.projects.filter((p) => p.dataCompleteness === 'summary-only').length,
+    unassignedCount: state.transactions.filter(
+      (t) => t.projectId === null && (t.type === 'prize' || t.type === 'stake'),
+    ).length,
+  };
+}
+
 export interface ProjectSummary {
   projectId: string;
   prizeIncome: number;

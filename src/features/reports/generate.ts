@@ -153,6 +153,8 @@ export function generateReport(
     revision: 1,
     updatedAt: nowIso,
     sourceVersion: APP_VERSION,
+    ...(isCurrentPeriod ? { dataAsOf: now } : endPoint ? { dataAsOf: endPoint.date } : {}),
+    generationSource: 'normal' as const,
     ...(endChannels ? { channels: endChannels } : {}),
     ...(channelSnapshotMissing ? { channelSnapshotMissing: true } : {}),
   };

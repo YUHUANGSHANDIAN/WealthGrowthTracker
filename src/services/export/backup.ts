@@ -24,7 +24,7 @@ import { defaultChannels, defaultCountdownData } from '../../constants/defaults'
 import { getLevelByAmount } from '../../constants/levels';
 import { defaultLotteryState } from '../../features/lottery/lotteryMath';
 
-export const BACKUP_VERSION = '1.4.0';
+export const BACKUP_VERSION = '1.5.0';
 export const APP_NAME = '财富成长记';
 
 /** 导出/导入时需要用到的完整应用状态（由 store 提供）。 */
@@ -168,6 +168,32 @@ function normalizeChannelDetail(raw: unknown): FinancialReport['channelDetails']
   };
 }
 
+function normalizeAssetComposition(raw: unknown): FinancialReport['assetComposition'] | undefined {
+  if (!isRecord(raw)) return undefined;
+  const parents = toArray(raw.parents)
+    .filter(isRecord)
+    .map((p) => ({
+      id: toStr(p.id, ''),
+      name: toStr(p.name, '未命名渠道'),
+      emoji: toStr(p.emoji, '💰'),
+      amount: round2(toNumber(p.amount, 0)),
+      ...(p.color !== undefined ? { color: toStr(p.color, '') } : {}),
+      percentageOfTotal: toNumber(p.percentageOfTotal, 0),
+      children: toArray(p.children)
+        .filter(isRecord)
+        .map((c) => ({
+          id: toStr(c.id, ''),
+          name: toStr(c.name, ''),
+          emoji: toStr(c.emoji, '💰'),
+          amount: round2(toNumber(c.amount, 0)),
+          ...(c.color !== undefined ? { color: toStr(c.color, '') } : {}),
+          percentageOfParent: toNumber(c.percentageOfParent, 0),
+          percentageOfTotal: toNumber(c.percentageOfTotal, 0),
+        })),
+    }));
+  return { parents, totalAmount: round2(toNumber(raw.totalAmount, 0)) };
+}
+
 function normalizeReport(raw: unknown): FinancialReport | null {
   const r = isRecord(raw) ? raw : {};
   const id = toStr(r.id, '');
@@ -236,6 +262,15 @@ function normalizeReport(raw: unknown): FinancialReport | null {
           repairedAt: toStr(a.repairedAt, ''),
         })) }
       : {}),
+    // v1.5 字段
+    ...(isRecord(r.assetComposition) ? { assetComposition: normalizeAssetComposition(r.assetComposition) } : {}),
+    ...(r.dataAsOf !== undefined ? { dataAsOf: toStr(r.dataAsOf, '') } : {}),
+    ...(r.generationSource !== undefined
+      ? { generationSource: (['normal', 'legacy-txt-import', 'legacy-image-import', 'historical-backfill'].includes(toStr(r.generationSource))
+          ? toStr(r.generationSource)
+          : 'normal') as FinancialReport['generationSource'] }
+      : {}),
+    ...(Array.isArray(r.compositionWarnings) ? { compositionWarnings: r.compositionWarnings.map((w) => toStr(w, '')) } : {}),
   };
 }
 

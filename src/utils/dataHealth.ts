@@ -214,7 +214,7 @@ export function checkAchievementHealth(achievements: LevelAchievement[]): DataIs
   return issues;
 }
 
-/** 彩票健康：重复交易 ID / 非法日期 / 金额<=0 / 缺失项目 / 未知类型。Pool 为负不是错误。 */
+/** 彩票健康：重复交易 ID / 非法日期 / 金额<=0 / 缺失项目 / 未知类型 / 项目一致性。Pool 为负不是错误。 */
 export function checkLotteryHealth(lottery: LotteryState): DataIssue[] {
   const issues: DataIssue[] = [];
   const ids = new Set<string>();
@@ -235,7 +235,35 @@ export function checkLotteryHealth(lottery: LotteryState): DataIssue[] {
     if (!validTypes.includes(t.type)) {
       issues.push(makeIssue('lottery', 'warning', '未知交易类型', `交易 ${t.id} 类型「${t.type}」未知`, null, { entityId: t.id }));
     }
+    if (t.type === 'adjustment' && t.direction !== undefined && t.direction !== 1 && t.direction !== -1) {
+      issues.push(makeIssue('lottery', 'warning', '调整方向非法', `交易 ${t.id} 的 adjustment 方向「${String(t.direction)}」非法（应为 1 或 -1）`, null, { entityId: t.id }));
+    }
   }
+
+  // 项目级一致性检查
+  const seenProjectIds = new Set<string>();
+  const seenProjectNames = new Set<string>();
+  const txCountByProject = new Map<string, number>();
+  for (const t of lottery.transactions) {
+    if (t.projectId) txCountByProject.set(t.projectId, (txCountByProject.get(t.projectId) ?? 0) + 1);
+  }
+  for (const p of lottery.projects) {
+    if (seenProjectIds.has(p.id)) issues.push(makeIssue('lottery', 'warning', '重复项目', `项目 ID ${p.id} 重复`, null, { entityId: p.id }));
+    seenProjectIds.add(p.id);
+    const nameKey = p.name.trim();
+    if (nameKey && seenProjectNames.has(nameKey)) issues.push(makeIssue('lottery', 'warning', '重复项目名称', `项目名称「${p.name}」重复`, null, { entityId: p.id }));
+    seenProjectNames.add(nameKey);
+    if (p.startDate && p.endDate && p.endDate < p.startDate) {
+      issues.push(makeIssue('lottery', 'warning', '项目日期范围非法', `项目「${p.name}」结束日期早于开始日期`, null, { entityId: p.id }));
+    }
+    if (p.dataCompleteness === 'detailed' && (txCountByProject.get(p.id) ?? 0) === 0) {
+      issues.push(makeIssue('lottery', 'warning', '详细项目缺少交易', `项目「${p.name}」标记为详细但没有任何交易`, null, { entityId: p.id }));
+    }
+    if (p.dataCompleteness === 'summary-only' && (txCountByProject.get(p.id) ?? 0) > 0) {
+      issues.push(makeIssue('lottery', 'warning', '汇总项目却有交易', `项目「${p.name}」标记为 summary-only 却存在 ${txCountByProject.get(p.id)} 笔交易（可能导致双计数）`, null, { entityId: p.id }));
+    }
+  }
+
   // Pool Balance 为负：合法，不是 Health Error。
   return issues;
 }

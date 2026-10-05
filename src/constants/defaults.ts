@@ -97,7 +97,25 @@ export function defaultChannels(): Channel[] {
       createdAt: now,
       updatedAt: now,
       children: [
-        child('bank_card_pudong', '浦发银行(3066)', '🏦', '#7C3AED', 'bank_cards'),
+        child('bank_card_account', '银行账户', '🏦', '#7C3AED', 'bank_cards'),
+      ],
+    },
+    {
+      id: 'jd_finance',
+      name: '京东金融',
+      emoji: '💼',
+      amount: 0,
+      color: '#F43F5E',
+      isParent: true,
+      isExpanded: false,
+      createdAt: now,
+      updatedAt: now,
+      children: [
+        child('jd_jinku', '京东小金库', '🪙', '#F59E0B', 'jd_finance'),
+        child('jd_fund', '基金', '📊', '#3B82F6', 'jd_finance'),
+        child('jd_stock', '股票', '📈', '#06B6D4', 'jd_finance'),
+        child('jd_gold', '黄金', '🥇', '#D97706', 'jd_finance'),
+        child('jd_huoqian', '京东活钱+', '💵', '#10B981', 'jd_finance'),
       ],
     },
   ];

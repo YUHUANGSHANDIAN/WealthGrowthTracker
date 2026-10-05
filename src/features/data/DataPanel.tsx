@@ -10,9 +10,12 @@ import { checkDataHealth, checkReportHealth, checkGoalHealth, checkAchievementHe
 import { previewMerge } from '../../utils/mergeData';
 import { platformCapabilities } from '../../utils/platform';
 import { useNavigationStore } from '../../store/navigationStore';
+import { planBackfill, monthlyCoverageByYear } from '../reports/backfill';
+import { buildAnonymousDiagnostic } from '../../utils/anonymousDiagnostic';
+import { saveTextFile, backupFilename } from '../../services/export/download';
 
 export function DataPanel() {
-  const { exportData, importData, applyDataFixes, pushToast, hydrate } = useAppStore();
+  const { exportData, importData, applyDataFixes, pushToast, hydrate, runMonthlyBackfill } = useAppStore();
   const channels = useAppStore((s) => s.channels);
   const history = useAppStore((s) => s.history);
   const reports = useAppStore((s) => s.reports);
@@ -35,6 +38,10 @@ export function DataPanel() {
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [backfillPreviewOpen, setBackfillPreviewOpen] = useState(false);
+
+  const coverageByYear = useMemo(() => monthlyCoverageByYear(reports, history), [reports, history]);
+  const backfillPlan = useMemo(() => planBackfill(reports, history), [reports, history]);
 
   const health = useMemo(() => {
     const base = checkDataHealth(channels, history);
@@ -135,6 +142,22 @@ export function DataPanel() {
     }
   }
 
+  async function exportAnonymousDiagnostic() {
+    const diag = buildAnonymousDiagnostic({
+      channels,
+      history,
+      reports,
+      goals,
+      levelAchievements,
+      lottery,
+      healthIssueTypes: health.issues.map((i) => i.domain),
+      platform: platformCapabilities().platform,
+      storageBackend: adapterName,
+    });
+    await saveTextFile(backupFilename('anonymous_diagnostic'), JSON.stringify(diag, null, 2));
+    pushToast('已导出匿名诊断包（不含金额/名称/交易等敏感信息）', 'success');
+  }
+
   return (
     <div className="space-y-4">
       {/* 数据概览 */}
@@ -158,6 +181,31 @@ export function DataPanel() {
 
       {/* 活动日志 */}
       <ActivityLogCard />
+
+      {/* 数据维护：报告覆盖 + 历史补月报 + 匿名诊断 */}
+      <Card className="p-4">
+        <h2 className="font-semibold text-slate-800 mb-2">🧰 数据维护</h2>
+        <div className="space-y-3">
+          <div>
+            <div className="text-sm text-slate-600 mb-1">报告覆盖情况</div>
+            {coverageByYear.length === 0 ? (
+              <p className="text-xs text-slate-400">暂无历史数据可统计。</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {coverageByYear.map((y) => (
+                  <span key={y.year} className="text-xs bg-slate-50 rounded-lg px-2 py-1">
+                    {y.year}：月报 {y.covered} / {y.total}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => setBackfillPreviewOpen(true)}>📅 预览补生成缺失月报</Button>
+            <Button size="sm" variant="outline" onClick={() => void exportAnonymousDiagnostic()}>🩺 导出匿名诊断</Button>
+          </div>
+        </div>
+      </Card>
 
 
       <Card className="p-4">
@@ -252,7 +300,57 @@ export function DataPanel() {
         onCancel={() => setConfirmRestore(null)}
         onConfirm={() => void doRestore()}
       />
+
+      <BackfillPreviewModal
+        open={backfillPreviewOpen}
+        plan={backfillPlan}
+        onClose={() => setBackfillPreviewOpen(false)}
+        onRun={() => {
+          const r = runMonthlyBackfill();
+          setBackfillPreviewOpen(false);
+          pushToast(`补生成 ${r.created.length} 份、修复 ${r.repaired.length} 份历史月报`, 'success');
+        }}
+      />
     </div>
+  );
+}
+
+function BackfillPreviewModal({ open, plan, onClose, onRun }: {
+  open: boolean;
+  plan: ReturnType<typeof planBackfill>;
+  onClose: () => void;
+  onRun: () => void;
+}) {
+  const createCount = plan.filter((p) => p.action === 'create').length;
+  const repairCount = plan.filter((p) => p.action === 'repair').length;
+  const skipCount = plan.filter((p) => p.action === 'skip').length;
+  return (
+    <Modal open={open} onClose={onClose} title="补生成缺失月报（预览）" size="md"
+      footer={<>
+        <Button variant="ghost" onClick={onClose}>取消</Button>
+        <Button onClick={onRun} disabled={createCount === 0 && repairCount === 0}>执行补生成</Button>
+      </>}>
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">将为缺失的历史月份生成月度报告（dataAsOf = 该月最后有效记录日期，绝不虚构月末值）。</p>
+        <div className="flex gap-3 text-sm">
+          <span className="text-emerald-600">将创建 {createCount}</span>
+          <span className="text-blue-600">将修复 {repairCount}</span>
+          <span className="text-slate-400">跳过 {skipCount}</span>
+        </div>
+        <div className="max-h-64 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50 text-xs">
+          {plan.map((p) => (
+            <div key={p.periodKey} className="flex items-center gap-2 px-3 py-2">
+              <span className="w-24 tabular text-slate-500 shrink-0">{p.month}</span>
+              <span className="w-24 tabular text-slate-400 shrink-0">{p.lastDataDate ?? '—'}</span>
+              <span className={`shrink-0 ${p.action === 'create' ? 'text-emerald-600' : p.action === 'repair' ? 'text-blue-600' : 'text-slate-400'}`}>
+                {p.action === 'create' ? 'Create' : p.action === 'repair' ? 'Repair' : 'Skip'}
+              </span>
+              <span className="flex-1 text-slate-400 truncate">{p.reason}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Modal>
   );
 }
 

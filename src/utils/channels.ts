@@ -182,6 +182,143 @@ export function removeChildChannel(
   );
 }
 
+// ---------------------------------------------------------------------------
+// 父渠道 ⇄ 子渠道 结构转换（v1.5，纯函数，保证资产守恒）
+// ---------------------------------------------------------------------------
+
+/** 添加首个子渠道时的金额处理策略。 */
+export type FirstChildStrategy = 'direct' | 'transfer' | 'uncategorized' | 'clear';
+
+/** 删除最后一个子渠道时的金额处理策略。 */
+export type LastChildStrategy = 'keep-direct' | 'drop-amount';
+
+export interface PromoteResult {
+  channels: Channel[];
+  /** 实际新增的子渠道（含策略生成的「未分类」）。 */
+  addedChildren: SubChannel[];
+  /** 结构转换导致的资产减少（transfer/uncategorized/direct 为 0，clear 为父渠道直接金额）。 */
+  lostAmount: number;
+}
+
+/**
+ * 给父渠道添加一个子渠道，并根据策略处理「父渠道已有直接金额」的语义转换。
+ * - parent 已有子渠道，或直接金额为 0：等价于普通 addChildChannel（子渠道金额 0）。
+ * - parent 无子渠道且直接金额 > 0：
+ *   - transfer       ：直接金额转入新建子渠道（资产守恒）。
+ *   - uncategorized  ：新建「未分类」子渠道承接直接金额，再新增用户子渠道（金额 0，资产守恒）。
+ *   - clear          ：清空父渠道直接金额（仅用户二次确认后允许，总资产减少）。
+ *   - direct         ：仅新增子渠道（金额 0），父渠道直接金额被结构转换丢弃（不推荐，测试用）。
+ */
+export function promoteParentToChildren(
+  channels: Channel[],
+  parentId: string,
+  child: SubChannel,
+  strategy: FirstChildStrategy,
+): PromoteResult {
+  const parent = channels.find((c) => c.id === parentId);
+  if (!parent || !parent.isParent) return { channels, addedChildren: [], lostAmount: 0 };
+
+  const hasChildren = (parent.children?.length ?? 0) > 0;
+  const directAmount = hasChildren ? 0 : round2(parent.amount);
+
+  let added: SubChannel[] = [];
+  let lostAmount = 0;
+
+  if (!hasChildren && directAmount > 0) {
+    switch (strategy) {
+      case 'transfer':
+        added = [{ ...child, amount: directAmount }];
+        break;
+      case 'uncategorized': {
+        const uncat: SubChannel = {
+          id: randomId('sub'),
+          name: '未分类',
+          emoji: '🗂️',
+          amount: directAmount,
+          color: child.color,
+          parentId,
+        };
+        added = [uncat, { ...child, amount: 0 }];
+        break;
+      }
+      case 'clear':
+        added = [{ ...child, amount: 0 }];
+        lostAmount = directAmount;
+        break;
+      case 'direct':
+      default:
+        added = [{ ...child, amount: 0 }];
+        break;
+    }
+  } else {
+    added = [{ ...child, amount: 0 }];
+  }
+
+  const next = normalizeChannelAmounts(
+    channels.map((c) =>
+      c.id === parentId
+        ? { ...c, children: [...(c.children ?? []), ...added], isExpanded: true, updatedAt: nowIso() }
+        : c,
+    ),
+  );
+  return { channels: next, addedChildren: added, lostAmount };
+}
+
+export interface CollapseResult {
+  channels: Channel[];
+  /** 保留为父渠道直接金额的金额。 */
+  keptAmount: number;
+  /** 结构转换导致的资产减少。 */
+  lostAmount: number;
+}
+
+/**
+ * 删除子渠道，并显式处理「删除最后一个子渠道」的金额语义。
+ * - 非最后一个子渠道：普通删除，父渠道仍由剩余子渠道汇总（资产守恒）。
+ * - 最后一个子渠道且 amount > 0：
+ *   - keep-direct ：父渠道变为直接持有该金额（资产守恒，推荐）。
+ *   - drop-amount ：同时删除该金额（总资产减少，需用户明确确认）。
+ * - 最后一个子渠道且 amount = 0：两种策略等价，父渠道变为空直接渠道。
+ */
+export function collapseParentToDirectAmount(
+  channels: Channel[],
+  parentId: string,
+  childId: string,
+  strategy: LastChildStrategy,
+): CollapseResult {
+  const parent = channels.find((c) => c.id === parentId);
+  if (!parent) return { channels, keptAmount: 0, lostAmount: 0 };
+  const children = parent.children ?? [];
+  const target = children.find((s) => s.id === childId);
+  if (!target) return { channels, keptAmount: 0, lostAmount: 0 };
+
+  const remaining = children.filter((s) => s.id !== childId);
+  const targetAmount = round2(target.amount);
+
+  if (remaining.length > 0) {
+    return {
+      channels: normalizeChannelAmounts(
+        channels.map((c) => (c.id === parentId ? { ...c, children: remaining, updatedAt: nowIso() } : c)),
+      ),
+      keptAmount: 0,
+      lostAmount: 0,
+    };
+  }
+
+  if (strategy === 'drop-amount' && targetAmount > 0) {
+    const next = channels.map((c) =>
+      c.id === parentId ? { ...c, children: [], amount: 0, updatedAt: nowIso() } : c,
+    );
+    return { channels: next, keptAmount: 0, lostAmount: targetAmount };
+  }
+
+  // keep-direct（或 amount = 0 时等价）：父渠道变为直接持有该金额
+  const next = channels.map((c) =>
+    c.id === parentId ? { ...c, children: [], amount: targetAmount, updatedAt: nowIso() } : c,
+  );
+  return { channels: next, keptAmount: targetAmount, lostAmount: 0 };
+}
+
 /**
  * 设置「叶子」金额：无子渠道的父渠道直接设置自身金额；有子渠道的父渠道设置其指定子渠道金额。
  * 统一入口，供金额编辑表单使用。

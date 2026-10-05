@@ -152,6 +152,64 @@ function parentChannels(channels: Channel[]): { name: string; amount: number }[]
   return [...map.entries()].map(([name, amount]) => ({ name, amount: round2(amount) }));
 }
 
+/** 期初 → 期末结构变化（父渠道 rollup）。只做描述性统计，不写投资建议。 */
+export interface StructureChangeItem {
+  id: string;
+  name: string;
+  emoji: string;
+  startAmount: number;
+  endAmount: number;
+  amountChange: number;
+  startPct: number; // 期初占比 %
+  endPct: number; // 期末占比 %
+  pctChange: number; // 占比变化（百分点）
+}
+
+/** 把两个渠道快照按父渠道聚合，计算结构变化（缺期初快照时用 amount 0）。 */
+export function channelStructureChange(startChannels: Channel[] | undefined, endChannels: Channel[]): StructureChangeItem[] {
+  const aggregate = (channels: Channel[] | undefined): Map<string, { name: string; emoji: string; amount: number }> => {
+    const map = new Map<string, { name: string; emoji: string; amount: number }>();
+    if (!channels) return map;
+    for (const c of channels) {
+      const amount = channelAmount(c);
+      const existing = map.get(c.id);
+      if (existing) existing.amount = round2(existing.amount + amount);
+      else map.set(c.id, { name: c.name, emoji: c.emoji, amount: round2(amount) });
+    }
+    return map;
+  };
+
+  const start = aggregate(startChannels);
+  const end = aggregate(endChannels);
+  const startTotal = [...start.values()].reduce((a, c) => a + c.amount, 0);
+  const endTotal = [...end.values()].reduce((a, c) => a + c.amount, 0);
+
+  const ids = new Set([...start.keys(), ...end.keys()]);
+  const items: StructureChangeItem[] = [];
+  for (const id of ids) {
+    const s = start.get(id);
+    const e = end.get(id);
+    const startAmount = s?.amount ?? 0;
+    const endAmount = e?.amount ?? 0;
+    const name = e?.name ?? s?.name ?? id;
+    const emoji = e?.emoji ?? s?.emoji ?? '💰';
+    const startPct = startTotal > 0 ? round2((startAmount / startTotal) * 100) : 0;
+    const endPct = endTotal > 0 ? round2((endAmount / endTotal) * 100) : 0;
+    items.push({
+      id,
+      name,
+      emoji,
+      startAmount,
+      endAmount,
+      amountChange: diffMoney(endAmount, startAmount),
+      startPct,
+      endPct,
+      pctChange: round2(endPct - startPct),
+    });
+  }
+  return items.sort((a, b) => Math.abs(b.amountChange) - Math.abs(a.amountChange));
+}
+
 export function historicalChannelComposition(history: HistoryPoint[], opts: CompositionOptions = { level: 'leaf', topN: 5, mode: 'absolute' }): CompositionPoint[] {
   const sorted = [...history].sort((a, b) => (a.date < b.date ? -1 : 1));
   return sorted.map((p) => {

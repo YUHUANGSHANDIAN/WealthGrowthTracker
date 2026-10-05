@@ -91,20 +91,25 @@ export function ChannelItem({ channel, handlers, isPinned = false }: { channel: 
         </span>
       </div>
 
-      {/* 操作栏 */}
+      {/* 操作栏：任何父渠道都始终提供「＋ 子渠道」；无子渠道时额外提供「¥ 金额」 */}
       <div className="flex items-center gap-1 px-2 py-1.5 border-t border-slate-100 bg-slate-50/50">
-        <ActionButton label={hasChildren ? '添加子渠道' : '设置金额'} onClick={() => (hasChildren ? handlers.onAddSub(channel.id) : handlers.onEditAmount({ parentId: channel.id }, channel.amount, channel.name))}>
-          {hasChildren ? '＋ 子渠道' : '¥ 金额'}
+        <ActionButton label="添加子渠道" onClick={() => handlers.onAddSub(channel.id)}>
+          ＋ 子渠道
         </ActionButton>
+        {!hasChildren && (
+          <ActionButton label="设置金额" onClick={() => handlers.onEditAmount({ parentId: channel.id }, channel.amount, channel.name)}>
+            ¥ 金额
+          </ActionButton>
+        )}
         <ActionButton label="编辑渠道" onClick={() => handlers.onEditChannel(channel)}>
-          ✎ 编辑
+          ✏️ 编辑
         </ActionButton>
         <ActionButton label={isPinned ? '取消置顶' : '置顶'} onClick={() => handlers.onTogglePin(channel.id)}>
           {isPinned ? '📌 已置顶' : '📍 置顶'}
         </ActionButton>
         <div className="flex-1" />
         <ActionButton label="删除渠道" onClick={() => handlers.onDeleteChannel(channel)} tone="red">
-          🗑 删除
+          🗑️ 删除
         </ActionButton>
       </div>
 

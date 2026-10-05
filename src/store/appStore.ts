@@ -37,17 +37,19 @@ import {
   defaultSortRules,
 } from '../constants/defaults';
 import {
-  addChildChannel,
+  collapseParentToDirectAmount,
   makeChannel,
   makeSubChannel,
   normalizeChannelAmounts,
+  promoteParentToChildren,
   removeChannel,
-  removeChildChannel,
   setLeafAmount,
   toggleChannelExpanded,
   totalAssets,
   updateChannel,
   updateSubChannel,
+  type FirstChildStrategy,
+  type LastChildStrategy,
 } from '../utils/channels';
 import { round2 } from '../utils/money';
 import { todayString } from '../utils/date';
@@ -61,9 +63,10 @@ import {
 } from '../services/export';
 import { saveTextFile, backupFilename } from '../services/export/download';
 import { generateReport, toggleReportArchive } from '../features/reports/generate';
+import { runBackfill } from '../features/reports/backfill';
 import { reportFileBase, reportHtml } from '../features/reports/reportFile';
 import { buildReportIndex } from '../features/reports/reportIndex';
-import { migrateChannelsV12, migrateReportsV13, needsV12Migration } from '../services/migration';
+import { migrateChannelsV12, migrateChannelsV15, migrateReportsV13, needsV12Migration, needsV15Migration } from '../services/migration';
 import { DEFAULT_REPORT_SORT, type ReportSortSpec } from '../features/reports/reportSort';
 import { detectCelebrations, type CelebrationEvent } from '../utils/celebrate';
 import { DEFAULT_SMART_CONFIG } from '../utils/smartSort';
@@ -145,13 +148,13 @@ interface AppState {
   updateParentChannel: (id: string, patch: Partial<Pick<Channel, 'name' | 'emoji' | 'color'>>) => void;
   deleteParentChannel: (id: string) => void;
   toggleChannel: (id: string) => void;
-  addSubChannel: (parentId: string, name: string, emoji: string, color: string) => void;
+  addSubChannel: (parentId: string, name: string, emoji: string, color: string, strategy?: FirstChildStrategy) => void;
   updateSubChannelInfo: (
     parentId: string,
     childId: string,
     patch: Partial<Pick<SubChannel, 'name' | 'emoji' | 'color'>>,
   ) => void;
-  deleteSubChannel: (parentId: string, childId: string) => void;
+  deleteSubChannel: (parentId: string, childId: string, strategy?: LastChildStrategy) => void;
   setAmount: (target: { parentId: string; childId?: string }, amount: number) => void;
 
   // ---- 历史 ----
@@ -170,6 +173,8 @@ interface AppState {
   deleteReport: (id: string) => void;
   deleteReports: (ids: string[]) => void;
   setReportSortSpec: (spec: ReportSortSpec) => void;
+  /** 补生成缺失的历史月度报告（幂等，返回 create/repair 的 periodKey）。 */
+  runMonthlyBackfill: () => { created: string[]; repaired: string[] };
 
   // ---- 排序 ----
   addSortRule: (rule: Omit<CustomSortRule, 'id' | 'createdAt'>) => void;
@@ -199,10 +204,12 @@ interface AppState {
 
   // ---- Lottery ----
   addLotteryTransaction: (tx: LotteryTransaction) => void;
+  updateLotteryTransaction: (id: string, tx: LotteryTransaction) => void;
   deleteLotteryTransaction: (id: string) => void;
   importLotteryTransactions: (txs: LotteryTransaction[]) => number;
   upsertLotteryProject: (project: LotteryProject) => void;
   deleteLotteryProject: (id: string) => void;
+  archiveLotteryProject: (id: string) => void;
   setLotteryPool: (pool: LotteryState['pool']) => void;
   setLotterySettings: (settings: LotteryState['settings']) => void;
   applyLotteryExcelImport: (preview: { projects: LotteryProject[]; transactions: LotteryTransaction[] }) => { projectsAdded: number; transactionsAdded: number };
@@ -294,6 +301,26 @@ function afterChannelChange(s: Pick<AppState, 'channels' | 'history'>): {
 
 export const useAppStore = create<AppState>()((set, get) => {
   const persist = () => schedulePersist(get);
+
+  /** 渠道金额/结构变更的统一收尾：同步今日历史快照 + 等级成就 + 庆祝 + 持久化。 */
+  const commitChannelChange = (prevTotal: number, nextChannels: Channel[]) => {
+    set((s) => {
+      const { history } = afterChannelChange({ ...s, channels: nextChannels });
+      return { channels: nextChannels, history };
+    });
+    const newTotal = totalAssets(get().channels);
+    const crossed = crossedLevelAchievements(prevTotal, newTotal);
+    if (crossed.length > 0) {
+      set((s) => ({ levelAchievements: mergeLevelAchievements(s.levelAchievements, crossed) }));
+    }
+    const { event, newGoalAchieved } = detectCelebrations(prevTotal, newTotal, get().countdown, get().goalAchieved);
+    if (event) {
+      if (newGoalAchieved) set({ goalAchieved: newGoalAchieved });
+      if (event.goal) get().triggerCoinRain();
+      set({ celebration: event });
+    }
+    persist();
+  };
 
   return {
     hydrated: false,
@@ -400,6 +427,18 @@ export const useAppStore = create<AppState>()((set, get) => {
         if (migrated.added > 0) {
           channels = migrated.channels;
           migrationNote = `已为「校园卡」补充 ${migrated.added} 个默认学校子渠道`;
+        }
+      }
+
+      // v1.4 → v1.5 迁移：新增京东金融父渠道 + 默认子渠道（幂等，仅升级时运行一次）。
+      if (!isFirstRun && needsV15Migration(storedVersion)) {
+        const migrated = migrateChannelsV15(channels);
+        if (migrated.addedParent > 0 || migrated.addedChildren > 0) {
+          channels = migrated.channels;
+          const note = migrated.addedParent > 0
+            ? `已新增「京东金融」父渠道${migrated.addedChildren > 0 ? `及 ${migrated.addedChildren} 个默认子渠道` : ''}`
+            : `已为「京东金融」补齐 ${migrated.addedChildren} 个默认子渠道`;
+          migrationNote = migrationNote ? `${migrationNote}；${note}` : note;
         }
       }
 
@@ -525,40 +564,30 @@ export const useAppStore = create<AppState>()((set, get) => {
       set((s) => ({ channels: toggleChannelExpanded(s.channels, id) }));
       persist();
     },
-    addSubChannel(parentId, name, emoji, color) {
+    addSubChannel(parentId, name, emoji, color, strategy = 'transfer') {
+      const prevTotal = totalAssets(get().channels);
       const child = makeSubChannel(parentId, name, emoji, color);
-      set((s) => ({ channels: addChildChannel(s.channels, parentId, child) }));
-      persist();
+      const result = promoteParentToChildren(get().channels, parentId, child, strategy);
+      commitChannelChange(prevTotal, result.channels);
+      if (result.lostAmount > 0) {
+        get().logActivity('channel-structure', `添加子渠道「${name}」并清空父渠道直接金额 ¥${result.lostAmount.toFixed(2)}`, 'channel', parentId);
+      }
     },
     updateSubChannelInfo(parentId, childId, patch) {
       set((s) => ({ channels: updateSubChannel(s.channels, parentId, childId, patch) }));
       persist();
     },
-    deleteSubChannel(parentId, childId) {
-      set((s) => ({ channels: removeChildChannel(s.channels, parentId, childId) }));
-      persist();
+    deleteSubChannel(parentId, childId, strategy = 'keep-direct') {
+      const prevTotal = totalAssets(get().channels);
+      const result = collapseParentToDirectAmount(get().channels, parentId, childId, strategy);
+      commitChannelChange(prevTotal, result.channels);
+      if (result.lostAmount > 0) {
+        get().logActivity('channel-structure', `删除子渠道并同时删除金额 ¥${result.lostAmount.toFixed(2)}`, 'channel', parentId);
+      }
     },
     setAmount(target, amount) {
       const prevTotal = totalAssets(get().channels);
-      set((s) => {
-        const channels = setLeafAmount(s.channels, target, amount);
-        const { history } = afterChannelChange({ ...s, channels });
-        return { channels, history };
-      });
-      const newTotal = totalAssets(get().channels);
-      // 记录新达成的等级成就（首次跨越阈值）
-      const crossed = crossedLevelAchievements(prevTotal, newTotal);
-      if (crossed.length > 0) {
-        set((s) => ({ levelAchievements: mergeLevelAchievements(s.levelAchievements, crossed) }));
-      }
-      // 检测并触发等级升级 / 目标达成庆祝（仅真实的金额编辑触发，导入/重启不触发）
-      const { event, newGoalAchieved } = detectCelebrations(prevTotal, newTotal, get().countdown, get().goalAchieved);
-      if (event) {
-        if (newGoalAchieved) set({ goalAchieved: newGoalAchieved });
-        if (event.goal) get().triggerCoinRain();
-        set({ celebration: event });
-      }
-      persist();
+      commitChannelChange(prevTotal, setLeafAmount(get().channels, target, amount));
     },
 
     // ---------------------------------------------------------------------
@@ -698,6 +727,16 @@ export const useAppStore = create<AppState>()((set, get) => {
       set({ reportSortSpec: spec });
       persist();
     },
+    runMonthlyBackfill() {
+      const s = get();
+      const result = runBackfill(s.reports, s.history);
+      set({ reports: result.reports });
+      persist();
+      if (result.created.length > 0) {
+        get().logActivity('report-backfill', `补生成 ${result.created.length} 份历史月报`, 'reports');
+      }
+      return { created: result.created, repaired: result.repaired };
+    },
 
     // ---------------------------------------------------------------------
     addSortRule(rule) {
@@ -821,9 +860,19 @@ export const useAppStore = create<AppState>()((set, get) => {
       set((s) => ({ lottery: { ...s.lottery, transactions: [tx, ...s.lottery.transactions] } }));
       persist();
     },
+    updateLotteryTransaction(id, tx) {
+      set((s) => ({
+        lottery: {
+          ...s.lottery,
+          transactions: s.lottery.transactions.map((t) => (t.id === id ? { ...tx, id, updatedAt: new Date().toISOString() } : t)),
+        },
+      }));
+      persist();
+    },
     deleteLotteryTransaction(id) {
       set((s) => ({ lottery: { ...s.lottery, transactions: s.lottery.transactions.filter((t) => t.id !== id) } }));
       persist();
+      get().logActivity('lottery-transaction-delete', '删除一笔彩票交易', 'lottery', id);
     },
     importLotteryTransactions(txs) {
       const existingFps = new Set(get().lottery.transactions.map((t) => t.importFingerprint).filter((f): f is string => !!f));
@@ -845,6 +894,17 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
     deleteLotteryProject(id) {
       set((s) => ({ lottery: { ...s.lottery, projects: s.lottery.projects.filter((p) => p.id !== id) } }));
+      persist();
+    },
+    archiveLotteryProject(id) {
+      set((s) => ({
+        lottery: {
+          ...s.lottery,
+          projects: s.lottery.projects.map((p) =>
+            p.id === id ? { ...p, status: 'archived' as const, updatedAt: new Date().toISOString() } : p,
+          ),
+        },
+      }));
       persist();
     },
     setLotteryPool(pool) {

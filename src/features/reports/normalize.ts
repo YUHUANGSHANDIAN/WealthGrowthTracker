@@ -1,6 +1,6 @@
-import type { Channel, FinancialReport, ReportChannelDetail, ReportType } from '../../types';
+import type { Channel, FinancialReport, ReportAssetComposition, ReportChannelDetail, ReportType } from '../../types';
 import { getLevelByAmount } from '../../constants/levels';
-import { leafChannels } from '../../utils/channels';
+import { channelAmount, leafChannels } from '../../utils/channels';
 import { isoWeekOfYear, pad2, parseDateString } from '../../utils/date';
 import { round2 } from '../../utils/money';
 
@@ -17,8 +17,8 @@ import { round2 } from '../../utils/money';
  * 所有函数均为纯函数、确定性、幂等：normalize(normalize(report)) 结果不变。
  */
 
-export const REPORT_SCHEMA_VERSION = 2;
-export const REPORT_RENDERER_VERSION = 1;
+export const REPORT_SCHEMA_VERSION = 3;
+export const REPORT_RENDERER_VERSION = 2;
 
 /** 当前渠道构成报告所需的份额明细（叶子渠道）。 */
 export function buildChannelDetails(channels: Channel[], total: number): ReportChannelDetail[] {
@@ -32,6 +32,35 @@ export function buildChannelDetails(channels: Channel[], total: number): ReportC
     children: [],
     percentage: total > 0 ? round2((l.amount / total) * 100) : 0,
   }));
+}
+
+/**
+ * 层级资产构成（Report Schema v3）：父渠道 rollup + 子渠道 breakdown。
+ * 父渠道金额 = 子渠道之和；总资产 = 父渠道金额之和，绝不父子 double-count。
+ */
+export function buildAssetComposition(channels: Channel[], total: number): ReportAssetComposition {
+  const parents = channels.map((c) => {
+    const amount = round2(channelAmount(c));
+    const children = (c.children ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      emoji: s.emoji,
+      amount: round2(s.amount),
+      color: s.color,
+      percentageOfParent: amount > 0 ? round2((s.amount / amount) * 100) : 0,
+      percentageOfTotal: total > 0 ? round2((s.amount / total) * 100) : 0,
+    }));
+    return {
+      id: c.id,
+      name: c.name,
+      emoji: c.emoji,
+      amount,
+      color: c.color,
+      percentageOfTotal: total > 0 ? round2((amount / total) * 100) : 0,
+      children,
+    };
+  });
+  return { parents, totalAmount: round2(total) };
 }
 
 /** 报告周期 key：weekly:2026-W40 / monthly:2026-10 / yearly:2026。 */
@@ -165,6 +194,16 @@ export function normalizeFinancialReport(report: FinancialReport): FinancialRepo
     channelSnapshotMissing = false;
   }
 
+  // 层级资产构成（v3）：存在 channels snapshot 时重建父子层级；否则保留旧 flat，绝不猜父关系。
+  let assetComposition = report.assetComposition;
+  let compositionWarnings = report.compositionWarnings;
+  if (!assetComposition && report.channels && report.channels.length > 0) {
+    assetComposition = buildAssetComposition(report.channels, report.totalAmount);
+  }
+  if (!assetComposition && channelDetails.length > 0 && compositionWarnings === undefined) {
+    compositionWarnings = ['旧版报告未保存父子渠道映射，当前仅能显示扁平渠道结构。'];
+  }
+
   // TOP 渠道：仅在缺失且有渠道明细时补齐
   const topChannels =
     report.topChannels && report.topChannels.length > 0 ? report.topChannels : topChannelsFrom(channelDetails);
@@ -203,6 +242,10 @@ export function normalizeFinancialReport(report: FinancialReport): FinancialRepo
     dataCompleteness: completeness.score,
     dataCompletenessLabel: completeness.label,
     dataWarnings: completeness.warnings,
+    ...(assetComposition ? { assetComposition } : {}),
+    ...(report.dataAsOf !== undefined ? { dataAsOf: report.dataAsOf } : {}),
+    generationSource: report.generationSource ?? 'normal',
+    ...(compositionWarnings !== undefined ? { compositionWarnings } : {}),
   };
 }
 

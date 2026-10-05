@@ -6,7 +6,7 @@ import { useNavigationStore } from '../../src/store/navigationStore';
 function lotteryState(): LotteryState {
   return {
     pool: { id: 'pool', name: '彩票资金池', openingBalance: 0, createdAt: '' },
-    projects: [{ id: 'p1', name: '竞彩足球', category: 'sports-football', status: 'active', dataCompleteness: 'detailed', createdAt: '', updatedAt: '' }],
+    projects: [{ id: 'p1', name: '项目A', category: 'sports-football', status: 'active', dataCompleteness: 'detailed', createdAt: '', updatedAt: '' }],
     transactions: [],
     settings: { showLotteryAppendix: false },
   };

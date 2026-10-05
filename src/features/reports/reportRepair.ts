@@ -1,6 +1,6 @@
 import type { FinancialReport, HistoryPoint, ReportFieldProvenance } from '../../types';
 import { round2 } from '../../utils/money';
-import { buildChannelDetails, topChannelsFrom } from './normalize';
+import { buildAssetComposition, buildChannelDetails, topChannelsFrom } from './normalize';
 import { latestPointAtOrBefore } from './generate';
 
 /**
@@ -113,6 +113,7 @@ export function repairReportFromHistory(report: FinancialReport, history: Histor
       const details = buildChannelDetails(endSnapshot.channels, report.totalAmount);
       next.channels = endSnapshot.channels;
       next.channelDetails = details;
+      next.assetComposition = buildAssetComposition(endSnapshot.channels, report.totalAmount);
       next.channelSnapshotMissing = false;
       next.topChannels = topChannelsFrom(details);
       record('channelDetails', undefined, 'history-snapshot', 'history-snapshot', `从 ${endSnapshot.date} 的历史渠道快照恢复渠道构成`);
@@ -121,6 +122,9 @@ export function repairReportFromHistory(report: FinancialReport, history: Histor
       next.channelSnapshotMissing = true;
       warnings.push('该版本历史记录未保存渠道构成，无法恢复（不推算、不使用今天的数据）');
     }
+  } else if (next.channels?.length && !next.assetComposition) {
+    // 已有 channels 快照但缺层级构成（旧 schema），安全重建父子层级
+    next.assetComposition = buildAssetComposition(next.channels, report.totalAmount);
   }
 
   next.fieldProvenance = provenance;

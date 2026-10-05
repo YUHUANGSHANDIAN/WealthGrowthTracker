@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { useNavigationStore } from '../../store/navigationStore';
-import type { FinancialReport, ReportType } from '../../types';
+import type { FinancialReport, ReportType, ReportAssetComposition } from '../../types';
 import { formatCNY, diffMoney } from '../../utils/money';
 import { assetAtDate, generateReport } from './generate';
 import { displayTitle, findReportConflict, repairReportFromHistory } from './reportRepair';
@@ -476,6 +476,12 @@ function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, 
             <Stat label="本期变化" value={`${positive ? '+' : ''}${formatCNY(report.changeAmount)}`} tone={positive ? 'up' : 'down'} />
             <Stat label="变化率" value={`${positive ? '+' : ''}${report.changePercentage.toFixed(1)}%`} tone={positive ? 'up' : 'down'} />
           </div>
+          {report.dataAsOf && (
+            <p className="text-xs text-slate-400 mt-2">
+              数据截至 {report.dataAsOf}
+              {report.reportType === 'monthly' ? '（该月最后有效记录）' : ''}
+            </p>
+          )}
         </section>
 
         {/* 周期统计 */}
@@ -501,14 +507,19 @@ function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, 
           )}
         </section>
 
-        {/* 渠道构成 */}
+        {/* 渠道构成（父渠道 rollup + 子渠道 breakdown） */}
         <section>
           <SectionTitle>资产构成</SectionTitle>
-          {items.length > 0 ? (
+          {report.assetComposition && report.assetComposition.parents.length > 0 ? (
+            <HierarchicalComposition comp={report.assetComposition} />
+          ) : items.length > 0 ? (
             <BarChart items={items} ariaLabel="报告资产构成" />
           ) : (
             <p className="text-sm text-slate-400">无渠道明细{report.channelSnapshotMissing ? '（旧版历史仅保存总资产，无法还原渠道构成）' : ''}</p>
           )}
+          {report.compositionWarnings?.length ? (
+            <p className="text-xs text-amber-600 mt-2">⚠️ {report.compositionWarnings.join('；')}</p>
+          ) : null}
         </section>
 
         {/* 历史比较 */}
@@ -807,5 +818,67 @@ function RepairReportModal({ report, history, onClose, onApply }: {
         <TextArea label="修复原因（可选）" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="例如：补充早期缺失的历史快照" />
       </div>
     </Modal>
+  );
+}
+
+/** 层级资产构成：父渠道 rollup 条 + 点击展开子渠道 breakdown。 */
+function HierarchicalComposition({ comp }: { comp: ReportAssetComposition }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const parents = [...comp.parents].sort((a, b) => b.amount - a.amount);
+  const maxAmount = Math.max(1, ...parents.map((p) => p.amount));
+
+  function toggle(id: string) {
+    setExpanded((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <div className="space-y-2">
+      {parents.map((p) => {
+        const open = expanded.has(p.id);
+        const widthPct = Math.max(2, (p.amount / maxAmount) * 100);
+        return (
+          <div key={p.id} className="border border-slate-100 rounded-lg overflow-hidden">
+            <button
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-slate-50 transition-colors"
+              onClick={() => p.children.length > 0 && toggle(p.id)}
+              aria-expanded={p.children.length > 0 ? open : undefined}
+            >
+              <span aria-hidden>{p.emoji}</span>
+              <span className="flex-1 min-w-0">
+                <span className="font-semibold text-slate-800 text-sm truncate">{p.name}</span>
+                <span className="block h-1.5 mt-1 bg-slate-100 rounded-full overflow-hidden">
+                  <span className="block h-full bg-emerald-500 rounded-full" style={{ width: `${widthPct}%` }} />
+                </span>
+              </span>
+              <span className="text-right shrink-0">
+                <span className="font-semibold text-slate-800 tabular text-sm">{formatCNY(p.amount)}</span>
+                <span className="block text-xs text-slate-400 tabular">{p.percentageOfTotal.toFixed(1)}%</span>
+              </span>
+              {p.children.length > 0 && (
+                <span className={`text-slate-300 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden>▾</span>
+              )}
+            </button>
+            {open && p.children.length > 0 && (
+              <div className="border-t border-slate-100 divide-y divide-slate-50 bg-slate-50/40">
+                {[...p.children].sort((a, b) => b.amount - a.amount).map((c) => (
+                  <div key={c.id} className="flex items-center gap-2 px-4 py-2 pl-8">
+                    <span aria-hidden>{c.emoji}</span>
+                    <span className="flex-1 text-sm text-slate-700 truncate">{c.name}</span>
+                    <span className="text-sm tabular text-slate-600">{formatCNY(c.amount)}</span>
+                    <span className="text-xs text-slate-400 tabular w-20 text-right">占父 {c.percentageOfParent.toFixed(1)}%</span>
+                    <span className="text-xs text-slate-400 tabular w-20 text-right">占总 {c.percentageOfTotal.toFixed(1)}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }

@@ -55,6 +55,46 @@ export interface ReportChannelDetail {
   percentage: number;
 }
 
+/** 层级资产构成中的子渠道（breakdown）。 */
+export interface ReportAssetChild {
+  id: string;
+  name: string;
+  emoji: string;
+  amount: Money;
+  color?: string;
+  /** 占父渠道金额比例（0-100）。 */
+  percentageOfParent: number;
+  /** 占总资产比例（0-100）。 */
+  percentageOfTotal: number;
+}
+
+/** 层级资产构成中的父渠道（rollup）。 */
+export interface ReportAssetParent {
+  id: string;
+  name: string;
+  emoji: string;
+  amount: Money;
+  color?: string;
+  /** 占总资产比例（0-100）。 */
+  percentageOfTotal: number;
+  /** 子渠道明细；无子渠道的父渠道是叶子，children 为空。 */
+  children: ReportAssetChild[];
+}
+
+/**
+ * 层级资产构成（Report Schema v3）：父级和子级都保存，避免父子混在同一级。
+ * - 父渠道属于 rollup（金额 = 子渠道之和），其占比基于总资产。
+ * - 子渠道属于 breakdown，同时保存 percentageOfParent 与 percentageOfTotal。
+ * - 总资产 = 父渠道金额之和；绝不能把父渠道与子渠道一起相加。
+ */
+export interface ReportAssetComposition {
+  parents: ReportAssetParent[];
+  totalAmount: Money;
+}
+
+/** 报告生成来源。 */
+export type ReportGenerationSource = 'normal' | 'legacy-txt-import' | 'legacy-image-import' | 'historical-backfill';
+
 /** 财务报告（周/月/年报）。大量可选字段用于兼容旧版报告的完整快照数据。 */
 export interface FinancialReport {
   id: string;
@@ -154,6 +194,16 @@ export interface FinancialReport {
   fieldProvenance?: Partial<Record<string, ReportFieldProvenance>>;
   /** 修复审计记录（手动修复历史事实）。 */
   repairAudit?: ReportRepairAudit[];
+
+  // —— v1.5 Report Domain（可选，向后兼容）——
+  /** 层级资产构成（父渠道 rollup + 子渠道 breakdown），v3 起为 canonical。 */
+  assetComposition?: ReportAssetComposition;
+  /** 报告数据快照截止日期（YYYY-MM-DD）：该周期最后一条有效历史记录的日期。 */
+  dataAsOf?: string;
+  /** 报告生成来源（区分正常生成 / 旧版文本导入 / 旧版图片导入 / 历史补月报）。 */
+  generationSource?: ReportGenerationSource;
+  /** 资产构成警告（如旧版未保存父子映射，仅能显示扁平结构）。 */
+  compositionWarnings?: string[];
 }
 
 /** 报告字段来源。 */

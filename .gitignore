@@ -48,3 +48,13 @@ legacy-export/
 # 本地归档 / 导入（用户数据与冗余副本，不进入 Git）
 local-archives/
 local-imports/
+
+# 用户隐私数据（绝不进入 Git）
+历史财务报告/
+private-data/
+migration-backups/
+legacy-lottery/
+*.xlsx
+*.xls
+app-state.json
+wealth-backup*.json

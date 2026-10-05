@@ -35,6 +35,8 @@ jobs:
         run: npm run typecheck
       - name: Test
         run: npm test
+      - name: Privacy check
+        run: npm run privacy:check
       - name: Rust format check
         working-directory: src-tauri
         run: cargo fmt --all -- --check

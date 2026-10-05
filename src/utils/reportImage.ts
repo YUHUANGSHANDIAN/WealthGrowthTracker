@@ -111,7 +111,7 @@ export function buildReportSvg(
 
   const badge = `<g><rect x="${W - 40 - 150}" y="34" width="150" height="34" rx="17" fill="${pal.surface}"/><rect x="${W - 40 - 150}" y="34" width="150" height="34" rx="17" fill="none" stroke="${pal.border}"/><text x="${W - 40 - 75}" y="56" font-size="14" font-weight="600" text-anchor="middle" fill="${pal.primary}">🏆 ${esc(levelText)}</text></g>`;
 
-  const period = `${esc(report.startDate)} ~ ${esc(report.endDate)}`;
+  const period = `${esc(report.startDate)} ~ ${esc(report.endDate)}${report.dataAsOf ? ` · 数据截至 ${esc(report.dataAsOf)}` : ''}`;
 
   // —— 标题 + 周期 ——
   const titleBlock = `
@@ -151,36 +151,76 @@ export function buildReportSvg(
       .join('');
   }
 
-  // —— 渠道构成 ——
-  const details = [...report.channelDetails].sort((a, b) => b.amount - a.amount).slice(0, template === 'compact' ? 5 : 8);
+  // —— 渠道构成（父渠道 + 可选 TOP 子渠道，避免父子混淆）——
+  const comp = report.assetComposition;
+  const parentRows = comp && comp.parents.length > 0 ? [...comp.parents].sort((a, b) => b.amount - a.amount) : [];
+  const flatDetails = [...report.channelDetails].sort((a, b) => b.amount - a.amount);
+  const maxParents = template === 'story' ? 6 : template === 'compact' ? 3 : 5;
   let channels = '';
-  if (details.length > 0 && template !== 'compact') {
+  if (template === 'compact') {
+    const source = parentRows.length > 0 ? parentRows : flatDetails;
+    const top3 = source
+      .slice(0, 3)
+      .map((d) => `${esc(d.emoji ?? '')} ${esc(d.name)} ${privacyPercentage('percentageOfTotal' in d ? d.percentageOfTotal : d.percentage)}`)
+      .join('  ·  ');
+    channels = `<text x="40" y="${totalValueY + 66}" font-size="14" fill="#475569">TOP：${top3}</text>`;
+  } else if (parentRows.length > 0) {
+    const barStartY = (template === 'social' || template === 'story' ? totalValueY + 210 : totalValueY + 200);
+    const barH = template === 'story' ? 30 : 24;
+    const labelW = 190;
+    const barX = 40 + labelW + 16;
+    const barMaxW = W - 40 - barX - 130;
+    const maxAmount = Math.max(1, ...parentRows.map((p) => p.amount));
+    let y = barStartY;
+    channels = `<text x="40" y="${y - 16}" font-size="16" font-weight="600" fill="${pal.ink}">资产构成</text>`;
+
+    for (const p of parentRows.slice(0, maxParents)) {
+      const w = Math.max(4, (p.amount / maxAmount) * barMaxW);
+      const pct = privacyPercentage(p.percentageOfTotal);
+      const amt = privacyAmount(p.amount, privacy);
+      const amountText = amt != null && amt !== '' ? ` ${esc(amt)}` : '';
+      channels += `<g>
+        <text x="40" y="${y + barH / 2 + 5}" font-size="14" font-weight="600" fill="#1f2937">${esc(p.emoji ?? '')} ${esc(p.name)}</text>
+        <rect x="${barX}" y="${y}" width="${w}" height="${barH}" rx="6" fill="${pal.primary}" opacity="0.85"/>
+        <text x="${barX + w + 8}" y="${y + barH / 2 + 5}" font-size="13" fill="#475569">${pct}${amountText}</text>
+      </g>`;
+      y += barH + 12;
+      if (p.children.length > 0) {
+        const topChildren = [...p.children].sort((a, b) => b.amount - a.amount).slice(0, 3);
+        const childText = topChildren
+          .map((c) => `${esc(c.emoji ?? '')} ${esc(c.name)} ${privacyPercentage(c.percentageOfTotal)}`)
+          .join('  ·  ');
+        channels += `<text x="64" y="${y + 6}" font-size="12" fill="#64748b">└ ${childText}</text>`;
+        y += 18;
+      }
+      y += 6;
+    }
+  } else if (flatDetails.length > 0) {
+    // 旧版扁平叶子渠道（无父子映射）
     const barStartY = (template === 'social' || template === 'story' ? totalValueY + 210 : totalValueY + 200);
     const barH = template === 'story' ? 40 : 30;
     const gap = template === 'story' ? 22 : 14;
-    const maxAmount = Math.max(1, ...details.map((d) => d.amount));
+    const maxAmount = Math.max(1, ...flatDetails.map((d) => d.amount));
     const labelW = 220;
     const barX = 40 + labelW + 16;
     const barMaxW = W - 40 - barX - 120;
 
     channels = `<text x="40" y="${barStartY - 16}" font-size="16" font-weight="600" fill="${pal.ink}">资产构成</text>`;
-    channels += details
+    channels += flatDetails
+      .slice(0, 8)
       .map((d, i) => {
-        const y = barStartY + i * (barH + gap);
+        const yy = barStartY + i * (barH + gap);
         const w = Math.max(4, (d.amount / maxAmount) * barMaxW);
         const pct = privacyPercentage(d.percentage);
         const amt = privacyAmount(d.amount, privacy);
         const amountText = amt != null && amt !== '' ? ` ${esc(amt)}` : '';
         return `<g>
-          <text x="40" y="${y + barH / 2 + 5}" font-size="14" fill="#334155">${esc(d.emoji ?? '')} ${esc(d.name)}</text>
-          <rect x="${barX}" y="${y}" width="${w}" height="${barH}" rx="7" fill="${pal.primary}" opacity="0.85"/>
-          <text x="${barX + w + 8}" y="${y + barH / 2 + 5}" font-size="13" fill="#475569">${pct}${amountText}</text>
+          <text x="40" y="${yy + barH / 2 + 5}" font-size="14" fill="#334155">${esc(d.emoji ?? '')} ${esc(d.name)}</text>
+          <rect x="${barX}" y="${yy}" width="${w}" height="${barH}" rx="7" fill="${pal.primary}" opacity="0.85"/>
+          <text x="${barX + w + 8}" y="${yy + barH / 2 + 5}" font-size="13" fill="#475569">${pct}${amountText}</text>
         </g>`;
       })
       .join('');
-  } else if (details.length > 0 && template === 'compact') {
-    const top3 = details.slice(0, 3).map((d) => `${esc(d.emoji ?? '')} ${esc(d.name)} ${privacyPercentage(d.percentage)}`).join('  ·  ');
-    channels = `<text x="40" y="${totalValueY + 66}" font-size="14" fill="#475569">TOP：${top3}</text>`;
   }
 
   // —— 底部 ——

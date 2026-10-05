@@ -9,7 +9,8 @@ import { LevelExplorer } from '../levels/LevelExplorer';
 import { Modal, ConfirmDialog } from '../../components/ui/Modal';
 import { TextField, SelectField } from '../../components/ui/form';
 import { ChannelItem, type AmountTarget, type ChannelHandlers } from './ChannelItem';
-import { ChannelFormModal, SubChannelFormModal, AmountModal } from './channelModals';
+import { ChannelFormModal, SubChannelFormModal, AmountModal, FirstChildModal, LastChildModal } from './channelModals';
+import type { FirstChildStrategy, LastChildStrategy } from '../../utils/channels';
 import type { ChannelGrowth } from '../../types';
 
 type SortConfig =
@@ -87,6 +88,10 @@ export function AssetsPanel() {
   const [subForm, setSubForm] = useState<{ open: boolean; parentId: string; editing: SubChannel | null }>({ open: false, parentId: '', editing: null });
   // 金额表单
   const [amountForm, setAmountForm] = useState<{ open: boolean; target: AmountTarget; current: number; label: string }>({ open: false, target: { parentId: '' }, current: 0, label: '' });
+  // 首个子渠道（父渠道已有直接金额时）
+  const [firstChild, setFirstChild] = useState<{ open: boolean; parent: Channel | null }>({ open: false, parent: null });
+  // 删除最后一个子渠道
+  const [lastChild, setLastChild] = useState<{ open: boolean; parentId: string; childId: string; parentName: string; childName: string; childAmount: number }>({ open: false, parentId: '', childId: '', parentName: '', childName: '', childAmount: 0 });
   // 删除确认
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void }>({ open: false, title: '', message: '', onConfirm: () => {} });
 
@@ -160,18 +165,32 @@ export function AssetsPanel() {
           setDeleteConfirm((s) => ({ ...s, open: false }));
         },
       }),
-    onAddSub: (parentId) => setSubForm({ open: true, parentId, editing: null }),
+    onAddSub: (parentId) => {
+      const parent = channels.find((c) => c.id === parentId);
+      if (parent && (parent.children?.length ?? 0) === 0 && parent.amount > 0) {
+        setFirstChild({ open: true, parent });
+      } else {
+        setSubForm({ open: true, parentId, editing: null });
+      }
+    },
     onEditSub: (parentId, sub) => setSubForm({ open: true, parentId, editing: sub }),
-    onDeleteSub: (parentId, sub) =>
-      setDeleteConfirm({
-        open: true,
-        title: '删除子渠道',
-        message: `确定删除子渠道「${sub.name}」吗？此操作无法撤销。`,
-        onConfirm: () => {
-          deleteSubChannel(parentId, sub.id);
-          setDeleteConfirm((s) => ({ ...s, open: false }));
-        },
-      }),
+    onDeleteSub: (parentId, sub) => {
+      const parent = channels.find((c) => c.id === parentId);
+      const isLast = (parent?.children?.length ?? 0) <= 1;
+      if (isLast && sub.amount > 0) {
+        setLastChild({ open: true, parentId, childId: sub.id, parentName: parent?.name ?? '', childName: sub.name, childAmount: sub.amount });
+      } else {
+        setDeleteConfirm({
+          open: true,
+          title: '删除子渠道',
+          message: `确定删除子渠道「${sub.name}」吗？此操作无法撤销。`,
+          onConfirm: () => {
+            deleteSubChannel(parentId, sub.id);
+            setDeleteConfirm((s) => ({ ...s, open: false }));
+          },
+        });
+      }
+    },
     onEditAmount: (target, current, label) =>
       setAmountForm({ open: true, target, current, label }),
     onTogglePin: togglePinChannel,
@@ -289,6 +308,26 @@ export function AssetsPanel() {
         message={deleteConfirm.message}
         onCancel={() => setDeleteConfirm((s) => ({ ...s, open: false }))}
         onConfirm={deleteConfirm.onConfirm}
+      />
+      {firstChild.parent && (
+        <FirstChildModal
+          open={firstChild.open}
+          parent={firstChild.parent}
+          totalAssets={total}
+          onClose={() => setFirstChild({ open: false, parent: null })}
+          onSubmit={(data) => {
+            addSubChannel(firstChild.parent!.id, data.name, data.emoji, data.color, data.strategy as FirstChildStrategy);
+          }}
+        />
+      )}
+      <LastChildModal
+        open={lastChild.open}
+        parentName={lastChild.parentName}
+        childName={lastChild.childName}
+        childAmount={lastChild.childAmount}
+        totalAssets={total}
+        onClose={() => setLastChild((s) => ({ ...s, open: false }))}
+        onSubmit={(strategy: LastChildStrategy) => deleteSubChannel(lastChild.parentId, lastChild.childId, strategy)}
       />
 
       <MultiSortModal

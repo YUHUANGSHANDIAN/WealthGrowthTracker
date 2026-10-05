@@ -2,6 +2,51 @@
 
 本文件记录「财富成长记 / 财富梦想实现家」各版本的变更。
 
+## [1.5.0] - 2026-10-05
+
+### 资产（Assets）
+- **父渠道 ⇄ 子渠道生命周期修复**：任何父渠道始终提供「＋ 子渠道」，空父渠道仍可直接记录金额。
+- **无损结构转换**：父渠道有直接金额时添加首个子渠道，弹出「金额归属」选择（转入新子渠道 / 创建「未分类」/ 清空直接金额，需二次确认）；默认保持总资产不变。
+- **删除最后一个子渠道显式交互**：可选「保留为父渠道直接金额」（推荐）或「同时删除该金额」，杜绝隐式金额行为。
+- 转换逻辑集中为纯函数 `promoteParentToChildren` / `collapseParentToDirectAmount`，并同步今日历史快照。
+- **京东金融**：默认父渠道新增「京东金融」（京东小金库 / 基金 / 股票 / 黄金 / 京东活钱+），并做 v1.4→v1.5 幂等 Migration（按规范化名称去重，保留用户已有子渠道数据）。
+
+### 财务报告（Reports）
+- **Report Schema v3**：新增 `assetComposition`（父渠道 rollup + 子渠道 breakdown，含 percentageOfParent / percentageOfTotal），父级与子级都保存、绝不父子 double-count。
+- **Data As Of**：报告记录数据快照截止日期（该周期最后有效记录），UI 显示「数据截至」，绝不虚构真正月末值。
+- **generationSource**：区分正常生成 / 旧版文本导入 / 旧版图片导入 / 历史补月报。
+- 旧报告只有扁平 channelDetails（无父子映射）时不猜父关系，显示明确 warning。
+- 报告详情「资产构成」改为两层：父渠道构成 + 点击展开子渠道明细（占父渠道 / 占总资产）。
+- 分享图片与 HTML 同步展示父子层级，避免混淆。
+
+### 彩票（Lottery）
+- **Current Pool Balance 与 Lifetime Performance 分离**：当前资金池只基于真实 ledger 交易；全生命周期表现额外纳入 summary-only 历史项目与未归属交易，绝不 double-count。
+- 「💼 注入/取出」按钮改为真正的资金池设置；新增「➕ 资金注入」「↩️ 资金取出」按钮创建真实交易。
+- **Project CRUD**：新增 / 编辑 / 归档 / 详情；有交易的项目禁止直接删除（建议归档，避免 orphan）。
+- **Project Detail**：Overview / 交易明细 / ROI / 数据类型（详细交易 / 历史汇总）。
+- **项目净盈亏升级**：0 中线横向正负 Bar，按净盈亏 / ROI / 支出 / 收入 / 交易数排序，可筛选 / 点击进详情。
+- **交易编辑** + 删除确认（显示类型 / 日期 / 金额 / 项目，写入活动日志）。
+- 彩票健康检查扩展：详细项目无交易 / summary-only 有交易 / 重复项目 / 非法日期范围 / 非法 adjustment 方向。
+
+### 分析（Analysis）
+- 新增 `channelStructureChange`：期初 → 期末结构变化（金额变化 + 占比变化百分点），纯描述性统计。
+
+### 数据（Data）
+- **报告覆盖情况**：按年份统计月报覆盖（如 2025：月报 10/12）。
+- **缺失月报补生成**：预览（Create / Repair / Skip）+ 执行；使用当月最后有效 HistoryPoint 作为 dataAsOf，绝不生成 0 元报告、绝不重复生成。
+- **历史报告导入器**：`legacyReports.ts`（TXT/图片配对、解析、与现有报告/历史 reconciliation、字段来源优先级）。
+- **匿名诊断导出**：只含版本 / schema / 各域数量 / 健康问题类型 / 平台 / 存储后端，绝不包含金额 / 渠道名 / 报告内容 / 彩票交易 / PIN。
+
+### 隐私（Privacy）
+- **移除真实数据样例**：默认银行卡匿名化（不再含真实卡号尾号），彩票测试 Fixture 全部合成化。
+- **Privacy Guard**：`npm run privacy:check`（scripts/privacy-check.mjs）阻止 app-state / 备份 / xlsx / 历史报告目录进入 Git，CI 同步运行。
+- .gitignore 增加用户隐私数据防御性条目。
+
+### 其它
+- 版本 1.5.0（package.json / Cargo.toml / tauri.conf.json 同步）。
+- Backup 升级到 v1.5.0，仍兼容 v1.0 ~ v1.4。
+- Emoji / Color Registry v2：拆分 FEATURE_META / ACTION_META / REPORT_META / CHANNEL_SUGGESTIONS / LOTTERY_META / STATUS_META / SEMANTIC_COLORS。
+
 ## [1.4.0] - 2026-10-04
 
 ### 财务报告（Reports）
