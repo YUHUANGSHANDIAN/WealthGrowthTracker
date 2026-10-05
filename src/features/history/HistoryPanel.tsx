@@ -7,16 +7,31 @@ import { Modal, ConfirmDialog } from '../../components/ui/Modal';
 import { TextField, MoneyField } from '../../components/ui/form';
 import { LineChart } from '../../components/charts/LineChart';
 import { BRAND } from '../../components/charts/palette';
+import type { HistoryPoint } from '../../types';
+
+const SOURCE_META: Record<string, { label: string; tone: 'emerald' | 'blue' | 'purple' | 'slate' | 'amber' }> = {
+  'live-snapshot': { label: '实时快照', tone: 'emerald' },
+  manual: { label: '手动', tone: 'slate' },
+  'weekly-report': { label: '周报生成', tone: 'blue' },
+  import: { label: '导入', tone: 'purple' },
+  'legacy-txt-import': { label: '旧版TXT', tone: 'amber' },
+  'legacy-image-import': { label: '旧版图片', tone: 'amber' },
+  'ocr-repair': { label: 'OCR修复', tone: 'amber' },
+  'historical-backfill': { label: '历史补全', tone: 'blue' },
+};
 
 export function HistoryPanel() {
   const history = useAppStore((s) => s.history);
-  const { addHistoryPoint, deleteHistoryPoint, deleteHistoryPoints } = useAppStore();
+  const { addHistoryPoint, overwriteHistoryPoint, updateHistoryPoint, deleteHistoryPoint, deleteHistoryPoints } = useAppStore();
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const [date, setDate] = useState(todayString());
   const [amount, setAmount] = useState<string>('');
   const [error, setError] = useState('');
+
+  // 同日期冲突（手动添加 / 编辑日期撞车时触发）
+  const [conflict, setConflict] = useState<{ date: string; amount: number; existing: HistoryPoint } | null>(null);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -70,7 +85,28 @@ export function HistoryPanel() {
       setError('请输入日期');
       return;
     }
-    addHistoryPoint(date, value);
+    if (editingDate === null) {
+      // 手动添加：同日期已存在 → 冲突，不静默覆盖
+      const res = addHistoryPoint(date, value, 'manual');
+      if (res.conflict && res.existing) {
+        setConflict({ date, amount: value, existing: res.existing });
+        return;
+      }
+    } else {
+      if (date === editingDate) {
+        // 同一天编辑金额：直接更新原记录
+        updateHistoryPoint(date, value);
+      } else {
+        // 编辑日期到另一天：目标日期已有记录 → 冲突
+        const existing = history.find((h) => h.date === date);
+        if (existing) {
+          setConflict({ date, amount: value, existing });
+          return;
+        }
+        overwriteHistoryPoint(date, value, 'manual');
+        deleteHistoryPoint(editingDate);
+      }
+    }
     setFormOpen(false);
   }
 
@@ -148,6 +184,9 @@ export function HistoryPanel() {
                 />
                 <span className="text-sm text-slate-500 tabular w-28 shrink-0">{p.date}</span>
                 <span className="flex-1 text-sm font-semibold text-slate-800 tabular">{formatCNY(p.totalAmount)}</span>
+                {p.source && SOURCE_META[p.source] && (
+                  <Badge tone={SOURCE_META[p.source]!.tone}>{SOURCE_META[p.source]!.label}</Badge>
+                )}
                 <button className="text-xs text-slate-500 hover:text-emerald-600" onClick={() => openEdit(p.date, p.totalAmount)}>
                   编辑
                 </button>
@@ -191,6 +230,33 @@ export function HistoryPanel() {
           setConfirmDelete(false);
         }}
       />
+
+      {/* 同日期冲突：一天只能保留一条 */}
+      {conflict && (
+        <Modal open onClose={() => setConflict(null)} title="当天已有历史记录" size="sm"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConflict(null)}>取消</Button>
+              <Button onClick={() => { overwriteHistoryPoint(conflict.date, conflict.amount, 'manual'); setConflict(null); setFormOpen(false); }}>覆盖当天记录</Button>
+            </>
+          }>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">日期 <span className="font-medium tabular">{conflict.date}</span> 已有一条历史记录。</p>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="bg-slate-50 rounded-lg p-3">
+                <div className="text-xs text-slate-400">现有记录</div>
+                <div className="font-semibold text-slate-700 tabular">{formatCNY(conflict.existing.totalAmount)}</div>
+                <div className="text-xs text-slate-400 mt-1">来源：{SOURCE_META[conflict.existing.source ?? '']?.label ?? '—'}</div>
+              </div>
+              <div className="bg-emerald-50 rounded-lg p-3">
+                <div className="text-xs text-emerald-600">新记录</div>
+                <div className="font-semibold text-emerald-700 tabular">{formatCNY(conflict.amount)}</div>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400">一天只能保留一条记录。覆盖会更新当天金额与快照。</p>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

@@ -24,6 +24,7 @@ import type {
   LotteryTransaction,
   LotteryProject,
   ActivityLogEntry,
+  HistorySource,
 } from '../types';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { getLevelByAmount } from '../constants/levels';
@@ -53,6 +54,7 @@ import {
 } from '../utils/channels';
 import { round2 } from '../utils/money';
 import { todayString } from '../utils/date';
+import { prepareHistoryUpsert, overwriteHistoryPoint } from '../utils/history';
 import { randomId, uuid } from '../utils/id';
 import { storageService } from '../services/storage';
 import {
@@ -158,15 +160,20 @@ interface AppState {
   setAmount: (target: { parentId: string; childId?: string }, amount: number) => void;
 
   // ---- 历史 ----
-  addHistoryPoint: (date: string, totalAmount: number) => void;
+  addHistoryPoint: (date: string, totalAmount: number, source?: HistorySource) => { conflict: boolean; existing?: HistoryPoint };
+  overwriteHistoryPoint: (date: string, totalAmount: number, source?: HistorySource) => void;
   updateHistoryPoint: (date: string, totalAmount: number) => void;
   deleteHistoryPoint: (date: string) => void;
   deleteHistoryPoints: (dates: string[]) => void;
+  /** 构造周报生成的 Daily Snapshot 并检查当天 History 冲突（不写入）。 */
+  prepareWeeklySnapshot: (referenceDate: string) => { conflict: boolean; identical: boolean; snapshot: HistoryPoint; existing?: HistoryPoint };
+  /** 写入周报 Daily Snapshot（创建或覆盖当天，一天一条）。 */
+  commitWeeklySnapshot: (snapshot: HistoryPoint) => void;
 
   // ---- 报告 ----
-  generateReportNow: (reportType: ReportType, referenceDate?: string, mode?: 'update' | 'saveAs') => FinancialReport;
-  /** 显式写入报告（update=覆盖同周期；saveAs=另存新版本）。不静默覆盖归档报告。 */
-  commitReport: (generated: FinancialReport, mode: 'update' | 'saveAs', existing?: FinancialReport) => FinancialReport;
+  generateReportNow: (reportType: ReportType, referenceDate?: string) => FinancialReport;
+  /** 写入报告：同周期唯一——有 existing 则更新（递增 revision、保留自定义元数据），否则新建。 */
+  commitReport: (generated: FinancialReport, existing?: FinancialReport) => FinancialReport;
   updateReportMetadata: (id: string, patch: Partial<Pick<FinancialReport, 'titleMode' | 'standardTitle' | 'customTitle' | 'tags' | 'customSummary' | 'archiveNote'>>) => void;
   repairReport: (id: string, repaired: FinancialReport) => void;
   archiveReport: (id: string, note?: string) => void;
@@ -286,15 +293,19 @@ function afterChannelChange(s: Pick<AppState, 'channels' | 'history'>): {
   }));
   const wealthLevel = getLevelByAmount(total).name;
   const timestamp = Date.now();
+  const updatedAt = new Date().toISOString();
 
+  // 当天唯一 HistoryPoint 原地更新（Live Snapshot，不新增第二条，不弹冲突）
   let history = s.history;
   const existing = history.find((h) => h.date === today);
   if (existing) {
     history = history.map((h) =>
-      h.date === today ? { ...h, totalAmount: total, channels: snapshot, wealthLevel, timestamp } : h,
+      h.date === today
+        ? { ...h, totalAmount: total, channels: snapshot, wealthLevel, timestamp, source: 'live-snapshot', updatedAt }
+        : h,
     );
   } else {
-    history = [...history, { date: today, totalAmount: total, channels: snapshot, wealthLevel, timestamp }];
+    history = [...history, { date: today, totalAmount: total, channels: snapshot, wealthLevel, timestamp, source: 'live-snapshot', updatedAt }];
   }
   return { channels, history };
 }
@@ -591,19 +602,37 @@ export const useAppStore = create<AppState>()((set, get) => {
     },
 
     // ---------------------------------------------------------------------
-    addHistoryPoint(date, totalAmount) {
-      set((s) => {
-        const rest = s.history.filter((h) => h.date !== date);
-        const history = [...rest, { date, totalAmount: round2(totalAmount) }].sort((a, b) =>
-          a.date < b.date ? -1 : 1,
-        );
-        return { history };
-      });
+    addHistoryPoint(date, totalAmount, source = 'manual') {
+      const incoming: HistoryPoint = {
+        date,
+        totalAmount: round2(totalAmount),
+        source,
+        updatedAt: new Date().toISOString(),
+        timestamp: Date.now(),
+      };
+      const result = prepareHistoryUpsert(get().history, incoming);
+      if (!result.ok) {
+        // 同日期唯一：不静默覆盖，返回冲突交给 UI 处理
+        return { conflict: true, existing: result.existing };
+      }
+      set({ history: result.history });
+      persist();
+      return { conflict: false };
+    },
+    overwriteHistoryPoint(date, totalAmount, source = 'manual') {
+      const incoming: HistoryPoint = {
+        date,
+        totalAmount: round2(totalAmount),
+        source,
+        updatedAt: new Date().toISOString(),
+        timestamp: Date.now(),
+      };
+      set((s) => ({ history: overwriteHistoryPoint(s.history, incoming) }));
       persist();
     },
     updateHistoryPoint(date, totalAmount) {
       set((s) => ({
-        history: s.history.map((h) => (h.date === date ? { ...h, totalAmount: round2(totalAmount) } : h)),
+        history: s.history.map((h) => (h.date === date ? { ...h, totalAmount: round2(totalAmount), updatedAt: new Date().toISOString() } : h)),
       }));
       persist();
     },
@@ -616,23 +645,48 @@ export const useAppStore = create<AppState>()((set, get) => {
       set((s) => ({ history: s.history.filter((h) => !set_.has(h.date)) }));
       persist();
     },
+    prepareWeeklySnapshot(referenceDate) {
+      const s = get();
+      const total = totalAssets(s.channels);
+      const snapshotChannels: Channel[] = s.channels.map((c) => ({
+        ...c,
+        children: c.children ? c.children.map((child) => ({ ...child })) : undefined,
+      }));
+      const snapshot: HistoryPoint = {
+        date: referenceDate,
+        totalAmount: total,
+        channels: snapshotChannels,
+        wealthLevel: getLevelByAmount(total).name,
+        timestamp: Date.now(),
+        updatedAt: new Date().toISOString(),
+        source: 'weekly-report',
+      };
+      const existing = s.history.find((h) => h.date === referenceDate);
+      if (!existing) return { conflict: false, identical: false, snapshot };
+      const identical = existing.totalAmount === total && JSON.stringify(existing.channels ?? null) === JSON.stringify(snapshotChannels);
+      if (identical) return { conflict: false, identical: true, snapshot };
+      return { conflict: true, identical: false, snapshot, existing };
+    },
+    commitWeeklySnapshot(snapshot) {
+      set((s) => ({ history: overwriteHistoryPoint(s.history, snapshot) }));
+      persist();
+    },
 
     // ---------------------------------------------------------------------
-    generateReportNow(reportType, referenceDate = todayString(), mode = 'update') {
+    generateReportNow(reportType, referenceDate = todayString()) {
       const s = get();
       const generated = generateReport(s.history, reportType, referenceDate, s.channels);
       const existing = s.reports.find((r) => r.periodKey && r.periodKey === generated.periodKey);
-      return get().commitReport(generated, mode, existing);
+      return get().commitReport(generated, existing);
     },
-    commitReport(generated, mode = 'update', existing) {
+    commitReport(generated, existing) {
       const s = get();
-      // 归档报告绝不静默覆盖：update 模式遇到 archived 自动退化为 saveAs（另存新版本）
-      const shouldUpdate = !!existing && mode === 'update' && !existing!.isArchived;
       let report: FinancialReport;
       let reports: FinancialReport[];
 
-      if (shouldUpdate) {
-        const prev = existing!;
+      if (existing) {
+        // 同周期唯一：绝不新增第二份 canonical report，只更新现有报告（递增 revision、保留自定义元数据与归档状态）。
+        const prev = existing;
         const custom = prev.titleMode === 'custom' && prev.customTitle?.trim();
         report = {
           ...generated,
@@ -655,7 +709,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         };
         reports = s.reports.map((r) => (r.id === prev.id ? report : r));
       } else {
-        report = existing && mode === 'saveAs' ? { ...generated, copyOfReportId: existing.id } : generated;
+        report = generated;
         reports = [report, ...s.reports];
       }
 
@@ -672,11 +726,12 @@ export const useAppStore = create<AppState>()((set, get) => {
           }
         })();
       }
-      const verb = shouldUpdate ? '已更新' : '已生成';
+      const updated = !!existing;
+      const verb = updated ? '已更新' : '已生成';
       get().pushToast(`${verb}报告「${report.title}」`, 'success');
       get().logActivity(
-        shouldUpdate ? 'report-update' : 'report-create',
-        shouldUpdate ? `更新报告「${report.title}」至 Revision ${report.revision}` : `生成报告「${report.title}」`,
+        updated ? 'report-update' : 'report-create',
+        updated ? `更新报告「${report.title}」至 Revision ${report.revision}` : `生成报告「${report.title}」`,
         'report',
         report.id,
       );

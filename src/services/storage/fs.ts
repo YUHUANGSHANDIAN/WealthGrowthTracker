@@ -43,6 +43,53 @@ export async function getDocumentsDir(): Promise<string | null> {
   return invoke<string>('document_dir');
 }
 
+/** 默认数据根目录（忽略自定义配置，用于「恢复默认位置」）。 */
+export async function getDefaultDataDir(): Promise<string | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('default_data_dir');
+}
+
+/** 数据根目录配置（与 Rust storage-config.json 对应）。 */
+export interface DataRootConfig {
+  dataRootMode: 'default' | 'custom';
+  customDataRoot?: string;
+  updatedAt?: string;
+}
+
+/** 读取数据根目录配置（仅 Tauri，返回 null 表示非 Tauri 环境）。 */
+export async function readStorageConfig(): Promise<DataRootConfig | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<DataRootConfig>('storage_config_read');
+}
+
+/** 写入数据根目录配置（仅 Tauri）。 */
+export async function writeStorageConfig(config: DataRootConfig): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke<void>('storage_config_write', { config });
+}
+
+/** 获取 OS App Config Directory 路径（仅 Tauri）。 */
+export async function getConfigDir(): Promise<string | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('config_dir');
+}
+
+/** 把整个数据根目录从 src 复制到 dst（跨磁盘安全），返回复制的文件数。 */
+export async function migrateDataRoot(src: string, dst: string): Promise<number> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<number>('migrate_data_root', { src, dst });
+}
+
+/** 删除任意绝对路径（文件或目录），供存储迁移旧根清理等受控场景。 */
+export async function removePathAbsolute(path: string): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke<void>('remove_path_absolute', { path });
+}
+
 /** 原生打开一个路径（目录用资源管理器，文件用默认程序）。 */
 export async function openPathInSystem(relPath: string): Promise<void> {
   if (!isTauri()) return;

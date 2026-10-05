@@ -47,9 +47,18 @@ describe('appStore', () => {
     expect(todayPoint?.timestamp).toBeGreaterThan(0);
   });
 
-  it('addHistoryPoint 同日期覆盖而非重复', () => {
+  it('addHistoryPoint 同日期返回冲突而非静默覆盖（一天一条）', () => {
     useAppStore.getState().addHistoryPoint('2026-01-01', 100);
-    useAppStore.getState().addHistoryPoint('2026-01-01', 200);
+    const res = useAppStore.getState().addHistoryPoint('2026-01-01', 200);
+    expect(res.conflict).toBe(true);
+    const pts = useAppStore.getState().history.filter((h) => h.date === '2026-01-01');
+    expect(pts).toHaveLength(1);
+    expect(pts[0]!.totalAmount).toBe(100); // 未覆盖
+  });
+
+  it('overwriteHistoryPoint 同日期覆盖', () => {
+    useAppStore.getState().addHistoryPoint('2026-01-01', 100);
+    useAppStore.getState().overwriteHistoryPoint('2026-01-01', 200);
     const pts = useAppStore.getState().history.filter((h) => h.date === '2026-01-01');
     expect(pts).toHaveLength(1);
     expect(pts[0]!.totalAmount).toBe(200);

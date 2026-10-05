@@ -12,6 +12,7 @@ import { useNavigationStore } from '../../store/navigationStore';
 import { Card, Button, Badge, ProgressBar, EmptyState } from '../../components/ui/primitives';
 import { Modal } from '../../components/ui/Modal';
 import { MoneyField, TextField, SelectField } from '../../components/ui/form';
+import { SliderField } from '../../components/ui/Slider';
 import { LineChart } from '../../components/charts/LineChart';
 import { PREDICTION } from '../../components/charts/palette';
 
@@ -204,8 +205,7 @@ export function GoalsPanel() {
             ]}
           />
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">风力 <span className="text-slate-400 tabular">{Math.round(coinRainConfig.windStrength * 100)}%</span></label>
-            <input type="range" min={0} max={1} step={0.05} value={coinRainConfig.windStrength} onChange={(e) => setCoinRainConfig({ ...coinRainConfig, windStrength: Number(e.target.value) })} className="w-full accent-emerald-600" aria-label="风力" />
+            <SliderField label="风力" min={0} max={1} step={0.05} value={coinRainConfig.windStrength} onChange={(v) => setCoinRainConfig({ ...coinRainConfig, windStrength: v })} format={(v) => `${Math.round(v * 100)}%`} ariaLabel="风力" />
           </div>
         </div>
       </Card>

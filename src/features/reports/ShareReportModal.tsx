@@ -21,6 +21,7 @@ import {
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/primitives';
 import { SelectField } from '../../components/ui/form';
+import { SliderField } from '../../components/ui/Slider';
 
 /**
  * Share Center —— 报告分享（v1.3）。
@@ -171,10 +172,7 @@ export function ShareReportModal({ report, onClose }: { report: FinancialReport;
           />
           {format !== 'png' && (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                质量 <span className="text-slate-400 tabular">{Math.round(quality * 100)}%</span>
-              </label>
-              <input type="range" min={0.5} max={1} step={0.05} value={quality} onChange={(e) => setQuality(Number(e.target.value))} className="w-full accent-emerald-600" aria-label="图片质量" />
+              <SliderField label="质量" min={0.5} max={1} step={0.05} value={quality} onChange={setQuality} format={(v) => `${Math.round(v * 100)}%`} ariaLabel="图片质量" />
             </div>
           )}
           {background === 'transparent' && format !== 'png' && (

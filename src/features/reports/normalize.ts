@@ -2,6 +2,7 @@ import type { Channel, FinancialReport, ReportAssetComposition, ReportChannelDet
 import { getLevelByAmount } from '../../constants/levels';
 import { channelAmount, leafChannels } from '../../utils/channels';
 import { isoWeekOfYear, pad2, parseDateString } from '../../utils/date';
+import { canonicalWeeklyPeriod, resolveWeeklyIdentity } from '../../utils/isoWeek';
 import { round2 } from '../../utils/money';
 
 /**
@@ -17,8 +18,8 @@ import { round2 } from '../../utils/money';
  * 所有函数均为纯函数、确定性、幂等：normalize(normalize(report)) 结果不变。
  */
 
-export const REPORT_SCHEMA_VERSION = 3;
-export const REPORT_RENDERER_VERSION = 2;
+export const REPORT_SCHEMA_VERSION = 4;
+export const REPORT_RENDERER_VERSION = 3;
 
 /** 当前渠道构成报告所需的份额明细（叶子渠道）。 */
 export function buildChannelDetails(channels: Channel[], total: number): ReportChannelDetail[] {
@@ -164,20 +165,57 @@ export function computeCompleteness(report: FinancialReport): ReportCompleteness
  */
 export function normalizeFinancialReport(report: FinancialReport): FinancialReport {
   const endDate = report.endDate || report.startDate;
-  const periodKey = report.periodKey ?? periodKeyOf(report);
-  const title = report.title?.trim() ? report.title : buildTitle(report.reportType, endDate);
-  const standardTitle = report.standardTitle ?? title;
   const titleMode = report.titleMode ?? 'auto';
-
   const d = parseDateString(endDate);
-  const iso = report.reportType === 'weekly' ? isoWeekOfYear(endDate) : null;
 
-  // 周期定位字段（仅缺失时推导，不覆盖已有历史事实）
-  const year = report.year ?? (report.reportType === 'weekly' ? (iso?.year ?? d.getFullYear()) : d.getFullYear());
+  // —— Calendar Metadata（v1.6 起为「结构性字段」，非不可改的历史事实）——
+  let periodKey = report.periodKey ?? periodKeyOf(report);
+  let startDate = report.startDate;
+  let canonicalEndDate = report.endDate;
+  let standardTitle = report.standardTitle ?? buildTitle(report.reportType, endDate);
+  let year = report.year ?? d.getFullYear();
   const monthNumber = report.monthNumber ?? (report.reportType === 'monthly' ? d.getMonth() + 1 : undefined);
-  const weekNumber = report.weekNumber ?? (report.reportType === 'weekly' ? iso?.week : undefined);
-  const isoWeek = report.isoWeek ?? iso?.week;
-  const isoWeekYear = report.isoWeekYear ?? iso?.year;
+  let weekNumber: number | undefined = report.weekNumber;
+  let isoWeek: number | undefined = report.isoWeek;
+  let isoWeekYear: number | undefined = report.isoWeekYear;
+
+  if (report.reportType === 'weekly') {
+    // 周报：periodKey / startDate / endDate / weekNumber / isoWeek / isoWeekYear / year / standardTitle
+    // 必须与 canonical ISO 周期一致（Monday→Sunday，7 天），不再用 ?? 保留旧错误。
+    const identity = resolveWeeklyIdentity({
+      periodKey: report.periodKey,
+      isoWeekYear: report.isoWeekYear,
+      isoWeek: report.isoWeek,
+      title: report.standardTitle ?? report.title,
+      endDate: report.endDate,
+      startDate: report.startDate,
+    });
+    if (identity) {
+      const canonical = canonicalWeeklyPeriod(identity);
+      periodKey = canonical.periodKey;
+      startDate = canonical.startDate;
+      canonicalEndDate = canonical.endDate;
+      standardTitle = canonical.standardTitle;
+      year = canonical.isoWeekYear;
+      weekNumber = canonical.isoWeek;
+      isoWeek = canonical.isoWeek;
+      isoWeekYear = canonical.isoWeekYear;
+    } else {
+      const iso = isoWeekOfYear(endDate);
+      weekNumber = report.weekNumber ?? iso?.week;
+      isoWeek = report.isoWeek ?? iso?.week;
+      isoWeekYear = report.isoWeekYear ?? iso?.year;
+      year = report.year ?? (iso?.year ?? d.getFullYear());
+    }
+  }
+
+  // 展示标题：custom 保留用户标题；周报 auto 用 canonical 标准标题；月/年报 auto 保留原标题。
+  const title =
+    titleMode === 'custom' && report.customTitle?.trim()
+      ? report.customTitle.trim()
+      : report.reportType === 'weekly'
+        ? standardTitle
+        : report.title?.trim() || standardTitle;
 
   // 财富等级（从报告自己保存的 totalAmount 推导，安全）
   const level = getLevelByAmount(report.totalAmount);
@@ -222,6 +260,8 @@ export function normalizeFinancialReport(report: FinancialReport): FinancialRepo
     reportRendererVersion: report.reportRendererVersion ?? REPORT_RENDERER_VERSION,
     reportNormalizedAt: report.reportNormalizedAt,
     periodKey,
+    startDate,
+    endDate: canonicalEndDate,
     title,
     standardTitle,
     titleMode,
@@ -245,6 +285,7 @@ export function normalizeFinancialReport(report: FinancialReport): FinancialRepo
     ...(assetComposition ? { assetComposition } : {}),
     ...(report.dataAsOf !== undefined ? { dataAsOf: report.dataAsOf } : {}),
     generationSource: report.generationSource ?? 'normal',
+    integrityStatus: report.integrityStatus ?? ((report.generationSource ?? 'normal') === 'normal' ? 'verified' : 'reconstructed'),
     ...(compositionWarnings !== undefined ? { compositionWarnings } : {}),
   };
 }

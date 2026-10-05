@@ -2,7 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { Card, Button, Badge } from '../../components/ui/primitives';
 import { Modal, ConfirmDialog } from '../../components/ui/Modal';
-import { storageService, getDocumentsDir, openPathInSystem } from '../../services/storage';
+import { storageService, getDocumentsDir, getDefaultDataDir, openPathInSystem } from '../../services/storage';
+import { readStorageConfig, writeStorageConfig, migrateDataRoot, removePathAbsolute } from '../../services/storage/fs';
+import { TextField } from '../../components/ui/form';
+import { validateDataRootMigration } from '../../services/storage/migrate';
 import { parseBackup } from '../../services/export';
 import { downloadCSV } from '../../components/charts/export';
 import { buildChannelsCsv, buildHistoryCsv } from '../../utils/dataCsv';
@@ -39,6 +42,8 @@ export function DataPanel() {
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [backfillPreviewOpen, setBackfillPreviewOpen] = useState(false);
+  const [dataRootMode, setDataRootMode] = useState<'default' | 'custom'>('default');
+  const [storageModalOpen, setStorageModalOpen] = useState(false);
 
   const coverageByYear = useMemo(() => monthlyCoverageByYear(reports, history), [reports, history]);
   const backfillPlan = useMemo(() => planBackfill(reports, history), [reports, history]);
@@ -59,6 +64,8 @@ export function DataPanel() {
     void (async () => {
       const dir = await getDocumentsDir();
       if (dir) setDataPath(dir);
+      const cfg = await readStorageConfig();
+      if (cfg) setDataRootMode(cfg.dataRootMode);
     })();
   }, [isDesktop]);
 
@@ -158,6 +165,32 @@ export function DataPanel() {
     pushToast('已导出匿名诊断包（不含金额/名称/交易等敏感信息）', 'success');
   }
 
+  async function doMigrateDataRoot(target: string, mode: 'custom' | 'default'): Promise<string | null> {
+    const validation = validateDataRootMigration(dataPath, target);
+    if (!validation.ok) return validation.reason ?? '路径非法';
+    try {
+      await storageService.flush();
+      const mgr = storageService.getDesktopManager();
+      if (mgr) await mgr.backupNow(true); // 迁移前备份，随数据树一起复制
+      await migrateDataRoot(dataPath, target);
+      await writeStorageConfig({
+        dataRootMode: mode,
+        ...(mode === 'custom' ? { customDataRoot: target } : {}),
+        updatedAt: new Date().toISOString(),
+      });
+      await storageService.reload();
+      await hydrate();
+      await removePathAbsolute(dataPath); // 成功后才删除旧根
+      setDataPath(target);
+      setDataRootMode(mode);
+      return null; // 成功
+    } catch (err) {
+      // 迁移失败：config 仍指向旧目录，旧数据未删除
+      console.error('[storage] 迁移失败:', err);
+      return `迁移失败：${String(err)}（原数据未受影响）`;
+    }
+  }
+
   return (
     <div className="space-y-4">
       {/* 数据概览 */}
@@ -237,6 +270,20 @@ export function DataPanel() {
         </Card>
       )}
 
+      {canOpenFolder && (
+        <Card className="p-4">
+          <h2 className="font-semibold text-slate-800 mb-2">📁 数据存放位置</h2>
+          <p className="text-sm text-slate-500 mb-1 break-all">当前：<span className="font-mono text-xs text-slate-700">{dataPath || '—'}</span></p>
+          <p className="text-xs text-slate-400 mb-3">模式：{dataRootMode === 'custom' ? '自定义目录' : '默认目录'} · Storage Backend：{adapterName}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => setStorageModalOpen(true)}>📁 更改位置</Button>
+            {dataRootMode === 'custom' && (
+              <Button size="sm" variant="outline" onClick={() => { void (async () => { const d = await getDefaultDataDir(); if (d) { const err = await doMigrateDataRoot(d, 'default'); if (err) pushToast(err, 'error'); else pushToast('已恢复默认位置', 'success'); } })(); }}>↩ 恢复默认位置</Button>
+            )}
+          </div>
+        </Card>
+      )}
+
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-2">存储与隐私</h2>
         <p className="text-sm text-slate-600">你的所有资产数据默认只保存在<strong>你自己的电脑本地</strong>，不会上传到任何服务器。卸载应用不会删除「我的文档」中的财富数据。</p>
@@ -311,6 +358,19 @@ export function DataPanel() {
           pushToast(`补生成 ${r.created.length} 份、修复 ${r.repaired.length} 份历史月报`, 'success');
         }}
       />
+
+      <StorageLocationModal
+        open={storageModalOpen}
+        currentRoot={dataPath}
+        onClose={() => setStorageModalOpen(false)}
+        onMigrate={async (target) => {
+          const err = await doMigrateDataRoot(target, 'custom');
+          if (err) return err;
+          setStorageModalOpen(false);
+          pushToast('数据目录迁移成功', 'success');
+          return null;
+        }}
+      />
     </div>
   );
 }
@@ -348,6 +408,50 @@ function BackfillPreviewModal({ open, plan, onClose, onRun }: {
               <span className="flex-1 text-slate-400 truncate">{p.reason}</span>
             </div>
           ))}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function StorageLocationModal({ open, currentRoot, onClose, onMigrate }: {
+  open: boolean;
+  currentRoot: string;
+  onClose: () => void;
+  onMigrate: (target: string) => Promise<string | null>;
+}) {
+  const [target, setTarget] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  function submit() {
+    const validation = validateDataRootMigration(currentRoot, target);
+    if (!validation.ok) { setError(validation.reason ?? '路径非法'); return; }
+    setError('');
+    setBusy(true);
+    void onMigrate(target.trim()).then((err) => {
+      setBusy(false);
+      if (err) setError(err);
+    });
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="更改数据存放位置" size="md"
+      footer={<>
+        <Button variant="ghost" onClick={onClose}>取消</Button>
+        <Button onClick={submit} disabled={busy}>{busy ? '迁移中…' : '迁移到此位置'}</Button>
+      </>}>
+      <div className="space-y-4">
+        <div>
+          <div className="text-xs text-slate-400 mb-1">当前数据位置</div>
+          <div className="text-sm font-mono text-slate-700 break-all">{currentRoot || '—'}</div>
+        </div>
+        <TextField label="新数据目录（绝对路径）" value={target} onChange={(e) => setTarget(e.target.value)} error={error} placeholder="例如：D:\\WealthData" autoFocus />
+        <p className="text-xs text-slate-400">
+          迁移会复制整个数据目录树（data/ reports/ backups/ exports/ 等），校验通过后才删除旧目录；失败自动回滚，原数据不受影响。目标目录应为空或尚不存在。
+        </p>
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
+          ⚠️ 迁移前会先创建备份并随数据一起复制到新位置。请勿在迁移过程中关闭应用。
         </div>
       </div>
     </Modal>

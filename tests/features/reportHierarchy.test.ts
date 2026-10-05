@@ -48,7 +48,7 @@ describe('Report 层级资产构成（Schema v3）', () => {
       channelDetails: [], isArchived: false, createdAt: '',
       channels,
     });
-    expect(report.reportSchemaVersion).toBe(3);
+    expect(report.reportSchemaVersion).toBe(4);
     expect(report.assetComposition).toBeDefined();
     expect(report.assetComposition!.parents[0]!.children).toHaveLength(1);
   });

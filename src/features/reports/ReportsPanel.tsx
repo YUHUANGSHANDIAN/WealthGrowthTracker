@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { useNavigationStore } from '../../store/navigationStore';
-import type { FinancialReport, ReportType, ReportAssetComposition } from '../../types';
+import type { FinancialReport, ReportType, ReportAssetComposition, HistoryPoint } from '../../types';
 import { formatCNY, diffMoney } from '../../utils/money';
 import { assetAtDate, generateReport } from './generate';
 import { displayTitle, findReportConflict, repairReportFromHistory } from './reportRepair';
@@ -32,6 +32,19 @@ const TYPE_META: Record<ReportType, { label: string; icon: string; tone: 'emeral
   yearly: { label: '年报', icon: '🗓️', tone: 'purple' },
 };
 
+const INTEGRITY_META: Record<import('../../types').ReportIntegrityStatus, { label: string; tone: 'emerald' | 'blue' | 'amber' }> = {
+  verified: { label: '✓ 已验证', tone: 'emerald' },
+  reconstructed: { label: '🔄 已重建', tone: 'blue' },
+  'needs-review': { label: '⚠ 需核对', tone: 'amber' },
+};
+
+const GENERATION_SOURCE_LABEL: Record<string, string> = {
+  normal: '正常生成',
+  'legacy-txt-import': '旧版 TXT',
+  'legacy-image-import': '旧版图片',
+  'historical-backfill': '历史补全',
+};
+
 type TypeFilter = 'all' | ReportType | 'archived';
 type TimeFilter = 'all' | 'this-year' | 'last-year' | '12m' | 'custom';
 
@@ -40,7 +53,7 @@ export function ReportsPanel() {
   const history = useAppStore((s) => s.history);
   const channels = useAppStore((s) => s.channels);
   const reportSortSpec = useAppStore((s) => s.reportSortSpec);
-  const { commitReport, archiveReport, deleteReport, deleteReports, setReportSortSpec, updateReportMetadata, repairReport, pushToast } = useAppStore();
+  const { commitReport, archiveReport, deleteReport, deleteReports, setReportSortSpec, updateReportMetadata, repairReport, pushToast, prepareWeeklySnapshot, commitWeeklySnapshot } = useAppStore();
 
   const [reportType, setReportType] = useState<ReportType>('weekly');
   const [search, setSearch] = useState('');
@@ -49,6 +62,7 @@ export function ReportsPanel() {
   const [customYear, setCustomYear] = useState(String(new Date().getFullYear()));
   const [detail, setDetail] = useState<FinancialReport | null>(null);
   const [conflict, setConflict] = useState<{ generated: FinancialReport; existing: FinancialReport } | null>(null);
+  const [snapshotConflict, setSnapshotConflict] = useState<{ snapshot: HistoryPoint; existing: HistoryPoint; generated: FinancialReport } | null>(null);
   const [editMeta, setEditMeta] = useState<FinancialReport | null>(null);
   const [repairTarget, setRepairTarget] = useState<FinancialReport | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -103,15 +117,30 @@ export function ReportsPanel() {
     return sortReports(list, reportSortSpec);
   }, [reports, typeFilter, timeFilter, customYear, nowYear, today, search, reportSortSpec]);
 
-  function generate() {
-    const generated = generateReport(history, reportType, today, channels);
+  function proceedReport(generated: FinancialReport) {
     const existing = findReportConflict(reports, generated.periodKey);
     if (existing) {
-      // 不静默覆盖：弹出冲突对话框，让用户选择更新/另存/取消
+      // 不静默覆盖：弹出冲突对话框，让用户选择「更新」或「取消」（同周期唯一，不再另存第二份）
       setConflict({ generated, existing });
     } else {
-      commitReport(generated, 'update');
+      commitReport(generated);
     }
+  }
+
+  function generate() {
+    const generated = generateReport(history, reportType, today, channels);
+
+    // 周报 = 一次 Daily Snapshot 写入：先同步当天 History，再处理报告周期冲突
+    if (reportType === 'weekly') {
+      const snap = prepareWeeklySnapshot(today);
+      if (snap.conflict && snap.existing) {
+        setSnapshotConflict({ snapshot: snap.snapshot, existing: snap.existing, generated });
+        return;
+      }
+      if (!snap.identical) commitWeeklySnapshot(snap.snapshot);
+    }
+
+    proceedReport(generated);
   }
 
   function toggleSelect(id: string) {
@@ -183,7 +212,6 @@ export function ReportsPanel() {
             />
           </div>
           <Button onClick={generate}>生成 / 更新当前周期</Button>
-          <Button variant="outline" onClick={() => { const g = generateReport(history, reportType, today, channels); commitReport(g, 'saveAs', findReportConflict(reports, g.periodKey)); }}>另存一份</Button>
         </div>
       </Card>
 
@@ -292,9 +320,34 @@ export function ReportsPanel() {
         <ReportConflictDialog
           existing={conflict.existing}
           onClose={() => setConflict(null)}
-          onUpdate={() => { commitReport(conflict.generated, 'update', conflict.existing); setConflict(null); }}
-          onSaveAs={() => { commitReport(conflict.generated, 'saveAs', conflict.existing); setConflict(null); }}
+          onUpdate={() => { commitReport(conflict.generated, conflict.existing); setConflict(null); }}
+          onUnarchiveAndUpdate={() => { archiveReport(conflict.existing.id); commitReport(conflict.generated, conflict.existing); setConflict(null); }}
         />
+      )}
+
+      {snapshotConflict && (
+        <Modal open onClose={() => setSnapshotConflict(null)} title="当天已有历史记录" size="sm"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setSnapshotConflict(null)}>保留当天原记录并取消生成</Button>
+              <Button onClick={() => { commitWeeklySnapshot(snapshotConflict.snapshot); const g = snapshotConflict.generated; setSnapshotConflict(null); proceedReport(g); }}>覆盖当天记录并继续</Button>
+            </>
+          }>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">生成周报会写入当天 Daily Snapshot，但日期 <span className="font-medium tabular">{snapshotConflict.snapshot.date}</span> 已有记录且数据不同。</p>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="bg-slate-50 rounded-lg p-3">
+                <div className="text-xs text-slate-400">当天现有记录</div>
+                <div className="font-semibold text-slate-700 tabular">{formatCNY(snapshotConflict.existing.totalAmount)}</div>
+              </div>
+              <div className="bg-emerald-50 rounded-lg p-3">
+                <div className="text-xs text-emerald-600">周报快照（新）</div>
+                <div className="font-semibold text-emerald-700 tabular">{formatCNY(snapshotConflict.snapshot.totalAmount)}</div>
+              </div>
+            </div>
+            <p className="text-xs text-slate-400">保留原记录将不生成周报；覆盖后当天记录与周报保持一致。</p>
+          </div>
+        </Modal>
       )}
 
       {editMeta && (
@@ -399,8 +452,8 @@ function ReportRow({ report, selected, onToggle, onOpen, onArchive, onDelete }: 
             <h3 className="font-semibold text-slate-800 truncate">{displayTitle(report)}</h3>
             <Badge tone={meta.tone}>{meta.label}</Badge>
             {report.isArchived && <Badge tone="slate">已归档</Badge>}
-            {report.dataCompleteness != null && report.dataCompleteness < 90 && (
-              <Badge tone="amber">{report.dataCompletenessLabel ?? `${report.dataCompleteness}%`}</Badge>
+            {report.integrityStatus && report.integrityStatus !== 'verified' && (
+              <Badge tone={INTEGRITY_META[report.integrityStatus].tone}>{INTEGRITY_META[report.integrityStatus].label}</Badge>
             )}
           </div>
           <div className="flex items-center gap-4 mt-2 text-sm flex-wrap">
@@ -549,24 +602,28 @@ function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, 
           </div>
         </section>
 
-        {/* 数据质量 */}
+        {/* 数据质量（完整性状态 + 历史覆盖） */}
         <section>
-          <SectionTitle>数据质量</SectionTitle>
-          {report.dataCompleteness != null ? (
-            <div className="space-y-1">
-              <div className="text-sm text-slate-600">
-                完整度 <span className="font-semibold tabular">{report.dataCompleteness}%</span> · {report.dataCompletenessLabel}
-                {report.channelSnapshotMissing ? ' · 缺少渠道快照' : ''}
-              </div>
-              {report.dataWarnings && report.dataWarnings.length > 0 && (
-                <ul className="text-xs text-slate-400 list-disc list-inside">
-                  {report.dataWarnings.map((w) => <li key={w}>{w}</li>)}
-                </ul>
+          <SectionTitle>数据状态</SectionTitle>
+          <div className="space-y-1">
+            <div className="text-sm text-slate-600">
+              {report.integrityStatus && INTEGRITY_META[report.integrityStatus]
+                ? INTEGRITY_META[report.integrityStatus].label
+                : '—'}
+              {report.historyPointsCount !== undefined && (
+                <span className="text-slate-400"> · 历史记录点 {report.historyPointsCount} 个</span>
               )}
+              {report.generationSource && report.generationSource !== 'normal' && (
+                <span className="text-slate-400"> · 来源：{GENERATION_SOURCE_LABEL[report.generationSource]}</span>
+              )}
+              {report.channelSnapshotMissing ? ' · 缺少渠道快照' : ''}
             </div>
-          ) : (
-            <p className="text-sm text-slate-400">—</p>
-          )}
+            {report.dataWarnings && report.dataWarnings.length > 0 && (
+              <ul className="text-xs text-slate-400 list-disc list-inside">
+                {report.dataWarnings.map((w) => <li key={w}>{w}</li>)}
+              </ul>
+            )}
+          </div>
         </section>
 
         {/* 备注 */}
@@ -675,11 +732,11 @@ function ReportSortEditor({ open, spec, onClose, onApply }: {
   );
 }
 
-function ReportConflictDialog({ existing, onClose, onUpdate, onSaveAs }: {
+function ReportConflictDialog({ existing, onClose, onUpdate, onUnarchiveAndUpdate }: {
   existing: FinancialReport;
   onClose: () => void;
   onUpdate: () => void;
-  onSaveAs: () => void;
+  onUnarchiveAndUpdate: () => void;
 }) {
   const archived = existing.isArchived;
   const comp = existing.dataCompleteness != null ? `${existing.dataCompleteness}%` : '—';
@@ -688,8 +745,11 @@ function ReportConflictDialog({ existing, onClose, onUpdate, onSaveAs }: {
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>取消</Button>
-          {!archived && <Button onClick={onUpdate}>更新现有报告（推荐）</Button>}
-          <Button variant="outline" onClick={onSaveAs}>另存为新版本</Button>
+          {archived ? (
+            <Button onClick={onUnarchiveAndUpdate}>取消归档并更新</Button>
+          ) : (
+            <Button onClick={onUpdate}>更新现有报告</Button>
+          )}
         </>
       }>
       <div className="space-y-3">
@@ -706,11 +766,9 @@ function ReportConflictDialog({ existing, onClose, onUpdate, onSaveAs }: {
           <div>数据完整度：{comp}</div>
           {existing.isArchived && <div className="text-amber-600">该报告已归档。</div>}
         </div>
-        {archived ? (
-          <p className="text-sm text-slate-500">该周期报告已归档，默认不会覆盖。如需替代归档报告，请先取消归档；这里可选择「另存为新版本」。</p>
-        ) : (
-          <p className="text-sm text-slate-500">「更新现有报告」将根据最新历史数据重新生成，保留报告 ID、创建时间、自定义标题与备注，并递增修订号。</p>
-        )}
+        <p className="text-sm text-slate-500">
+          同一周期只保留一份报告，不会另存第二份。更新将根据最新数据重新生成，保留报告 ID、创建时间、自定义标题与备注，并递增修订号。
+        </p>
       </div>
     </Modal>
   );

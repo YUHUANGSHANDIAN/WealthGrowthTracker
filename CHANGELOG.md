@@ -2,6 +2,38 @@
 
 本文件记录「财富成长记 / 财富梦想实现家」各版本的变更。
 
+## [1.6.0] - 2026-10-05
+
+### 存储（Storage Portability）
+- **自定义数据目录**：桌面端可在「数据 → 数据存放位置」更改数据根目录；配置保存在 OS App Config Directory（storage-config.json），不在数据根目录自身。
+- **事务式目录迁移**：Flush → 预迁移备份 → 递归复制整棵树（data/reports/backups/exports/…）→ 校验 → 切配置 → reload → 删除旧根；失败自动 rollback，原数据不受影响。
+- 跨磁盘安全（复制而非 rename）；目标为当前/内部/父目录会被拒绝；默认目录继续兼容。
+
+### ISO 周报完整性（ISO Report Integrity）
+- **ISO Week Domain**：新增 `src/utils/isoWeek.ts`（canonicalWeeklyPeriod / resolveWeeklyIdentity / isoWeekRange），一周 Monday→Sunday、正好 7 天、Week 1 含 1/4。
+- **旧周报周期 canonicalize**：`normalizeFinancialReport` 不再用 `??` 保留旧错误的 startDate/endDate/weekNumber/isoWeek/isoWeekYear/standardTitle，统一修复为 ISO 周期（Report Schema v4）。
+- Custom Title 保留，standardTitle 仍修正；旧来源日期范围可存入 `legacySourceMetadata`。
+- Data Health 新增 Period Integrity Check（周期非法 / isoWeek 冲突 / weekNumber 冲突 / 月年边界 / 标题不符）。
+
+### 报告唯一性（One Report Per Period）
+- 移除「另存一份报告」：每个 `weekly:YYYY-Www` / `monthly:YYYY-MM` / `yearly:YYYY` 只允许一份 canonical report；冲突只提供「更新」或「取消」，归档报告提供「取消归档并更新」。
+
+### 历史一天一条（Daily Snapshot Consistency）
+- History Domain 新增 `prepareHistoryUpsert` / `overwriteHistoryPoint`：一天最多一条 HistoryPoint，手动添加/编辑日期撞车时弹冲突确认，绝不静默覆盖。
+- HistoryPoint 增加 `source`（live-snapshot / manual / weekly-report / import / legacy / OCR / backfill）与 `updatedAt`。
+- **周报生成 = 一次 Daily Snapshot 写入**：先同步当天 History（无冲突则写、相同则复用、不同则弹冲突），再生成报告，保证 Report 与 History 一致。
+
+### 报告完整性（Report Integrity）
+- 新增 `integrityStatus`（verified / reconstructed / needs-review），UI 不再显示「部分完整」；历史序列稀疏单独显示「历史记录点 N 个」，不伪造数据。
+
+### UI
+- 统一 `SliderField` 替换原生 range（背景透明度 / 金币雨风力 / 报告图片质量），实时显示当前值、支持键盘、携带 aria 值。
+- History 列表显示来源 Badge。
+
+### 其它
+- 版本 1.6.0（package.json / Cargo.toml / tauri.conf.json / version.ts / backup 同步）。
+- Backup 升级到 v1.6.0，仍兼容 v1.0 ~ v1.5。
+
 ## [1.5.0] - 2026-10-05
 
 ### 资产（Assets）

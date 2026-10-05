@@ -40,7 +40,22 @@ export interface HistoryPoint {
   events?: unknown[];
   marketConditions?: unknown;
   linkedReportId?: string;
+  /** 记录来源（v1.6）：区分 live-snapshot / manual / weekly-report / import / 旧版导入 / OCR 修复等。 */
+  source?: HistorySource;
+  /** 最近更新时间（ISO）。 */
+  updatedAt?: string;
 }
+
+/** 历史记录来源（用于 UI Badge 与一致性审计）。 */
+export type HistorySource =
+  | 'live-snapshot'
+  | 'manual'
+  | 'weekly-report'
+  | 'import'
+  | 'legacy-txt-import'
+  | 'legacy-image-import'
+  | 'ocr-repair'
+  | 'historical-backfill';
 
 export type ReportType = 'weekly' | 'monthly' | 'yearly';
 
@@ -94,6 +109,15 @@ export interface ReportAssetComposition {
 
 /** 报告生成来源。 */
 export type ReportGenerationSource = 'normal' | 'legacy-txt-import' | 'legacy-image-import' | 'historical-backfill';
+
+/**
+ * 报告完整性状态（v1.6）—— 区别于「历史数据完整度 score」。
+ * - verified：报告关键字段已核实/生成自权威来源。
+ * - reconstructed：由旧版 TXT/图片/历史快照重建。
+ * - needs-review：存在无法自动修复的缺失或冲突，需人工核对。
+ * 不再用「部分完整」这种把「历史序列稀疏」误判为「报告不完整」的说法。
+ */
+export type ReportIntegrityStatus = 'verified' | 'reconstructed' | 'needs-review';
 
 /** 财务报告（周/月/年报）。大量可选字段用于兼容旧版报告的完整快照数据。 */
 export interface FinancialReport {
@@ -204,6 +228,16 @@ export interface FinancialReport {
   generationSource?: ReportGenerationSource;
   /** 资产构成警告（如旧版未保存父子映射，仅能显示扁平结构）。 */
   compositionWarnings?: string[];
+
+  // —— v1.6 Report Domain（可选，向后兼容）——
+  /** 报告完整性状态（v1.6，替代「部分完整」标签）。 */
+  integrityStatus?: ReportIntegrityStatus;
+  /** 旧来源原始元数据（如旧图片打印的日期范围/标题/生成时间），仅供审计，不作为 canonical 周期。 */
+  legacySourceMetadata?: {
+    sourcePrintedRange?: string;
+    sourceTitle?: string;
+    sourceGeneratedAt?: string;
+  };
 }
 
 /** 报告字段来源。 */

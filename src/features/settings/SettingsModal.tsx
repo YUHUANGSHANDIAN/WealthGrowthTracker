@@ -8,6 +8,7 @@ import { REPORT_SCHEMA_VERSION } from '../reports/normalize';
 import { storageService } from '../../services/storage';
 import { Modal } from '../../components/ui/Modal';
 import { Button, Badge } from '../../components/ui/primitives';
+import { SliderField } from '../../components/ui/Slider';
 import { TextField, SelectField, TextArea } from '../../components/ui/form';
 import { EmojiPicker } from '../../components/ui/Pickers';
 
@@ -110,12 +111,8 @@ function AppearanceSection() {
           { value: 'always', label: '始终减少动画' },
         ]} />
       <div>
-        <label className="block text-sm font-medium text-slate-700 mb-1">
-          背景动效透明度 <span className="text-slate-400 tabular">{appearance.backgroundOpacity}%</span>
-        </label>
-        <input type="range" min={5} max={50} step={5} value={appearance.backgroundOpacity}
-          onChange={(e) => setAppearance({ ...appearance, backgroundOpacity: Number(e.target.value) })}
-          className="w-full accent-emerald-600" aria-label="背景动效透明度" />
+        <SliderField label="背景动效透明度" min={5} max={50} step={5} value={appearance.backgroundOpacity}
+          onChange={(v) => setAppearance({ ...appearance, backgroundOpacity: v })} format={(v) => `${v}%`} ariaLabel="背景动效透明度" />
       </div>
     </div>
   );

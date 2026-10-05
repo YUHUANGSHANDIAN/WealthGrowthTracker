@@ -1,6 +1,7 @@
 import type { Channel, FinancialReport, Goal, HistoryPoint, LevelAchievement, LotteryState } from '../types';
 import { round2 } from './money';
 import { isValidTimezone } from './goals';
+import { canonicalWeeklyPeriod, parseWeeklyPeriodKey } from './isoWeek';
 
 export type HealthDomain = 'assets' | 'history' | 'reports' | 'goals' | 'levels' | 'lottery' | 'storage' | 'settings';
 
@@ -162,17 +163,60 @@ export function applyHealthFixes(
 // v1.3 扩展健康检查：报告 / 目标 / 等级成就（仅报告，不自动修复）
 // ---------------------------------------------------------------------------
 
-/** 报告健康：periodKey 缺失 / 重复 / 周编号非法 / 标题缺失。 */
+/** 某日期是星期几（1=Mon .. 7=Sun）。 */
+function dayOfWeek(date: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return d.getUTCDay() || 7;
+}
+
+/** 报告周期完整性检查（v1.6）：periodKey 缺失 / 重复 / ISO 周规范 / 月年边界。 */
 export function checkReportHealth(reports: FinancialReport[]): DataIssue[] {
   const issues: DataIssue[] = [];
   const byPeriod = new Map<string, number>();
   for (const r of reports) {
     if (!r.periodKey) issues.push(makeIssue('reports', 'warning', '报告缺少 periodKey', `报告「${r.title || r.id}」缺少周期标识`, null, { entityId: r.id }));
     else byPeriod.set(r.periodKey, (byPeriod.get(r.periodKey) ?? 0) + 1);
-    if (r.reportType === 'weekly' && r.weekNumber !== undefined && (r.weekNumber < 1 || r.weekNumber > 53)) {
-      issues.push(makeIssue('reports', 'warning', '周编号非法', `报告「${r.title}」周编号为 ${r.weekNumber}`, null, { entityId: r.id }));
-    }
     if (!r.title?.trim()) issues.push(makeIssue('reports', 'warning', '报告缺少标题', `报告 ${r.id} 标题为空`, null, { entityId: r.id }));
+
+    if (r.reportType === 'weekly') {
+      const identity = parseWeeklyPeriodKey(r.periodKey);
+      if (identity) {
+        const canonical = canonicalWeeklyPeriod(identity);
+        if (r.startDate !== canonical.startDate || r.endDate !== canonical.endDate) {
+          issues.push(makeIssue('reports', 'warning', '周报周期非法（非 Monday→Sunday）', `报告「${r.title}」周期 ${r.startDate}~${r.endDate} 应为 ${canonical.startDate}~${canonical.endDate}`, null, { entityId: r.id }));
+        }
+        if (r.isoWeek !== undefined && r.isoWeek !== identity.isoWeek) {
+          issues.push(makeIssue('reports', 'warning', '周报 isoWeek 与 periodKey 冲突', `报告「${r.title}」isoWeek=${r.isoWeek} 但 periodKey=${r.periodKey}`, null, { entityId: r.id }));
+        }
+        if (r.weekNumber !== undefined && r.weekNumber !== identity.isoWeek) {
+          issues.push(makeIssue('reports', 'warning', '周报 weekNumber 与 periodKey 冲突', `报告「${r.title}」weekNumber=${r.weekNumber} 但 periodKey=${r.periodKey}`, null, { entityId: r.id }));
+        }
+        if (r.isoWeekYear !== undefined && r.isoWeekYear !== identity.isoWeekYear) {
+          issues.push(makeIssue('reports', 'warning', '周报 isoWeekYear 冲突', `报告「${r.title}」isoWeekYear=${r.isoWeekYear} 应为 ${identity.isoWeekYear}`, null, { entityId: r.id }));
+        }
+        if (r.standardTitle && r.standardTitle !== canonical.standardTitle) {
+          issues.push(makeIssue('reports', 'warning', '周报标准标题与周期不符', `报告「${r.title}」standardTitle="${r.standardTitle}" 应为 "${canonical.standardTitle}"`, null, { entityId: r.id }));
+        }
+      } else if (r.startDate && r.endDate) {
+        const sd = dayOfWeek(r.startDate);
+        const ed = dayOfWeek(r.endDate);
+        if (sd !== 1 || ed !== 7) {
+          issues.push(makeIssue('reports', 'warning', '周报周期非法（非 Monday→Sunday）', `报告「${r.title}」周期 ${r.startDate}~${r.endDate} 不是周一到周日`, null, { entityId: r.id }));
+        }
+      }
+    } else if (r.reportType === 'monthly' && r.startDate && r.endDate) {
+      const startOk = /-01$/.test(r.startDate);
+      const endOk = /-31$|-30$|-29$|-28$/.test(r.endDate);
+      if (!startOk || !endOk) {
+        issues.push(makeIssue('reports', 'warning', '月报日期边界非法', `报告「${r.title}」周期 ${r.startDate}~${r.endDate} 不是月初~月末`, null, { entityId: r.id }));
+      }
+    } else if (r.reportType === 'yearly' && r.startDate && r.endDate) {
+      if (!/^(\d{4})-01-01$/.test(r.startDate) || !/^(\d{4})-12-31$/.test(r.endDate)) {
+        issues.push(makeIssue('reports', 'warning', '年报日期边界非法', `报告「${r.title}」周期 ${r.startDate}~${r.endDate} 不是 01-01~12-31`, null, { entityId: r.id }));
+      }
+    }
   }
   for (const [key, count] of byPeriod) {
     if (count > 1) issues.push(makeIssue('reports', 'warning', '存在重复周期报告', `periodKey ${key} 有 ${count} 份报告`, null, { entityId: key }));
