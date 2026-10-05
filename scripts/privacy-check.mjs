@@ -56,10 +56,11 @@ for (const f of new Set([...tracked, ...staged])) {
   }
 }
 
-// 内容检查（仅文本文件）
+// 内容检查（仅文本文件；跳过本脚本自身，避免匹配到 guard 里的正则字面量）
 const TEXT_RE = /\.(ts|tsx|js|mjs|cjs|json|md|txt|html|css|yml|yaml|toml)$/;
 for (const f of tracked) {
   if (!TEXT_RE.test(f)) continue;
+  if (f.endsWith('privacy-check.mjs')) continue;
   try {
     const content = readFileSync(f, 'utf8');
     for (const re of FORBIDDEN_CONTENT) {
