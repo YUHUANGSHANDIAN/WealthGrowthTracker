@@ -16,6 +16,7 @@ import { saveTextFile, backupFilename } from '../../services/export/download';
 import { downloadCSV } from '../../components/charts/export';
 import { buildReportsIndexCsv, buildReportsBatchHtml } from './reportIndex';
 import { ShareReportModal } from './ShareReportModal';
+import { ReportEditorModal } from './ReportEditorModal';
 import {
   sortReports,
   REPORT_SORT_FIELDS,
@@ -53,7 +54,7 @@ export function ReportsPanel() {
   const history = useAppStore((s) => s.history);
   const channels = useAppStore((s) => s.channels);
   const reportSortSpec = useAppStore((s) => s.reportSortSpec);
-  const { commitReport, archiveReport, deleteReport, deleteReports, setReportSortSpec, updateReportMetadata, repairReport, pushToast, prepareWeeklySnapshot, commitWeeklySnapshot } = useAppStore();
+  const { commitReport, archiveReport, deleteReport, deleteReports, setReportSortSpec, updateReportMetadata, repairReport, pushToast, prepareWeeklySnapshot, commitWeeklySnapshot, commitReportEdit } = useAppStore();
 
   const [reportType, setReportType] = useState<ReportType>('weekly');
   const [search, setSearch] = useState('');
@@ -65,6 +66,7 @@ export function ReportsPanel() {
   const [snapshotConflict, setSnapshotConflict] = useState<{ snapshot: HistoryPoint; existing: HistoryPoint; generated: FinancialReport } | null>(null);
   const [editMeta, setEditMeta] = useState<FinancialReport | null>(null);
   const [repairTarget, setRepairTarget] = useState<FinancialReport | null>(null);
+  const [editFull, setEditFull] = useState<FinancialReport | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [sortEditorOpen, setSortEditorOpen] = useState(false);
@@ -313,6 +315,19 @@ export function ReportsPanel() {
           onClose={() => setDetail(null)}
           onEditMetadata={(r) => { setDetail(null); setEditMeta(r); }}
           onRepair={(r) => { setDetail(null); setRepairTarget(r); }}
+          onEditFull={(r) => { setDetail(null); setEditFull(r); }}
+        />
+      )}
+
+      {editFull && (
+        <ReportEditorModal
+          report={editFull}
+          onClose={() => setEditFull(null)}
+          onSave={(edited, audit, opts) => {
+            commitReportEdit(editFull.id, edited, audit, opts);
+            setEditFull(null);
+            pushToast('报告已保存（修改已写入审计）', 'success');
+          }}
         />
       )}
 
@@ -477,13 +492,14 @@ function ReportRow({ report, selected, onToggle, onOpen, onArchive, onDelete }: 
   );
 }
 
-function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, onRepair }: {
+function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, onRepair, onEditFull }: {
   report: FinancialReport;
   reports: FinancialReport[];
   history: import('../../types').HistoryPoint[];
   onClose: () => void;
   onEditMetadata: (r: FinancialReport) => void;
   onRepair: (r: FinancialReport) => void;
+  onEditFull: (r: FinancialReport) => void;
 }) {
   const [shareOpen, setShareOpen] = useState(false);
   const navigate = useNavigationStore((s) => s.navigate);
@@ -642,7 +658,8 @@ function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, 
 
         <div className="border-t border-slate-100 pt-3 flex flex-wrap gap-2">
           <Button onClick={() => setShareOpen(true)}>📤 分享报告</Button>
-          <Button variant="outline" onClick={() => onEditMetadata(report)}>✏️ 编辑元数据</Button>
+          <Button variant="outline" onClick={() => onEditFull(report)}>📝 高级编辑</Button>
+          <Button variant="outline" onClick={() => onEditMetadata(report)}>✏️ 元数据</Button>
           <Button variant="outline" onClick={() => onRepair(report)}>🧰 数据修复</Button>
           <Button variant="outline" onClick={() => { onClose(); navigate({ tab: 'analysis', startDate: report.startDate, endDate: report.endDate }); }}>📊 深入分析本周期</Button>
         </div>

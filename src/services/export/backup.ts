@@ -24,7 +24,7 @@ import { defaultChannels, defaultCountdownData } from '../../constants/defaults'
 import { getLevelByAmount } from '../../constants/levels';
 import { defaultLotteryState } from '../../features/lottery/lotteryMath';
 
-export const BACKUP_VERSION = '1.6.0';
+export const BACKUP_VERSION = '1.6.1';
 export const APP_NAME = '财富成长记';
 
 /** 导出/导入时需要用到的完整应用状态（由 store 提供）。 */

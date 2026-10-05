@@ -25,6 +25,7 @@ import type {
   LotteryProject,
   ActivityLogEntry,
   HistorySource,
+  ReportRepairAudit,
 } from '../types';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { getLevelByAmount } from '../constants/levels';
@@ -65,6 +66,7 @@ import {
 } from '../services/export';
 import { saveTextFile, backupFilename } from '../services/export/download';
 import { generateReport, toggleReportArchive } from '../features/reports/generate';
+import { normalizeFinancialReport } from '../features/reports/normalize';
 import { runBackfill } from '../features/reports/backfill';
 import { reportFileBase, reportHtml } from '../features/reports/reportFile';
 import { buildReportIndex } from '../features/reports/reportIndex';
@@ -175,6 +177,8 @@ interface AppState {
   /** 写入报告：同周期唯一——有 existing 则更新（递增 revision、保留自定义元数据），否则新建。 */
   commitReport: (generated: FinancialReport, existing?: FinancialReport) => FinancialReport;
   updateReportMetadata: (id: string, patch: Partial<Pick<FinancialReport, 'titleMode' | 'standardTitle' | 'customTitle' | 'tags' | 'customSummary' | 'archiveNote'>>) => void;
+  /** 高级编辑报告全字段（记录 manual-report-edit 审计；可选择同步对应 History）。 */
+  commitReportEdit: (id: string, edited: FinancialReport, audit: ReportRepairAudit[], opts?: { syncHistory?: boolean }) => FinancialReport;
   repairReport: (id: string, repaired: FinancialReport) => void;
   archiveReport: (id: string, note?: string) => void;
   deleteReport: (id: string) => void;
@@ -752,6 +756,52 @@ export const useAppStore = create<AppState>()((set, get) => {
         }),
       }));
       persist();
+    },
+    commitReportEdit(id, edited, audit, opts = {}) {
+      const normalized = normalizeFinancialReport({ ...edited, reportSchemaVersion: 4 });
+      const now = new Date().toISOString();
+      set((s) => ({
+        reports: s.reports.map((r) =>
+          r.id === id
+            ? {
+                ...normalized,
+                id,
+                repairAudit: [...(r.repairAudit ?? []), ...audit],
+                fieldProvenance: {
+                  ...(r.fieldProvenance ?? {}),
+                  ...Object.fromEntries(audit.map((a) => [a.field, 'manual-repair' as const])),
+                },
+                updatedAt: now,
+              }
+            : r,
+        ),
+      }));
+      persist();
+
+      // 可选：同步修正 dataAsOf 对应的 Daily History
+      if (opts.syncHistory && normalized.dataAsOf) {
+        const s = get();
+        const existing = s.history.find((h) => h.date === normalized.dataAsOf);
+        if (existing) {
+          set((state) => ({
+            history: overwriteHistoryPoint(state.history, {
+              ...existing,
+              totalAmount: normalized.totalAmount,
+              channels: normalized.channels,
+              wealthLevel: normalized.wealthLevelName ?? existing.wealthLevel,
+              source: 'manual',
+              updatedAt: now,
+            }),
+          }));
+          persist();
+        }
+      }
+
+      const mgr = storageService.getDesktopManager();
+      if (mgr) {
+        void mgr.writeReport(normalized.reportType, reportFileBase(normalized), JSON.stringify(normalized, null, 2), reportHtml(normalized)).catch(() => {});
+      }
+      return normalized;
     },
     repairReport(id, repaired) {
       set((s) => ({ reports: s.reports.map((r) => (r.id === id ? repaired : r)) }));

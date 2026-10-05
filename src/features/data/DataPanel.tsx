@@ -15,6 +15,7 @@ import { platformCapabilities } from '../../utils/platform';
 import { useNavigationStore } from '../../store/navigationStore';
 import { planBackfill, monthlyCoverageByYear } from '../reports/backfill';
 import { buildAnonymousDiagnostic } from '../../utils/anonymousDiagnostic';
+import { buildMaintenanceActions, type MaintenanceAction } from '../../utils/maintenance';
 import { saveTextFile, backupFilename } from '../../services/export/download';
 
 export function DataPanel() {
@@ -47,6 +48,7 @@ export function DataPanel() {
 
   const coverageByYear = useMemo(() => monthlyCoverageByYear(reports, history), [reports, history]);
   const backfillPlan = useMemo(() => planBackfill(reports, history), [reports, history]);
+  const maintenanceActions = useMemo(() => buildMaintenanceActions({ reports, history, channels, hasCustomStorage: dataRootMode === 'custom' }), [reports, history, channels, dataRootMode]);
 
   const health = useMemo(() => {
     const base = checkDataHealth(channels, history);
@@ -209,7 +211,8 @@ export function DataPanel() {
         {isDesktop && dataPath && <p className="mt-3 text-xs text-slate-500 font-mono break-all">数据目录：{dataPath}</p>}
       </Card>
 
-      {/* 数据健康中心（交互式） */}
+      {/* 数据健康与维护中心（v1.6：动态 Maintenance Action + 问题详情） */}
+      <MaintenanceActions actions={maintenanceActions} />
       <DataHealthCenter issues={health.issues} onFixAll={doFix} busy={busy} />
 
       {/* 活动日志 */}
@@ -473,6 +476,39 @@ function ClickableStat({ label, value, onClick }: { label: string; value: string
       <div className="text-[11px] text-slate-400">{label}</div>
       <div className="text-sm font-semibold text-slate-700 tabular break-all">{value} ›</div>
     </button>
+  );
+}
+
+function MaintenanceActions({ actions }: { actions: MaintenanceAction[] }) {
+  if (actions.length === 0) {
+    return (
+      <Card className="p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-semibold text-slate-800">🩺 数据健康与维护中心</h2>
+          <Badge tone="emerald">✅ 无需处理</Badge>
+        </div>
+        <p className="text-sm text-slate-500">当前没有需要执行的数据维护任务。</p>
+      </Card>
+    );
+  }
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="font-semibold text-slate-800">🩺 数据健康与维护中心</h2>
+        <Badge tone="amber">{actions.length} 项待处理</Badge>
+      </div>
+      <div className="space-y-2">
+        {actions.map((a) => (
+          <div key={a.id} className="flex items-start gap-2 px-3 py-2 rounded-lg border border-slate-100">
+            <span className={a.severity === 'error' ? 'text-red-500' : a.severity === 'warning' ? 'text-amber-500' : 'text-slate-400'} aria-hidden>{a.severity === 'error' ? '✖' : '⚠'}</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-slate-700">{a.title}</div>
+              <div className="text-xs text-slate-400">{a.description}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
