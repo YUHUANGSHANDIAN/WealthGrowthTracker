@@ -1,3 +1,4 @@
+import { validateLedgerShape, validateFinancialExtensions } from '../services/storage/validateLedger';
 import { create } from 'zustand';
 import type {
   AppearanceSettings,
@@ -57,6 +58,7 @@ import { round2 } from '../utils/money';
 import { todayString } from '../utils/date';
 import { prepareHistoryUpsert, overwriteHistoryPoint } from '../utils/history';
 import { randomId, uuid } from '../utils/id';
+import { prepareHistoryEdit as buildHistoryEdit, confirmHistoryEdit as checkHistoryEdit, type HistoryEditCommand, type HistoryEditProposal } from '../features/history/transaction';
 import { storageService } from '../services/storage';
 import {
   buildBackup,
@@ -65,11 +67,11 @@ import {
   type ImportedData,
 } from '../services/export';
 import { saveTextFile, backupFilename } from '../services/export/download';
-import { generateReport, toggleReportArchive } from '../features/reports/generate';
-import { normalizeFinancialReport } from '../features/reports/normalize';
+import { toggleReportArchive } from '../features/reports/generate';
+import { normalizeFinancialReport, periodKeyOf } from '../features/reports/normalize';
+import { confirmReportProposal, prepareReportEdit, prepareReportGeneration, type ReportProposal, type ReportApproval } from '../features/reports/transaction';
 import { runBackfill } from '../features/reports/backfill';
-import { reportFileBase, reportHtml } from '../features/reports/reportFile';
-import { buildReportIndex } from '../features/reports/reportIndex';
+import { emptyProjectionQueue, enqueueReportProjection, parseProjectionQueue, writeReportProjection, type ReportProjectionQueue } from '../features/reports/projectionQueue';
 import { migrateChannelsV12, migrateChannelsV15, migrateReportsV13, needsV12Migration, needsV15Migration } from '../services/migration';
 import { DEFAULT_REPORT_SORT, type ReportSortSpec } from '../features/reports/reportSort';
 import { detectCelebrations, type CelebrationEvent } from '../utils/celebrate';
@@ -84,6 +86,12 @@ import {
 } from '../utils/levelAchievements';
 import { countdownFromGoal, countdownToGoal } from '../utils/goals';
 import { defaultLotteryState } from '../features/lottery/lotteryMath';
+import {
+  confirmAmountBatch as confirmAmountBatchProposal,
+  prepareAmountBatch as buildAmountBatchProposal,
+  type AmountBatchChange,
+  type AmountBatchProposal,
+} from '../features/assets/amountBatch';
 
 export type ToastKind = 'success' | 'error' | 'info';
 export interface Toast {
@@ -95,6 +103,11 @@ export interface Toast {
 interface AppState {
   // 运行时状态
   hydrated: boolean;
+  recoveryError: string | null;
+  maintenanceLabel: string | null;
+  dataRevision: number;
+  saveStatus: 'saved' | 'pending' | 'saving' | 'error';
+  saveError: string | null;
   toasts: Toast[];
   coinRainActive: boolean;
   /** 当前庆祝事件（等级升级 / 目标达成），由 CelebrationOverlay 消费。 */
@@ -104,6 +117,8 @@ interface AppState {
   channels: Channel[];
   history: HistoryPoint[];
   reports: FinancialReport[];
+  reportProjectionQueue: ReportProjectionQueue;
+  retryReportProjection: () => Promise<void>;
   sortRules: CustomSortRule[];
   sortHistory: SortHistory;
   /** 当前排序模式 key（持久化，刷新后恢复）。 */
@@ -160,11 +175,16 @@ interface AppState {
   ) => void;
   deleteSubChannel: (parentId: string, childId: string, strategy?: LastChildStrategy) => void;
   setAmount: (target: { parentId: string; childId?: string }, amount: number) => void;
+  prepareAmountBatch: (changes: AmountBatchChange[], referenceDate?: string) => AmountBatchProposal;
+  confirmAmountBatch: (proposal: AmountBatchProposal) => Promise<void>;
 
   // ---- 历史 ----
   addHistoryPoint: (date: string, totalAmount: number, source?: HistorySource) => { conflict: boolean; existing?: HistoryPoint };
   overwriteHistoryPoint: (date: string, totalAmount: number, source?: HistorySource) => void;
   updateHistoryPoint: (date: string, totalAmount: number) => void;
+  setHistoryEventNote: (date: string, note: string, baseRevision: number) => Promise<void>;
+  prepareHistoryEdit: (command: HistoryEditCommand, baseRevision: number) => HistoryEditProposal;
+  confirmHistoryEdit: (proposal: HistoryEditProposal, overwrite?: boolean) => Promise<void>;
   deleteHistoryPoint: (date: string) => void;
   deleteHistoryPoints: (dates: string[]) => void;
   /** 构造周报生成的 Daily Snapshot 并检查当天 History 冲突（不写入）。 */
@@ -173,19 +193,18 @@ interface AppState {
   commitWeeklySnapshot: (snapshot: HistoryPoint) => void;
 
   // ---- 报告 ----
-  generateReportNow: (reportType: ReportType, referenceDate?: string) => FinancialReport;
-  /** 写入报告：同周期唯一——有 existing 则更新（递增 revision、保留自定义元数据），否则新建。 */
-  commitReport: (generated: FinancialReport, existing?: FinancialReport) => FinancialReport;
-  updateReportMetadata: (id: string, patch: Partial<Pick<FinancialReport, 'titleMode' | 'standardTitle' | 'customTitle' | 'tags' | 'customSummary' | 'archiveNote'>>) => void;
+  prepareReport: (type: ReportType, referenceDate?: string) => ReportProposal;
+  confirmReport: (proposal: ReportProposal, approval?: ReportApproval) => Promise<FinancialReport>;
+  updateReportMetadata: (id: string, patch: Partial<Pick<FinancialReport, 'titleMode' | 'standardTitle' | 'customTitle' | 'tags' | 'customSummary' | 'archiveNote'>>, baseRevision?: number) => Promise<void>;
   /** 高级编辑报告全字段（记录 manual-report-edit 审计；可选择同步对应 History）。 */
-  commitReportEdit: (id: string, edited: FinancialReport, audit: ReportRepairAudit[], opts?: { syncHistory?: boolean }) => FinancialReport;
-  repairReport: (id: string, repaired: FinancialReport) => void;
-  archiveReport: (id: string, note?: string) => void;
-  deleteReport: (id: string) => void;
-  deleteReports: (ids: string[]) => void;
+  commitReportEdit: (id: string, edited: FinancialReport, audit: ReportRepairAudit[], opts?: { syncHistory?: boolean; baseRevision?: number }) => Promise<FinancialReport>;
+  repairReport: (id: string, repaired: FinancialReport, baseRevision: number) => Promise<FinancialReport>;
+  archiveReport: (id: string, note?: string) => Promise<void>;
+  deleteReport: (id: string) => Promise<void>;
+  deleteReports: (ids: string[]) => Promise<void>;
   setReportSortSpec: (spec: ReportSortSpec) => void;
   /** 补生成缺失的历史月度报告（幂等，返回 create/repair 的 periodKey）。 */
-  runMonthlyBackfill: () => { created: string[]; repaired: string[] };
+  runMonthlyBackfill: (baseRevision?: number) => Promise<{ created: string[]; repaired: string[] }>;
 
   // ---- 排序 ----
   addSortRule: (rule: Omit<CustomSortRule, 'id' | 'createdAt'>) => void;
@@ -236,8 +255,8 @@ interface AppState {
 
   // ---- 导入导出 ----
   exportData: () => Promise<void>;
-  importData: (jsonText: string, mode?: 'replace' | 'merge') => Promise<{ ok: boolean; message: string }>;
-  applyDataFixes: () => Promise<{ fixed: number }>;
+  importData: (jsonText: string, mode?: 'replace' | 'merge', baseRevision?: number) => Promise<{ ok: boolean; message: string }>;
+  applyDataFixes: (baseRevision?: number) => Promise<{ fixed: number }>;
 }
 
 const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
@@ -246,6 +265,7 @@ const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
     pick: (s) => ({ channels: s.channels, history: s.history }),
   },
   { key: STORAGE_KEYS.financialReports, pick: (s) => s.reports },
+  { key: STORAGE_KEYS.reportProjectionQueue, pick: (s) => s.reportProjectionQueue },
   { key: STORAGE_KEYS.customSortRules, pick: (s) => ({ rules: s.sortRules.filter((r) => !r.isSystem) }) },
   { key: STORAGE_KEYS.sortHistory, pick: (s) => s.sortHistory },
   { key: STORAGE_KEYS.sortConfig, pick: (s) => ({ activeKey: s.activeSortKey, pinned: s.pinnedChannelIds }) },
@@ -270,15 +290,38 @@ const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
 ];
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let persistQueue: Promise<void> = Promise.resolve();
+let persistDirty = false;
+
+async function persistNow(get: () => AppState): Promise<void> {
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = null;
+  if (!get().hydrated) return;
+  if (!persistDirty) { await persistQueue; return; }
+  persistDirty = false;
+  const values = PERSIST_KEYS.map(({ key, pick }) => ({ key, raw: JSON.stringify(pick(get())) }));
+  useAppStore.setState({ saveStatus: 'saving', saveError: null });
+  const write = persistQueue.catch(() => {}).then(async () => {
+    await storageService.setBatch(values.map(({ key, raw }) => ({ key, value: raw })));
+    await storageService.flushAdapter();
+  });
+  persistQueue = write;
+  try {
+    await write;
+    useAppStore.setState({ saveStatus: persistDirty ? 'pending' : 'saved' });
+  } catch (error) {
+    persistDirty = true;
+    useAppStore.setState({ saveStatus: 'error', saveError: error instanceof Error ? error.message : '保存失败' });
+    throw error;
+  }
+}
 
 function schedulePersist(get: () => AppState): void {
+  persistDirty = true;
+  useAppStore.setState({ saveStatus: 'pending' });
   if (persistTimer) clearTimeout(persistTimer);
-  persistTimer = setTimeout(async () => {
-    const s = get();
-    if (!s.hydrated) return;
-    for (const { key, pick } of PERSIST_KEYS) {
-      await storageService.setJSON(key, pick(s));
-    }
+  persistTimer = setTimeout(() => {
+    void persistNow(get).catch(() => {}); // visible saveError; flush still rejects
   }, 300);
 }
 
@@ -314,8 +357,75 @@ function afterChannelChange(s: Pick<AppState, 'channels' | 'history'>): {
   return { channels, history };
 }
 
-export const useAppStore = create<AppState>()((set, get) => {
+const persistentFields: ReadonlyArray<keyof AppState> = [
+  'channels', 'history', 'reports', 'sortRules', 'sortHistory', 'activeSortKey',
+  'pinnedChannelIds', 'reportSortSpec', 'smartSortConfig', 'profile', 'appearance',
+  'account', 'authRecord', 'chartSettings', 'countdown', 'goals', 'primaryGoalId',
+  'countdownOpacity', 'coinRainConfig', 'goalAchieved', 'timeRangeHistory',
+  'countdownProgressHistory', 'currentWealthLevel', 'wealthTrackerHistory',
+  'levelAchievements', 'lottery', 'activityLog',
+];
+
+export const useAppStore = create<AppState>()((rawSet, get) => {
+  // UI blocking is not sufficient: an earlier async command can resume during maintenance.
+  const set: typeof rawSet = (update, replace) => {
+    const previous = get();
+    const next = typeof update === 'function' ? update(previous) : update;
+    if (previous.maintenanceLabel && persistentFields.some(key => key in next && next[key] !== previous[key])) {
+      throw new Error(`${previous.maintenanceLabel}，暂时不能编辑数据`);
+    }
+    rawSet(next, replace);
+  };
+  let hydration: Promise<void> | null = null;
   const persist = () => schedulePersist(get);
+  let projectionInFlight: Promise<void> | null = null;
+  const drainReportProjection = (): Promise<void> => {
+    if (projectionInFlight) return projectionInFlight;
+    projectionInFlight = (async () => {
+      const manager = storageService.getDesktopManager();
+      if (!manager) return;
+      await storageService.flush();
+      const queue = get().reportProjectionQueue;
+      if (!queue.indexPending && !queue.reportIds.length) return;
+      const reports = get().reports;
+      try {
+        await writeReportProjection(queue, reports, manager);
+        if (get().reportProjectionQueue.generation === queue.generation) {
+          rawSet({ reportProjectionQueue: { ...emptyProjectionQueue(), generation: queue.generation } });
+          persist();
+          await storageService.flush();
+        }
+      } catch {
+        if (get().reportProjectionQueue.generation === queue.generation) {
+          rawSet({ reportProjectionQueue: { ...queue, attempts: queue.attempts + 1, lastError: '报告文件同步失败。主数据已保留，请检查存储目录权限后重试。' } });
+          persist();
+          await storageService.flush();
+        }
+        get().pushToast('主数据已保存，报告文件等待同步，可在数据中心重试', 'error');
+      }
+    })().finally(() => { projectionInFlight = null; });
+    return projectionInFlight;
+  };
+
+  const commitReportList = async (label: string, baseRevision: number, build: (reports: FinancialReport[]) => FinancialReport[]) => {
+    if (get().dataRevision !== baseRevision) throw new Error('数据已变化，请重新打开并确认');
+    const reports = build(get().reports);
+    if (reports === get().reports || JSON.stringify(reports) === JSON.stringify(get().reports)) return;
+    validateLedgerShape(null, reports);
+    const periods = reports.map(r => normalizeFinancialReport(r).periodKey ?? periodKeyOf(r));
+    if (new Set(periods).size !== periods.length) throw new Error('存在重复报告周期，请先核对数据');
+    const release = beginLedgerMaintenance(label);
+    try {
+      await storageService.flush();
+      const mgr = storageService.getDesktopManager();
+      if (mgr && !(await mgr.backupNow(true))) throw new Error('操作前备份不可用');
+      if (get().dataRevision !== baseRevision) throw new Error('数据已变化，请重新打开并确认');
+      rawSet({ reports });
+      persist();
+      await storageService.flush();
+      if (mgr) await drainReportProjection();
+    } finally { release(); }
+  };
 
   /** 渠道金额/结构变更的统一收尾：同步今日历史快照 + 等级成就 + 庆祝 + 持久化。 */
   const commitChannelChange = (prevTotal: number, nextChannels: Channel[]) => {
@@ -339,6 +449,11 @@ export const useAppStore = create<AppState>()((set, get) => {
 
   return {
     hydrated: false,
+    recoveryError: null,
+    maintenanceLabel: null,
+    dataRevision: 0,
+    saveStatus: 'saved',
+    saveError: null,
     toasts: [],
     coinRainActive: false,
     celebration: null,
@@ -346,6 +461,11 @@ export const useAppStore = create<AppState>()((set, get) => {
     channels: [],
     history: [],
     reports: [],
+    reportProjectionQueue: emptyProjectionQueue(),
+    async retryReportProjection() {
+      const release = beginLedgerMaintenance('正在同步报告文件');
+      try { await drainReportProjection(); } finally { release(); }
+    },
     sortRules: [],
     sortHistory: { history: [] },
     activeSortKey: 'default',
@@ -375,7 +495,11 @@ export const useAppStore = create<AppState>()((set, get) => {
     importModalOpen: false,
 
     // ---------------------------------------------------------------------
-    async hydrate() {
+    hydrate() {
+      if (hydration) return hydration;
+      hydration = (async () => {
+      set({ hydrated: false, recoveryError: null });
+      try {
       const [
         wtd,
         reports,
@@ -400,6 +524,7 @@ export const useAppStore = create<AppState>()((set, get) => {
         goalsData,
         lotteryData,
         activityLogData,
+        projectionData,
       ] = await Promise.all([
         storageService.getJSON<{ channels: Channel[]; history: HistoryPoint[] }>(STORAGE_KEYS.wealthTrackerData),
         storageService.getJSON<FinancialReport[]>(STORAGE_KEYS.financialReports),
@@ -424,12 +549,18 @@ export const useAppStore = create<AppState>()((set, get) => {
         storageService.getJSON<{ goals: Goal[]; primaryGoalId: string | null }>(STORAGE_KEYS.goals),
         storageService.getJSON<LotteryState>(STORAGE_KEYS.lotteryState),
         storageService.getJSON<ActivityLogEntry[]>(STORAGE_KEYS.activityLog),
+        storageService.getJSON<ReportProjectionQueue>(STORAGE_KEYS.reportProjectionQueue),
       ]);
 
-      const isFirstRun = !wtd;
+      validateLedgerShape(wtd, reports);
+      validateFinancialExtensions({ countdown_data: countdown, goal_achievement_status: goal,
+        goals: goalsData, lottery_state: lotteryData, level_achievements: levelAchievements,
+        countdown_progress_history: progressHistory });
+      const isFirstRun = wtd === null;
       const storedVersion = await storageService.getRaw(STORAGE_VERSION_KEY);
-      let channels = wtd?.channels?.length ? wtd.channels : defaultChannels();
-      const history = wtd?.history?.length ? wtd.history : defaultHistory();
+      if (isFirstRun && (storedVersion !== null || reports !== null)) throw new Error('主数据缺失但已有版本或报告，不能按新安装初始化');
+      let channels = wtd ? wtd.channels : defaultChannels();
+      const history = wtd ? wtd.history : defaultHistory();
 
       // 系统规则始终可用，叠加用户自定义规则（只持久化用户规则，系统规则随版本生成）。
       const userRules = rules?.rules?.filter((r) => !r.isSystem) ?? [];
@@ -487,10 +618,13 @@ export const useAppStore = create<AppState>()((set, get) => {
       const primaryGoal = primaryGoalId ? goals.find((g) => g.id === primaryGoalId) : undefined;
       const effectiveCountdown = primaryGoal ? countdownFromGoal(primaryGoal) : countdown;
 
-      set({
+      rawSet({
         channels: normalizeChannelAmounts(channels),
         history,
         reports: normalizedReports,
+        reportProjectionQueue: storageService.getDesktopManager() && reportMigration.changed > 0
+          ? enqueueReportProjection(parseProjectionQueue(projectionData), [], normalizedReports)
+          : parseProjectionQueue(projectionData),
         sortRules: allRules,
         sortHistory: sortHistory ?? { history: [] },
         activeSortKey: sortConfig?.activeKey ?? 'default',
@@ -516,32 +650,30 @@ export const useAppStore = create<AppState>()((set, get) => {
         levelAchievements: mergedAchievements,
         lottery: lotteryData ?? defaultLotteryState(),
         activityLog: activityLogData ?? [],
-        hydrated: true,
+        hydrated: false,
       });
 
-      // 版本升级检测：先备份再写回新版本号（仅桌面文件存储有意义）。
-      if (!isFirstRun && storedVersion !== APP_VERSION) {
+      // The version and migrated ledger are one batch. A crash must never leave
+      // a version-only "existing installation" with its canonical data missing.
+      if (isFirstRun || storedVersion !== APP_VERSION || reportMigration.changed > 0) {
         const mgr = storageService.getDesktopManager();
-        if (mgr) await mgr.backupNow(true);
-        await storageService.setRaw(STORAGE_VERSION_KEY, APP_VERSION);
-        // 报告 schema 升级：备份成功后持久化规范化报告，并用新渲染器重写桌面 JSON/HTML。
-        if (reportMigration.changed > 0) {
-          await storageService.setJSON(STORAGE_KEYS.financialReports, normalizedReports);
-          if (mgr) {
-            for (const r of normalizedReports) {
-              void mgr.writeReport(r.reportType, reportFileBase(r), JSON.stringify(r, null, 2), reportHtml(r)).catch(() => {});
-            }
-            void mgr.writeReportIndex(JSON.stringify(buildReportIndex(normalizedReports), null, 2)).catch(() => {});
-          }
-        }
+        if (!isFirstRun && mgr && !(await mgr.backupNow(true))) throw new Error('升级前备份不可用');
+        const state = get();
+        await storageService.setBatch([
+          ...PERSIST_KEYS.map(({ key, pick }) => ({ key, value: JSON.stringify(pick(state)) })),
+          { key: STORAGE_VERSION_KEY, value: APP_VERSION },
+        ]);
         if (migrationNote) get().pushToast(migrationNote, 'info');
       }
-
-      if (isFirstRun) {
-        // 首次运行：写入默认数据与版本号，保证刷新后仍在。
-        await storageService.setRaw(STORAGE_VERSION_KEY, APP_VERSION);
-        persist();
+      await storageService.flushAdapter();
+      set({ hydrated: true });
+      } catch (error) {
+        storageService.pauseWrites();
+        set({ hydrated: false, recoveryError: error instanceof Error ? error.message : '数据加载失败', saveStatus: 'error' });
+        throw error;
       }
+      })().finally(() => { hydration = null; });
+      return hydration;
     },
 
     // ---------------------------------------------------------------------
@@ -604,6 +736,65 @@ export const useAppStore = create<AppState>()((set, get) => {
       const prevTotal = totalAssets(get().channels);
       commitChannelChange(prevTotal, setLeafAmount(get().channels, target, amount));
     },
+    prepareAmountBatch(changes, referenceDate) {
+      const state = get();
+      return buildAmountBatchProposal({
+        channels: state.channels,
+        history: state.history,
+        baseRevision: state.dataRevision,
+      }, changes, referenceDate);
+    },
+    async confirmAmountBatch(proposal) {
+      const initial = get();
+      const initialResult = confirmAmountBatchProposal({
+        channels: initial.channels,
+        history: initial.history,
+        baseRevision: initial.dataRevision,
+      }, proposal);
+      if (!initialResult.changed) return;
+
+      const release = beginLedgerMaintenance('正在保存批量金额');
+      try {
+        await storageService.flush();
+        const manager = storageService.getDesktopManager();
+        if (manager && !(await manager.backupNow(true))) throw new Error('操作前备份不可用');
+
+        const current = get();
+        const result = confirmAmountBatchProposal({
+          channels: current.channels,
+          history: current.history,
+          baseRevision: current.dataRevision,
+        }, proposal);
+        if (!result.changed) return;
+
+        const newTotal = totalAssets(result.channels);
+        const crossed = crossedLevelAchievements(proposal.oldTotal, newTotal);
+        const nextAchievements = crossed.length
+          ? mergeLevelAchievements(current.levelAchievements, crossed)
+          : current.levelAchievements;
+        const { event, newGoalAchieved } = detectCelebrations(
+          proposal.oldTotal,
+          newTotal,
+          current.countdown,
+          current.goalAchieved,
+        );
+
+        // This transaction owns the maintenance lease; commit through the guarded
+        // store's internal setter so ordinary writers remain blocked throughout.
+        rawSet({
+          channels: result.channels,
+          history: result.history,
+          ...(crossed.length ? { levelAchievements: nextAchievements } : {}),
+          ...(newGoalAchieved ? { goalAchieved: newGoalAchieved } : {}),
+          ...(event ? { celebration: event } : {}),
+        });
+        if (event?.goal) get().triggerCoinRain();
+        persist();
+        await storageService.flush();
+      } finally {
+        release();
+      }
+    },
 
     // ---------------------------------------------------------------------
     addHistoryPoint(date, totalAmount, source = 'manual') {
@@ -639,6 +830,53 @@ export const useAppStore = create<AppState>()((set, get) => {
         history: s.history.map((h) => (h.date === date ? { ...h, totalAmount: round2(totalAmount), updatedAt: new Date().toISOString() } : h)),
       }));
       persist();
+    },
+    async setHistoryEventNote(date, note, baseRevision) {
+      if (typeof note !== 'string' || note.length > 2000) throw new Error('事件备注最多 2000 字');
+      const assertCurrent = () => {
+        const state = get();
+        if (state.dataRevision !== baseRevision) throw new Error('数据已变化，请重新打开备注');
+        if (state.history.filter(point => point.date === date).length !== 1) throw new Error('历史日期不存在或重复，请先检查数据');
+        return state;
+      };
+      const normalizedNote = note.trim();
+      const initial = assertCurrent();
+      if ((initial.history.find(point => point.date === date)?.eventNote ?? '') === normalizedNote) return;
+      const release = beginLedgerMaintenance('正在保存事件备注');
+      try {
+        await storageService.flush();
+        const manager = storageService.getDesktopManager();
+        if (manager && !(await manager.backupNow(true))) throw new Error('操作前备份不可用');
+        const current = assertCurrent();
+        rawSet({ history: current.history.map(point => point.date === date
+          ? { ...point, eventNote: normalizedNote || undefined, eventNoteUpdatedAt: new Date().toISOString() }
+          : point) });
+        persist();
+        await storageService.flush();
+      } finally {
+        release();
+      }
+    },
+    prepareHistoryEdit(command, baseRevision) {
+      const state = get();
+      if (state.dataRevision !== baseRevision) throw new Error('数据已变化，请重新打开历史记录');
+      return buildHistoryEdit({ history: state.history, baseRevision }, command);
+    },
+    async confirmHistoryEdit(proposal, overwrite = false) {
+      const validate = () => checkHistoryEdit({ history: get().history, baseRevision: get().dataRevision }, proposal, overwrite);
+      if (!validate().changed) return;
+      const release = beginLedgerMaintenance('正在保存历史变更');
+      try {
+        await storageService.flush();
+        const manager = storageService.getDesktopManager();
+        if (manager && !(await manager.backupNow(true))) throw new Error('操作前备份不可用');
+        const result = validate();
+        rawSet({ history: result.history });
+        persist();
+        await storageService.flush();
+      } finally {
+        release();
+      }
     },
     deleteHistoryPoint(date) {
       set((s) => ({ history: s.history.filter((h) => h.date !== date) }));
@@ -676,76 +914,37 @@ export const useAppStore = create<AppState>()((set, get) => {
       persist();
     },
 
-    // ---------------------------------------------------------------------
-    generateReportNow(reportType, referenceDate = todayString()) {
-      const s = get();
-      const generated = generateReport(s.history, reportType, referenceDate, s.channels);
-      const existing = s.reports.find((r) => r.periodKey && r.periodKey === generated.periodKey);
-      return get().commitReport(generated, existing);
+    // Report writes use prepareReport/confirmReport so conflict approval,
+    // revision checks, backups, and report projections share one path.
+    prepareReport(type, referenceDate = todayString()) {
+      return prepareReportGeneration({ ...get(), baseRevision: get().dataRevision }, type, referenceDate);
     },
-    commitReport(generated, existing) {
-      const s = get();
-      let report: FinancialReport;
-      let reports: FinancialReport[];
-
-      if (existing) {
-        // 同周期唯一：绝不新增第二份 canonical report，只更新现有报告（递增 revision、保留自定义元数据与归档状态）。
-        const prev = existing;
-        const custom = prev.titleMode === 'custom' && prev.customTitle?.trim();
-        report = {
-          ...generated,
-          id: prev.id,
-          createdAt: prev.createdAt,
-          revision: (prev.revision ?? 1) + 1,
-          updatedAt: new Date().toISOString(),
-          isArchived: prev.isArchived,
-          archivedAt: prev.archivedAt,
-          archiveNote: prev.archiveNote,
-          // 保留用户自定义元数据
-          titleMode: prev.titleMode ?? 'auto',
-          standardTitle: generated.standardTitle ?? generated.title,
-          customTitle: prev.customTitle,
-          title: custom ? prev.customTitle! : generated.title,
-          tags: prev.tags,
-          customSummary: prev.customSummary,
-          repairAudit: prev.repairAudit,
-          fieldProvenance: prev.fieldProvenance,
-        };
-        reports = s.reports.map((r) => (r.id === prev.id ? report : r));
-      } else {
-        report = generated;
-        reports = [report, ...s.reports];
+    async confirmReport(proposal, approval = {}) {
+      const initial = confirmReportProposal({ ...get(), baseRevision: get().dataRevision }, proposal, approval);
+      if (!initial.changed) return initial.report;
+      const release = beginLedgerMaintenance('正在保存报告和快照');
+      try {
+        await storageService.flush();
+        const mgr = storageService.getDesktopManager();
+        if (mgr && !(await mgr.backupNow(true))) throw new Error('操作前备份不可用');
+        const result = confirmReportProposal({ ...get(), baseRevision: get().dataRevision }, proposal, approval);
+        if (result.changed) {
+          rawSet({ history: result.history, reports: result.reports });
+          persist();
+          await storageService.flush();
+          if (mgr) await drainReportProjection();
+        }
+        return result.report;
+      } finally {
+        release();
       }
-
-      set({ reports });
-      persist();
-      const mgr = storageService.getDesktopManager();
-      if (mgr) {
-        void (async () => {
-          try {
-            await mgr.writeReport(report.reportType, reportFileBase(report), JSON.stringify(report, null, 2), reportHtml(report));
-            await mgr.writeReportIndex(JSON.stringify(buildReportIndex(reports), null, 2));
-          } catch (err) {
-            console.warn('[reports] 报告写盘失败:', err);
-          }
-        })();
-      }
-      const updated = !!existing;
-      const verb = updated ? '已更新' : '已生成';
-      get().pushToast(`${verb}报告「${report.title}」`, 'success');
-      get().logActivity(
-        updated ? 'report-update' : 'report-create',
-        updated ? `更新报告「${report.title}」至 Revision ${report.revision}` : `生成报告「${report.title}」`,
-        'report',
-        report.id,
-      );
-      return report;
     },
-    updateReportMetadata(id, patch) {
-      set((s) => ({
-        reports: s.reports.map((r) => {
+    async updateReportMetadata(id, patch, baseRevision = get().dataRevision) {
+      const allowed = ['titleMode', 'standardTitle', 'customTitle', 'tags', 'customSummary', 'archiveNote'];
+      if (Object.keys(patch).some(field => !allowed.includes(field))) throw new Error('元数据编辑包含不允许的字段');
+      await commitReportList('正在保存报告备注', baseRevision, reports => reports.map((r) => {
           if (r.id !== id) return r;
-          const next: FinancialReport = { ...r, ...patch, updatedAt: new Date().toISOString() };
+          const next: FinancialReport = { ...r, ...patch, revision: (r.revision ?? 1) + 1, updatedAt: new Date().toISOString() };
           if (patch.titleMode === 'custom' && patch.customTitle?.trim()) {
             next.title = patch.customTitle.trim();
           } else if (patch.titleMode === 'auto') {
@@ -753,94 +952,71 @@ export const useAppStore = create<AppState>()((set, get) => {
             next.title = next.standardTitle ?? next.title;
           }
           return next;
-        }),
-      }));
-      persist();
+        }));
     },
-    commitReportEdit(id, edited, audit, opts = {}) {
-      const normalized = normalizeFinancialReport({ ...edited, reportSchemaVersion: 4 });
-      const now = new Date().toISOString();
-      set((s) => ({
-        reports: s.reports.map((r) =>
-          r.id === id
-            ? {
-                ...normalized,
-                id,
-                repairAudit: [...(r.repairAudit ?? []), ...audit],
-                fieldProvenance: {
-                  ...(r.fieldProvenance ?? {}),
-                  ...Object.fromEntries(audit.map((a) => [a.field, 'manual-repair' as const])),
-                },
-                updatedAt: now,
-              }
-            : r,
-        ),
-      }));
-      persist();
-
-      // 可选：同步修正 dataAsOf 对应的 Daily History
-      if (opts.syncHistory && normalized.dataAsOf) {
-        const s = get();
-        const existing = s.history.find((h) => h.date === normalized.dataAsOf);
-        if (existing) {
-          set((state) => ({
-            history: overwriteHistoryPoint(state.history, {
-              ...existing,
-              totalAmount: normalized.totalAmount,
-              channels: normalized.channels,
-              wealthLevel: normalized.wealthLevelName ?? existing.wealthLevel,
-              source: 'manual',
-              updatedAt: now,
-            }),
-          }));
-          persist();
-        }
-      }
-
-      const mgr = storageService.getDesktopManager();
-      if (mgr) {
-        void mgr.writeReport(normalized.reportType, reportFileBase(normalized), JSON.stringify(normalized, null, 2), reportHtml(normalized)).catch(() => {});
-      }
-      return normalized;
-    },
-    repairReport(id, repaired) {
-      set((s) => ({ reports: s.reports.map((r) => (r.id === id ? repaired : r)) }));
-      persist();
-      const mgr = storageService.getDesktopManager();
-      if (mgr) {
-        void mgr
-          .writeReport(repaired.reportType, reportFileBase(repaired), JSON.stringify(repaired, null, 2), reportHtml(repaired))
-          .catch(() => {});
+    async commitReportEdit(id, edited, audit, opts = {}) {
+      if (opts.baseRevision !== undefined && opts.baseRevision !== get().dataRevision) throw new Error('数据已变化，请重新打开报告编辑');
+      validateLedgerShape(null, [edited]);
+      const proposal = prepareReportEdit({ ...get(), baseRevision: get().dataRevision }, id, edited, opts);
+      if (proposal.conflicts.some(c => c.kind === 'period')) throw new Error('目标周期已有报告，请选择其他周期');
+      const release = beginLedgerMaintenance('正在保存报告编辑');
+      try {
+        await storageService.flush();
+        const mgr = storageService.getDesktopManager();
+        if (mgr && !(await mgr.backupNow(true))) throw new Error('操作前备份不可用');
+        const result = confirmReportProposal({ ...get(), baseRevision: get().dataRevision }, proposal, { overwriteSnapshot: !!opts.syncHistory });
+        const original = get().reports.find(r => r.id === id)!;
+        const report = { ...result.report, repairAudit: [...(original.repairAudit ?? []), ...audit],
+          fieldProvenance: { ...original.fieldProvenance, ...Object.fromEntries(audit.map(a => [a.field, 'manual-repair' as const])) } };
+        rawSet({ reports: result.reports.map(r => r.id === id ? report : r), history: result.history });
+        persist();
+        await storageService.flush();
+        if (mgr) await drainReportProjection();
+        return report;
+      } finally {
+        release();
       }
     },
-    archiveReport(id, note) {
-      set((s) => ({
-        reports: s.reports.map((r) => (r.id === id ? toggleReportArchive(r, note) : r)),
-      }));
-      persist();
+    async repairReport(id, repaired, baseRevision) {
+      const original = get().reports.find(r => r.id === id);
+      if (!original) throw new Error('报告已被删除，请重新打开');
+      const addedAudit = (repaired.repairAudit ?? []).filter(a => !(original.repairAudit ?? []).some(existing => JSON.stringify(existing) === JSON.stringify(a)));
+      return get().commitReportEdit(id, repaired, addedAudit, { baseRevision });
     },
-    deleteReport(id) {
-      set((s) => ({ reports: s.reports.filter((r) => r.id !== id) }));
-      persist();
+    async archiveReport(id, note) {
+      await commitReportList('正在保存报告归档', get().dataRevision, reports => reports.map(r => r.id === id ? { ...toggleReportArchive(r, note), revision: (r.revision ?? 1) + 1 } : r));
     },
-    deleteReports(ids) {
+    async deleteReport(id) {
+      await get().deleteReports([id]);
+    },
+    async deleteReports(ids) {
       const set_ = new Set(ids);
-      set((s) => ({ reports: s.reports.filter((r) => !set_.has(r.id)) }));
-      persist();
+      await commitReportList('正在删除所选报告', get().dataRevision, reports => reports.filter(r => !set_.has(r.id)));
     },
     setReportSortSpec(spec) {
       set({ reportSortSpec: spec });
       persist();
     },
-    runMonthlyBackfill() {
+    async runMonthlyBackfill(baseRevision = get().dataRevision) {
       const s = get();
+      if (baseRevision !== s.dataRevision) throw new Error('数据已变化，请重新预览月报补全');
       const result = runBackfill(s.reports, s.history);
-      set({ reports: result.reports });
-      persist();
-      if (result.created.length > 0) {
-        get().logActivity('report-backfill', `补生成 ${result.created.length} 份历史月报`, 'reports');
+      if (!result.created.length && !result.repaired.length) return { created: [], repaired: [] };
+      validateLedgerShape(null, result.reports);
+      const release = beginLedgerMaintenance('正在补全历史月报');
+      try {
+        await storageService.flush();
+        const mgr = storageService.getDesktopManager();
+        if (mgr && !(await mgr.backupNow(true))) throw new Error('操作前备份不可用');
+        if (baseRevision !== get().dataRevision) throw new Error('数据已变化，请重新预览月报补全');
+        rawSet({ reports: result.reports });
+        persist();
+        await storageService.flush();
+        if (mgr) await drainReportProjection();
+        return { created: result.created, repaired: result.repaired };
+      } finally {
+        release();
       }
-      return { created: result.created, repaired: result.repaired };
     },
 
     // ---------------------------------------------------------------------
@@ -1107,27 +1283,32 @@ export const useAppStore = create<AppState>()((set, get) => {
       await saveTextFile(filename, text);
       get().pushToast(`数据已成功导出为 ${filename}`, 'success');
     },
-    async importData(jsonText, mode = 'replace') {
+    async importData(jsonText, mode = 'replace', baseRevision = get().dataRevision) {
       const result = parseBackup(jsonText);
       if (!result.ok) return { ok: false, message: result.error };
-
-      // 导入前先备份当前数据（桌面版），避免误操作造成资产数据丢失。
-      const mgr = storageService.getDesktopManager();
-      if (mgr) await mgr.backupNow(true);
-
+      if (baseRevision !== get().dataRevision) throw new Error('数据已变化，请重新预览导入');
       const d: ImportedData = result.data;
+      const release = beginLedgerMaintenance('正在导入数据');
+      try {
+      await storageService.flush();
+      const mgr = storageService.getDesktopManager();
+      if (mgr && !(await mgr.backupNow(true))) throw new Error('操作前备份不可用');
+      if (baseRevision !== get().dataRevision) throw new Error('数据已变化，请重新预览导入');
       if (mode === 'merge') {
         const s = get();
         const merged = mergeData(
           { channels: s.channels, history: s.history, reports: s.reports },
           { channels: d.channels, history: d.history, reports: d.reports },
         );
-        set({ channels: normalizeChannelAmounts(merged.channels), history: merged.history, reports: merged.reports });
+        validateLedgerShape({ channels: merged.channels, history: merged.history }, merged.reports);
+        rawSet({ channels: normalizeChannelAmounts(merged.channels), history: merged.history, reports: merged.reports });
         persist();
+        await storageService.flush();
+        if (mgr) await drainReportProjection();
         return { ok: true, message: `合并导入成功：渠道 ${merged.channels.length} 个、历史 ${merged.history.length} 条、报告 ${merged.reports.length} 份` };
       }
 
-      set({
+      rawSet({
         channels: normalizeChannelAmounts(d.channels),
         history: d.history,
         reports: d.reports,
@@ -1148,26 +1329,67 @@ export const useAppStore = create<AppState>()((set, get) => {
         primaryGoalId: d.goals?.primaryGoalId ?? null,
       });
       persist();
+      await storageService.flush();
+      if (mgr) await drainReportProjection();
       return {
         ok: true,
         message: `导入成功：${d.channels.length} 个渠道、${d.history.length} 条历史记录${
           d.reports.length ? `、${d.reports.length} 份报告` : ''
         }`,
       };
+      } finally { release(); }
     },
-    async applyDataFixes() {
+    async applyDataFixes(baseRevision = get().dataRevision) {
       const s = get();
+      if (baseRevision !== s.dataRevision) throw new Error('数据已变化，请重新预览修复');
       const { issues } = checkDataHealth(s.channels, s.history);
       if (issues.length === 0) return { fixed: 0 };
-      const mgr = storageService.getDesktopManager();
-      if (mgr) await mgr.backupNow(true);
       const { channels, history, fixed } = applyHealthFixes(s.channels, s.history, issues);
-      set({ channels: normalizeChannelAmounts(channels), history });
-      persist();
-      get().logActivity('data-repair', `数据健康修复：${fixed} 类问题（修复前已备份）`, 'data');
-      return { fixed };
+      if (!fixed) return { fixed: 0 };
+      const release = beginLedgerMaintenance('正在修复数据');
+      try {
+        await storageService.flush();
+        const mgr = storageService.getDesktopManager();
+        if (mgr && !(await mgr.backupNow(true))) throw new Error('操作前备份不可用');
+        if (baseRevision !== get().dataRevision) throw new Error('数据已变化，请重新预览修复');
+        // Only use the reviewed fix output. Global normalization could silently
+        // rewrite unrelated amounts or erase unresolved evidence.
+        rawSet({ channels, history });
+        persist();
+        await storageService.flush();
+        return { fixed };
+      } finally { release(); }
     },
   };
+});
+
+storageService.registerDrainHook(() => persistNow(useAppStore.getState));
+
+/** Reserve synchronously before the first await; the owner must always release in finally. */
+export function beginLedgerMaintenance(label: string): () => void {
+  const state = useAppStore.getState();
+  if (!state.hydrated || state.recoveryError) throw new Error('当前数据不可编辑，请先完成恢复');
+  if (state.maintenanceLabel) throw new Error(`${state.maintenanceLabel}，请等待完成`);
+  useAppStore.setState({ maintenanceLabel: label });
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    useAppStore.setState({ maintenanceLabel: null });
+  };
+}
+
+useAppStore.subscribe((state, previous) => {
+  if (state.channels !== previous.channels || state.history !== previous.history || state.reports !== previous.reports) {
+    useAppStore.setState({ dataRevision: state.dataRevision + 1 });
+  }
+  if (state.hydrated && state.reports !== previous.reports && storageService.getDesktopManager()) {
+    const queue = enqueueReportProjection(useAppStore.getState().reportProjectionQueue, previous.reports, state.reports);
+    if (queue !== useAppStore.getState().reportProjectionQueue) {
+      useAppStore.setState({ reportProjectionQueue: queue });
+      schedulePersist(useAppStore.getState);
+    }
+  }
 });
 
 /** 派生：当前总资产。 */

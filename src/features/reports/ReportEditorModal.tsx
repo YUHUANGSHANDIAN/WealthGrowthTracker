@@ -8,6 +8,7 @@ import { canonicalWeeklyPeriod } from '../../utils/isoWeek';
 import { monthStart, monthEnd, yearStart, yearEnd, pad2 } from '../../utils/date';
 import { buildAssetComposition, buildChannelDetails } from './normalize';
 import { diffReportFields, buildManualEditAudit } from '../../utils/reportEdit';
+import { useAppStore } from '../../store/appStore';
 
 type Tab = 'basic' | 'assets' | 'stats' | 'source';
 
@@ -21,8 +22,9 @@ const TABS: { id: Tab; label: string }[] = [
 export function ReportEditorModal({ report, onClose, onSave }: {
   report: FinancialReport;
   onClose: () => void;
-  onSave: (edited: FinancialReport, audit: ReportRepairAudit[], opts: { syncHistory: boolean }) => void;
+  onSave: (edited: FinancialReport, audit: ReportRepairAudit[], opts: { syncHistory: boolean; baseRevision: number }) => void | Promise<void>;
 }) {
+  const [baseRevision] = useState(() => useAppStore.getState().dataRevision);
   const [tab, setTab] = useState<Tab>('basic');
   const [titleMode, setTitleMode] = useState<FinancialReport['titleMode']>(report.titleMode ?? 'auto');
   const [customTitle, setCustomTitle] = useState(report.customTitle ?? '');
@@ -38,7 +40,7 @@ export function ReportEditorModal({ report, onClose, onSave }: {
 
   // 资产数据
   const [totalAmount, setTotalAmount] = useState(report.totalAmount);
-  const [previousTotalAmount, setPreviousTotalAmount] = useState(report.previousTotalAmount ?? 0);
+  const [previousTotalAmount, setPreviousTotalAmount] = useState<number | undefined>(report.previousTotalAmount);
   const [channels, setChannels] = useState<Channel[]>(() => JSON.parse(JSON.stringify(report.channels ?? [])));
 
   // 统计
@@ -93,7 +95,7 @@ export function ReportEditorModal({ report, onClose, onSave }: {
       ...(weekNumber !== undefined ? { weekNumber } : {}),
       ...(monthNumber !== undefined ? { monthNumber } : {}),
       totalAmount: total,
-      previousTotalAmount: round2(previousTotalAmount),
+      ...(previousTotalAmount !== undefined ? { previousTotalAmount: round2(previousTotalAmount), baselineStatus: 'known' as const } : { previousTotalAmount: undefined, baselineStatus: 'unknown' as const }),
       tags: tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean),
       customSummary: summary.trim() || undefined,
       channels: channels.length ? channels : report.channels,
@@ -103,9 +105,9 @@ export function ReportEditorModal({ report, onClose, onSave }: {
     };
     // 重算派生字段
     const total2 = edited.totalAmount;
-    const prev = edited.previousTotalAmount ?? 0;
-    edited.changeAmount = round2(total2 - prev);
-    edited.changePercentage = prev > 0 ? round2(((total2 - prev) / prev) * 100) : 0;
+    const prev = edited.previousTotalAmount;
+    edited.changeAmount = prev === undefined ? 0 : round2(total2 - prev);
+    edited.changePercentage = prev !== undefined && prev > 0 ? round2(((total2 - prev) / prev) * 100) : 0;
     if (channels.length) {
       edited.assetComposition = buildAssetComposition(channels as Channel[], total2);
       edited.channelDetails = buildChannelDetails(channels as Channel[], total2);
@@ -117,6 +119,15 @@ export function ReportEditorModal({ report, onClose, onSave }: {
   const diffs = diffReportFields(report, edited);
 
   const [confirmDiff, setConfirmDiff] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [discardOpen, setDiscardOpen] = useState(false);
+
+  function requestClose() {
+    if (saving) return;
+    if (diffs.length) setDiscardOpen(true);
+    else onClose();
+  }
 
   function save() {
     if (report.reportType === 'weekly' && (periodWeek < 1 || periodWeek > 53)) {
@@ -125,9 +136,19 @@ export function ReportEditorModal({ report, onClose, onSave }: {
     setConfirmDiff(true);
   }
 
-  function doSave(syncHistory: boolean) {
+  async function doSave(syncHistory: boolean) {
     const finalAudit = buildManualEditAudit(report, edited, reason);
-    onSave(edited, finalAudit, { syncHistory });
+    setSaving(true);
+    setSaveError('');
+    try {
+      await onSave(edited, finalAudit, { syncHistory, baseRevision });
+      setConfirmDiff(false);
+      onClose();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : '报告保存失败，请重试');
+    } finally {
+      setSaving(false);
+    }
   }
 
   function updateParentAmount(id: string, amount: number) {
@@ -138,10 +159,10 @@ export function ReportEditorModal({ report, onClose, onSave }: {
   }
 
   return (
-    <Modal open onClose={onClose} title="高级编辑报告" size="lg"
+    <Modal open onClose={requestClose} title="高级编辑报告" size="lg"
       footer={<>
-        <Button variant="ghost" onClick={onClose}>取消</Button>
-        <Button onClick={save}>保存</Button>
+        <Button variant="ghost" disabled={saving} onClick={requestClose}>取消</Button>
+        <Button disabled={saving} onClick={save}>预览修改</Button>
       </>}>
       <div className="space-y-4">
         <div className="flex gap-1 flex-wrap">
@@ -170,7 +191,7 @@ export function ReportEditorModal({ report, onClose, onSave }: {
         {tab === 'assets' && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <MoneyField label="期初资产" value={previousTotalAmount} onChange={(v) => setPreviousTotalAmount(v === '' ? 0 : v)} />
+              <MoneyField label="期初资产" value={previousTotalAmount ?? ''} onChange={(v) => setPreviousTotalAmount(v === '' ? undefined : v)} hint={previousTotalAmount === undefined ? '留空表示未知；不会按 0 元计算变化' : undefined} />
               <MoneyField label={channels.length ? '期末总资产（由渠道求和）' : '期末总资产'} value={totalAmount} onChange={(v) => setTotalAmount(v === '' ? 0 : v)} disabled={channels.length > 0} />
             </div>
             {totalMismatch && (
@@ -240,13 +261,14 @@ export function ReportEditorModal({ report, onClose, onSave }: {
       </div>
 
       {confirmDiff && (
-        <Modal open onClose={() => setConfirmDiff(false)} title="确认修改（Diff）" size="md"
+        <Modal open onClose={() => { if (!saving) setConfirmDiff(false); }} title="确认修改（Diff）" size="md"
           footer={<>
-            <Button variant="ghost" onClick={() => setConfirmDiff(false)}>取消</Button>
-            <Button onClick={() => { doSave(false); setConfirmDiff(false); onClose(); }}>仅保存报告</Button>
-            <Button onClick={() => { doSave(true); setConfirmDiff(false); onClose(); }}>保存并同步 History</Button>
+            <Button variant="ghost" disabled={saving} onClick={() => setConfirmDiff(false)}>取消</Button>
+            <Button disabled={saving} onClick={() => void doSave(false)}>{saving ? '保存中…' : '仅保存报告'}</Button>
+            <Button disabled={saving} onClick={() => void doSave(true)}>{saving ? '保存中…' : '保存并同步 History'}</Button>
           </>}>
           <div className="space-y-3">
+            {saveError && <p className="text-sm text-red-600" role="alert">{saveError}</p>}
             <p className="text-sm text-slate-500">将修改 {diffs.length} 个字段：</p>
             <div className="max-h-60 overflow-y-auto space-y-1 text-sm">
               {diffs.map((d, i) => (
@@ -261,6 +283,10 @@ export function ReportEditorModal({ report, onClose, onSave }: {
           </div>
         </Modal>
       )}
+      {discardOpen && <Modal open title="放弃未保存的报告编辑？" onClose={() => setDiscardOpen(false)}
+        footer={<><Button variant="ghost" onClick={() => setDiscardOpen(false)}>继续编辑</Button><Button variant="danger" onClick={onClose}>放弃编辑</Button></>}>
+        <p className="text-sm text-slate-500">当前修改尚未保存。</p>
+      </Modal>}
     </Modal>
   );
 }

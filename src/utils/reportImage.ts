@@ -96,9 +96,10 @@ export function buildReportSvg(
   const pal = paletteOf(report);
   if (legacyThemeColor) pal.primary = legacyThemeColor;
 
+  const baselineUnknown = report.baselineStatus === 'unknown' || report.previousTotalAmount === undefined;
   const change = privacyChange(report.changeAmount, report.changePercentage, privacy);
   const totalText = privacyAmount(report.totalAmount, privacy) ?? '';
-  const prevText = privacyAmount(report.previousTotalAmount ?? 0, privacy);
+  const prevText = baselineUnknown ? null : privacyAmount(report.previousTotalAmount!, privacy);
   const levelText = report.wealthLevelName ?? '—';
 
   const bg = background === 'transparent' ? '' : `<rect width="${W}" height="${H}" fill="${background === 'theme' ? pal.surfaceSoft : '#ffffff'}"/>`;
@@ -126,7 +127,7 @@ export function buildReportSvg(
   const kpi = `
   <text x="40" y="${totalLabelY}" font-size="15" fill="${pal.muted}">期末总资产</text>
   <text x="40" y="${totalValueY}" font-size="${totalFont}" font-weight="700" fill="${pal.ink}">${esc(totalText)}</text>
-  <text x="40" y="${totalValueY + 34}" font-size="18" font-weight="600" fill="${changeColor(report.changeAmount)}">${privacy !== 'percentage-only' ? `${esc(change.amount ?? '')}  ` : ''}${esc(change.pct)}</text>`;
+  <text x="40" y="${totalValueY + 34}" font-size="18" font-weight="600" fill="${changeColor(report.changeAmount)}">${baselineUnknown ? '变化未知' : `${privacy !== 'percentage-only' ? `${esc(change.amount ?? '')}  ` : ''}${esc(change.pct)}`}</text>`;
 
   // —— 次级统计（detailed / social / story）——
   let stats = '';
@@ -137,7 +138,7 @@ export function buildReportSvg(
     const avg = privacyAmount(report.reportType === 'weekly' ? report.weeklyAvg ?? report.totalAmount : report.reportType === 'monthly' ? report.monthlyAvg ?? report.totalAmount : report.yearlyAvg ?? report.totalAmount, privacy);
 
     const cards = [
-      { label: '期初总资产', value: prev },
+      { label: '期初总资产', value: baselineUnknown ? '未知' : prev ?? '—' },
       { label: '期间最高', value: max ?? '—' },
       { label: '期间最低', value: min ?? '—' },
       { label: '期间平均', value: avg ?? '—' },

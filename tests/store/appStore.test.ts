@@ -6,7 +6,7 @@ import { todayString } from '../../src/utils/date';
 
 describe('appStore', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     useAppStore.setState({
       hydrated: true,
       channels: defaultChannels(),

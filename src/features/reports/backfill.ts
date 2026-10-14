@@ -1,7 +1,7 @@
 import type { FinancialReport, HistoryPoint } from '../../types';
 import { generateReport } from './generate';
-import { normalizeFinancialReport } from './normalize';
-import { pad2, todayString } from '../../utils/date';
+import { normalizeFinancialReport, periodKeyOf } from './normalize';
+import { isDateString, pad2, todayString } from '../../utils/date';
 
 /**
  * 历史月度报告覆盖与补生成（v1.5）。
@@ -25,13 +25,14 @@ export interface MonthCoverage {
 
 /** 列出从最早历史记录到上一个已结束月份的所有月份的覆盖情况。 */
 export function reportCoverage(reports: FinancialReport[], history: HistoryPoint[], now = todayString()): MonthCoverage[] {
-  if (history.length === 0) return [];
-  const dates = history.map((h) => h.date).sort();
+  if (!isDateString(now)) throw new Error('补全参考日期无效');
+  const dates = history.filter((h) => isDateString(h.date) && Number.isFinite(h.totalAmount) && h.date <= now).map((h) => h.date).sort();
+  if (!dates.length) return [];
   const earliest = dates[0]!;
   const curYear = Number(now.slice(0, 4));
   const curMonth = Number(now.slice(5, 7));
 
-  const existing = new Set(reports.filter((r) => r.periodKey?.startsWith('monthly:')).map((r) => r.periodKey));
+  const existing = new Set(reports.filter((r) => r.reportType === 'monthly').map((r) => periodKeyOf(r)));
 
   const result: MonthCoverage[] = [];
   let y = Number(earliest.slice(0, 4));
@@ -104,12 +105,16 @@ export function runBackfill(reports: FinancialReport[], history: HistoryPoint[],
       next = [gen, ...next];
       created.push(entry.periodKey);
     } else if (entry.action === 'repair') {
-      const idx = next.findIndex((r) => r.periodKey === entry.periodKey);
+      const idx = next.findIndex((r) => r.reportType === 'monthly' && periodKeyOf(r) === entry.periodKey);
       if (idx >= 0) {
-        const repairedReport = normalizeFinancialReport(next[idx]!);
-        if (entry.lastDataDate) repairedReport.dataAsOf = entry.lastDataDate;
-        next[idx] = repairedReport;
-        repaired.push(entry.periodKey);
+        const original = next[idx]!;
+        const repairedReport = normalizeFinancialReport(original);
+        // A later history record does not prove this report's saved balance.
+        // Keep its own dataAsOf, total, snapshot and user annotations together.
+        if (JSON.stringify(original) !== JSON.stringify(repairedReport)) {
+          next[idx] = { ...repairedReport, revision: (original.revision ?? 1) + 1 };
+          repaired.push(entry.periodKey);
+        }
       }
     }
   }

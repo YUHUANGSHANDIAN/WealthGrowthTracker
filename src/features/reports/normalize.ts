@@ -4,6 +4,7 @@ import { channelAmount, leafChannels } from '../../utils/channels';
 import { isoWeekOfYear, pad2, parseDateString } from '../../utils/date';
 import { canonicalWeeklyPeriod, resolveWeeklyIdentity } from '../../utils/isoWeek';
 import { round2 } from '../../utils/money';
+import { hasValidReportEvidence } from './evidence';
 
 /**
  * Report Domain —— 财务报告规范化管线（v1.3）。
@@ -18,8 +19,8 @@ import { round2 } from '../../utils/money';
  * 所有函数均为纯函数、确定性、幂等：normalize(normalize(report)) 结果不变。
  */
 
-export const REPORT_SCHEMA_VERSION = 4;
-export const REPORT_RENDERER_VERSION = 3;
+export const REPORT_SCHEMA_VERSION = 5;
+export const REPORT_RENDERER_VERSION = 4;
 
 /** 当前渠道构成报告所需的份额明细（叶子渠道）。 */
 export function buildChannelDetails(channels: Channel[], total: number): ReportChannelDetail[] {
@@ -164,6 +165,10 @@ export function computeCompleteness(report: FinancialReport): ReportCompleteness
  * 只补齐「可推导」字段；历史事实字段保持原值。
  */
 export function normalizeFinancialReport(report: FinancialReport): FinancialReport {
+  if ((report.reportSchemaVersion ?? 0) > REPORT_SCHEMA_VERSION ||
+      (report.reportRendererVersion ?? 0) > REPORT_RENDERER_VERSION) {
+    throw new Error('报告来自更新版本，当前版本只能保留原数据，不能迁移写入');
+  }
   const endDate = report.endDate || report.startDate;
   const titleMode = report.titleMode ?? 'auto';
   const d = parseDateString(endDate);
@@ -257,7 +262,7 @@ export function normalizeFinancialReport(report: FinancialReport): FinancialRepo
   return {
     ...report,
     reportSchemaVersion: REPORT_SCHEMA_VERSION,
-    reportRendererVersion: report.reportRendererVersion ?? REPORT_RENDERER_VERSION,
+    reportRendererVersion: REPORT_RENDERER_VERSION,
     reportNormalizedAt: report.reportNormalizedAt,
     periodKey,
     startDate,
@@ -285,7 +290,14 @@ export function normalizeFinancialReport(report: FinancialReport): FinancialRepo
     ...(assetComposition ? { assetComposition } : {}),
     ...(report.dataAsOf !== undefined ? { dataAsOf: report.dataAsOf } : {}),
     generationSource: report.generationSource ?? 'normal',
-    integrityStatus: report.integrityStatus ?? ((report.generationSource ?? 'normal') === 'normal' ? 'verified' : 'reconstructed'),
+    baselineStatus: report.baselineStatus ?? (report.previousTotalAmount === undefined ? 'unknown' : 'known'),
+    // "normal" describes the path, not proof. Verified requires evidence tied to
+    // the exact snapshot and facts; imported/reconstructed reports remain explicit.
+    integrityStatus: hasValidReportEvidence(report)
+      ? 'verified'
+      : report.integrityStatus === 'verified'
+        ? 'needs-review'
+        : report.integrityStatus ?? ((report.generationSource ?? 'normal') === 'normal' ? 'needs-review' : 'reconstructed'),
     ...(compositionWarnings !== undefined ? { compositionWarnings } : {}),
   };
 }
@@ -302,6 +314,7 @@ export const repairFinancialReport = normalizeFinancialReport;
 export function needsReportNormalization(report: FinancialReport): boolean {
   return (
     report.reportSchemaVersion !== REPORT_SCHEMA_VERSION ||
+    report.reportRendererVersion !== REPORT_RENDERER_VERSION ||
     !report.periodKey ||
     report.dataCompleteness === undefined
   );

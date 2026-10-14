@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Channel, HistoryPoint } from '../../src/types';
-import { analyticsKpis, assetConcentration, periodComparison, channelChange, historicalChannelComposition } from '../../src/features/analysis/analytics';
+import { analyticsKpis, assetConcentration, periodComparison, calendarOffset, channelChange, historicalChannelComposition } from '../../src/features/analysis/analytics';
 
 const channels: Channel[] = [
   { id: 'a', name: '支付宝', emoji: '💙', amount: 0, color: '#3B82F6', isParent: true, isExpanded: false, children: [{ id: 'a1', name: '余额', emoji: '💰', amount: 800, color: '#10B981', parentId: 'a' }] },
@@ -14,6 +14,28 @@ const history: HistoryPoint[] = [
 ];
 
 describe('分析系统', () => {
+  it('closed range ignores current channels and later history', () => {
+    const k = analyticsKpis(history, channels, '2026-01-01', '2026-06-01');
+    expect(k.currentTotal).toBe(800);
+    expect(k.change).toBe(300);
+    expect(k.max).toBe(800);
+    expect(k.pointCount).toBe(2);
+  });
+  it('missing baseline and missing period statistics remain unknown', () => {
+    const k = analyticsKpis(history, channels, '2025-01-01', '2025-02-01');
+    expect(k.currentTotal).toBeNull();
+    expect(k.startTotal).toBeNull();
+    expect(k.change).toBeNull();
+    expect(k.avg).toBeNull();
+    expect(k.coverage).toBe(0);
+    expect(channelChange(history, channels, 30, '2025-02-01')[0]?.change).toBeNull();
+  });
+  it('calendar comparison clamps month and leap-year boundaries', () => {
+    expect(calendarOffset('2024-03-31', -1)).toBe('2024-02-29');
+    expect(calendarOffset('2024-02-29', -12)).toBe('2023-02-28');
+    const result = periodComparison([{date:'2024-02-29',totalAmount:100},{date:'2024-03-01',totalAmount:150},{date:'2024-03-31',totalAmount:200}], '2024-03-31');
+    expect(result.mom?.change).toBe(100);
+  });
   it('KPI 计算（起点/变化/极值/覆盖率）', () => {
     const k = analyticsKpis(history, channels, '2026-01-01');
     expect(k.currentTotal).toBe(1000); // 800 + 200
@@ -47,7 +69,8 @@ describe('分析系统', () => {
     ];
     const comp = historicalChannelComposition(snapHistory, { level: 'leaf', topN: 5, mode: 'absolute' });
     expect(comp).toHaveLength(2); // 包含缺快照的点（missing）
-    expect(comp[1]!.channels.length).toBe(2);
+    expect(comp[1]!.channels.filter(c => c.id.startsWith('leaf:'))).toHaveLength(2);
+    expect(comp[1]!.channels.reduce((sum, c) => sum + c.amount, 0)).toBe(800);
     expect(comp[0]!.missing).toBe(true);
   });
 

@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react';
+import { useNavigationStore } from '../../store/navigationStore';
+import { latestPointAtOrBefore } from '../reports/generate';
 import { useAppStore } from '../../store/appStore';
 import { totalAssets, leafChannels } from '../../utils/channels';
 import { formatCNY } from '../../utils/money';
 import { addDays, todayString } from '../../utils/date';
 import { aggregateHistory, type TimeDimension } from '../../utils/timeDimension';
+import { historyTrend, smoothTrend } from './trend';
 import { Card, EmptyState, Badge } from '../../components/ui/primitives';
 import { LineChart } from '../../components/charts/LineChart';
 import { BarChart } from '../../components/charts/BarChart';
@@ -11,6 +14,7 @@ import { RadarChart } from '../../components/charts/RadarChart';
 import { StackedBarChart } from '../../components/charts/StackedBarChart';
 import { BRAND, CATEGORICAL_SERIES } from '../../components/charts/palette';
 import { analyzeDimensions } from '../prediction/models';
+import { AIActionButton } from '../ai/AIActionButton';
 import {
   analyticsKpis,
   assetConcentration,
@@ -38,18 +42,17 @@ const GRANULARITIES: { value: TimeDimension; label: string }[] = [
   { value: 'yearly', label: '年' },
 ];
 
-function smooth(points: { date: string; value: number }[], window = 3): { date: string; value: number }[] {
-  if (points.length < window) return points;
-  return points.map((p, i) => {
-    const start = Math.max(0, i - window + 1);
-    const slice = points.slice(start, i + 1);
-    const v = slice.reduce((a, b) => a + b.value, 0) / slice.length;
-    return { date: p.date, value: Math.round(v * 100) / 100 };
-  });
+function channelColor(id: string): string {
+  let hash = 0;
+  for (const character of id) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return CATEGORICAL_SERIES[hash % CATEGORICAL_SERIES.length]!;
 }
 
 export function AnalysisPanel() {
-  const channels = useAppStore((s) => s.channels);
+  const liveChannels = useAppStore((s) => s.channels);
+  const routeStart = useNavigationStore(s => s.startDate);
+  const routeEnd = useNavigationStore(s => s.endDate);
+  const navigate = useNavigationStore(s => s.navigate);
   const history = useAppStore((s) => s.history);
   const [range, setRange] = useState('90');
   const [granularity, setGranularity] = useState<TimeDimension>('raw');
@@ -57,28 +60,32 @@ export function AnalysisPanel() {
   const [changeDays, setChangeDays] = useState(30);
 
   const today = todayString();
+  const rangeEnd = routeEnd ?? today;
+  const endPoint = useMemo(()=>latestPointAtOrBefore(history, rangeEnd),[history,rangeEnd]);
+  const channels = useMemo(()=>rangeEnd === today ? liveChannels : endPoint?.channels ?? [],[rangeEnd,today,liveChannels,endPoint]);
+  const compositionUnknown = rangeEnd !== today && !endPoint?.channels;
   const total = totalAssets(channels);
 
   const rangeStart = useMemo(() => {
+    if (routeStart) return routeStart;
     if (range === 'all') return null;
     if (range === 'ytd') return `${new Date().getFullYear()}-01-01`;
     return addDays(today, -Number(range));
-  }, [range, today]);
+  }, [range, today, routeStart]);
 
   const rangeHistory = useMemo(() => {
     const sorted = [...history].sort((a, b) => (a.date < b.date ? -1 : 1));
-    if (!rangeStart) return sorted;
-    return sorted.filter((p) => p.date >= rangeStart);
-  }, [history, rangeStart]);
+    return sorted.filter((p) => (!rangeStart || p.date >= rangeStart) && p.date <= rangeEnd);
+  }, [history, rangeStart, rangeEnd]);
 
   const displayHistory = useMemo(() => aggregateHistory(rangeHistory, granularity), [rangeHistory, granularity]);
 
-  const kpis = useMemo(() => analyticsKpis(history, channels, rangeStart), [history, channels, rangeStart]);
+  const kpis = useMemo(() => analyticsKpis(history, liveChannels, rangeStart, rangeEnd), [history, liveChannels, rangeStart, rangeEnd]);
 
   const trendSeries = useMemo(() => {
-    const raw = displayHistory.map((p) => ({ date: p.date, value: p.totalAmount }));
-    return [{ id: 'total', name: '总资产', color: BRAND, points: smoothing ? smooth(raw) : raw, area: true }];
-  }, [displayHistory, smoothing]);
+    const raw = historyTrend(rangeHistory, granularity);
+    return [{ id: 'total', name: '总资产', color: BRAND, points: smoothing ? smoothTrend(raw) : raw, area: true }];
+  }, [rangeHistory, granularity, smoothing]);
 
   const comparisonItems = useMemo(() => {
     return leafChannels(channels)
@@ -99,28 +106,31 @@ export function AnalysisPanel() {
   }, [channels, total]);
 
   const concentration = useMemo(() => assetConcentration(channels), [channels]);
-  const comparison = useMemo(() => periodComparison(history), [history]);
-  const changes = useMemo(() => channelChange(history, channels, changeDays), [history, channels, changeDays]);
+  const comparison = useMemo(() => periodComparison(history.filter(p => !rangeStart || p.date >= rangeStart), rangeEnd), [history, rangeStart, rangeEnd]);
+  const changes = useMemo(() => channelChange(history, channels, changeDays, rangeEnd, routeStart), [history, channels, changeDays, rangeEnd, routeStart]);
   const [compLevel, setCompLevel] = useState<'parent' | 'leaf'>('leaf');
   const [compMode, setCompMode] = useState<'absolute' | 'percent'>('absolute');
   const [compTopN, setCompTopN] = useState(5);
   const composition = useMemo(() => historicalChannelComposition(rangeHistory, { level: compLevel, topN: compTopN, mode: compMode }), [rangeHistory, compLevel, compMode, compTopN]);
 
-  const radarAxes = useMemo(() => analyzeDimensions(history), [history]);
+  const radarAxes = useMemo(() => analyzeDimensions(rangeHistory), [rangeHistory]);
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end"><AIActionButton task="analysis-question" range={{ start: rangeStart ?? rangeHistory[0]?.date ?? rangeEnd, end: rangeEnd }}>解释所选区间</AIActionButton></div>
       {/* Header 控制 */}
       <Card className="p-4">
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex gap-1.5 flex-wrap" role="group" aria-label="时间范围">
             {RANGES.map((r) => (
-              <button key={r.value} onClick={() => setRange(r.value)} aria-pressed={range === r.value}
+              <button key={r.value} onClick={() => {setRange(r.value);navigate({tab:'analysis'});}} aria-pressed={!routeStart && range === r.value}
                 className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${range === r.value ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
                 {r.label}
               </button>
             ))}
           </div>
+          <label className="text-xs">起始日期 <input type="date" value={rangeStart??''} max={rangeEnd} onChange={e=>navigate({tab:'analysis',startDate:e.target.value||undefined,endDate:rangeEnd})}/></label>
+          <label className="text-xs">结束日期 <input type="date" value={rangeEnd} min={rangeStart??undefined} max={today} onChange={e=>navigate({tab:'analysis',startDate:rangeStart??undefined,endDate:e.target.value||undefined})}/></label>
           <select value={granularity} onChange={(e) => setGranularity(e.target.value as TimeDimension)} className="px-2 py-1 text-xs bg-white border border-slate-300 rounded-lg" aria-label="时间粒度">
             {GRANULARITIES.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
           </select>
@@ -134,16 +144,16 @@ export function AnalysisPanel() {
       {/* KPI */}
       <Card className="p-4">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Kpi label="当前总资产" value={formatCNY(kpis.currentTotal)} />
-          <Kpi label="期间起点资产" value={formatCNY(kpis.startTotal)} />
-          <Kpi label="期间变化" value={`${kpis.change >= 0 ? '+' : ''}${formatCNY(kpis.change)}`} tone={kpis.change >= 0 ? 'up' : 'down'} />
-          <Kpi label="变化率" value={`${kpis.changeRate >= 0 ? '+' : ''}${kpis.changeRate.toFixed(1)}%`} tone={kpis.changeRate >= 0 ? 'up' : 'down'} />
-          <Kpi label="期间最高" value={formatCNY(kpis.max)} />
-          <Kpi label="期间最低" value={formatCNY(kpis.min)} />
-          <Kpi label="期间平均" value={formatCNY(kpis.avg)} />
+          <Kpi label="期末资产" value={kpis.currentTotal===null?'未知':formatCNY(kpis.currentTotal)} />
+          <Kpi label="期间起点资产" value={kpis.startTotal===null?'未知':formatCNY(kpis.startTotal)} />
+          <Kpi label="期间变化" value={kpis.change===null?'未知':`${kpis.change >= 0 ? '+' : ''}${formatCNY(kpis.change)}`} tone={kpis.change===null?undefined:kpis.change >= 0 ? 'up' : 'down'} />
+          <Kpi label="变化率" value={kpis.changeRate===null?'未知':`${kpis.changeRate >= 0 ? '+' : ''}${kpis.changeRate.toFixed(1)}%`} tone={kpis.changeRate===null?undefined:kpis.changeRate >= 0 ? 'up' : 'down'} />
+          <Kpi label="期间最高" value={kpis.max===null?'未知':formatCNY(kpis.max)} />
+          <Kpi label="期间最低" value={kpis.min===null?'未知':formatCNY(kpis.min)} />
+          <Kpi label="期间平均" value={kpis.avg===null?'未知':formatCNY(kpis.avg)} />
           <Kpi label="数据覆盖率" value={`${(kpis.coverage * 100).toFixed(0)}%`} />
         </div>
-        <p className="text-[11px] text-slate-400 mt-2">「变化率」为资产变化率，不是证券回报率。</p>
+        <p className="text-[11px] text-slate-500 mt-2">「变化率」为资产变化率，不是证券回报率。</p>
       </Card>
 
       {/* 资产趋势 */}
@@ -155,7 +165,7 @@ export function AnalysisPanel() {
       {/* 历史渠道构成 */}
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-1">历史渠道构成</h2>
-        <p className="text-xs text-slate-400 mb-3">渠道资产结构随时间变化。缺快照的日期显示为缺口（不当作 0）。</p>
+        <p className="text-xs text-slate-500 mb-3">渠道资产结构随时间变化。缺快照的日期显示为缺口（不当作 0）。</p>
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <select value={compLevel} onChange={(e) => setCompLevel(e.target.value as 'parent' | 'leaf')} className="px-2 py-1 text-xs bg-white border border-slate-300 rounded-lg" aria-label="渠道层级">
             <option value="leaf">叶子渠道</option>
@@ -174,7 +184,7 @@ export function AnalysisPanel() {
         </div>
         {composition.filter((p) => !p.missing).length > 0 ? (
           <StackedBarChart
-            data={composition.filter((p) => !p.missing).map((p) => ({ date: p.date, segments: p.channels.map((c, i) => ({ name: c.name, color: CATEGORICAL_SERIES[i % CATEGORICAL_SERIES.length]!, value: c.amount })) }))}
+            data={composition.map((p) => ({ date: p.date, missing: p.missing, segments: p.channels.map(c => ({ id: c.id, name: c.name, color: channelColor(c.id), value: c.amount })) }))}
             valueFormatter={compMode === 'percent' ? (v) => `${v.toFixed(0)}%` : undefined}
             ariaLabel="历史渠道构成"
           />
@@ -186,11 +196,11 @@ export function AnalysisPanel() {
       {/* 渠道对比 + 集中度 */}
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-1">渠道对比与资产集中度</h2>
-        <p className="text-xs text-slate-400 mb-3">该指标仅描述资产在记录渠道中的集中程度，不代表投资风险。</p>
+        <p className="text-xs text-slate-500 mb-3">该指标仅描述资产在记录渠道中的集中程度，不代表投资风险。</p>
         <div className="grid grid-cols-3 gap-2 mb-3">
-          <Kpi label="TOP 1 占比" value={`${concentration.top1}%`} />
-          <Kpi label="TOP 3 占比" value={`${concentration.top3}%`} />
-          <Kpi label="HHI" value={String(concentration.hhi)} />
+          <Kpi label="TOP 1 占比" value={compositionUnknown?'未知':`${concentration.top1}%`} />
+          <Kpi label="TOP 3 占比" value={compositionUnknown?'未知':`${concentration.top3}%`} />
+          <Kpi label="HHI" value={compositionUnknown?'未知':String(concentration.hhi)} />
         </div>
         {comparisonItems.length > 0 ? <BarChart items={comparisonItems} ariaLabel="渠道资产对比" /> : <EmptyState icon="🏦" title="暂无渠道数据" />}
       </Card>
@@ -213,12 +223,12 @@ export function AnalysisPanel() {
               <span className="flex-1 truncate text-slate-700">{c.name}</span>
               <span className="tabular text-slate-500">{formatCNY(c.amount)}</span>
               <span className={`tabular font-medium ${(c.change ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                {(c.change ?? 0) >= 0 ? '▲+' : '▼'}{formatCNY(Math.abs(c.change ?? 0))}
-                {c.changeRate === null ? '（从 0 新增）' : c.changeRate !== null ? ` ${c.changeRate >= 0 ? '+' : ''}${c.changeRate.toFixed(1)}%` : ''}
+                {c.change===null?'基准未知':`${c.change >= 0 ? '▲+' : '▼'}${formatCNY(Math.abs(c.change))}`}
+                {c.change!==null && c.changeRate!==null ? ` ${c.changeRate>=0?'+':''}${c.changeRate.toFixed(1)}%` : ''}
               </span>
             </div>
           ))}
-          {changes.length === 0 && <p className="text-sm text-slate-400">暂无渠道数据。</p>}
+          {changes.length === 0 && <p className="text-sm text-slate-500">暂无渠道数据。</p>}
         </div>
       </Card>
 
@@ -259,7 +269,7 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone?: 'up'
   const color = tone === 'up' ? 'text-emerald-600' : tone === 'down' ? 'text-red-600' : 'text-slate-800';
   return (
     <div className="bg-slate-50 rounded-xl px-3 py-2.5">
-      <div className="text-xs text-slate-400">{label}</div>
+      <div className="text-xs text-slate-500">{label}</div>
       <div className={`text-sm font-semibold tabular truncate ${color}`}>{value}</div>
     </div>
   );
@@ -268,7 +278,7 @@ function Kpi({ label, value, tone }: { label: string; value: string; tone?: 'up'
 function PeriodCard({ label, data }: { label: string; data: { change: number; rate: number } | null }) {
   return (
     <div className="bg-slate-50 rounded-xl px-3 py-2.5">
-      <div className="text-xs text-slate-400">{label}</div>
+      <div className="text-xs text-slate-500">{label}</div>
       {data ? (
         <>
           <div className={`text-sm font-semibold tabular ${data.change >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -277,7 +287,7 @@ function PeriodCard({ label, data }: { label: string; data: { change: number; ra
           <div className={`text-xs tabular ${data.rate >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{data.rate >= 0 ? '+' : ''}{data.rate.toFixed(1)}%</div>
         </>
       ) : (
-        <div className="text-sm text-slate-400">暂无数据</div>
+        <div className="text-sm text-slate-500">暂无数据</div>
       )}
     </div>
   );

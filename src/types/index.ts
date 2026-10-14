@@ -40,6 +40,9 @@ export interface HistoryPoint {
   events?: unknown[];
   marketConditions?: unknown;
   linkedReportId?: string;
+  /** 用户事件备注，仅解释背景，不构成现金流记录。 */
+  eventNote?: string;
+  eventNoteUpdatedAt?: string;
   /** 记录来源（v1.6）：区分 live-snapshot / manual / weekly-report / import / 旧版导入 / OCR 修复等。 */
   source?: HistorySource;
   /** 最近更新时间（ISO）。 */
@@ -119,6 +122,29 @@ export type ReportGenerationSource = 'normal' | 'legacy-txt-import' | 'legacy-im
  */
 export type ReportIntegrityStatus = 'verified' | 'reconstructed' | 'needs-review';
 
+export interface ReportVerificationEvidence {
+  kind: 'snapshot-reconciliation';
+  checkedAt: string;
+  facts: string;
+  baselineDate?: string;
+  endDate: string;
+}
+
+/** References identify locally authorized facts; they never include credentials. */
+export interface ReportContextReference {
+  factId: string;
+  source: string;
+  sourceRevision: number;
+}
+
+export interface ReportAIAnnotationMetadata {
+  annotationId: string;
+  reportRevision: number;
+  profileId: string;
+  model: string;
+  createdAt: string;
+}
+
 /** 财务报告（周/月/年报）。大量可选字段用于兼容旧版报告的完整快照数据。 */
 export interface FinancialReport {
   id: string;
@@ -137,6 +163,8 @@ export interface FinancialReport {
   yearlyChange?: Money;
   yearlyChangePercentage?: number;
   previousTotalAmount?: Money;
+  /** Whether the opening balance is backed by a history point before the period. */
+  baselineStatus?: 'known' | 'unknown';
   // 周期极值/均值
   weeklyMax?: Money;
   weeklyMin?: Money;
@@ -232,6 +260,10 @@ export interface FinancialReport {
   // —— v1.6 Report Domain（可选，向后兼容）——
   /** 报告完整性状态（v1.6，替代「部分完整」标签）。 */
   integrityStatus?: ReportIntegrityStatus;
+  // Schema 5: evidence and AI annotations remain distinct from financial facts.
+  verificationEvidence?: ReportVerificationEvidence;
+  contextReferences?: ReportContextReference[];
+  aiAnnotationMetadata?: ReportAIAnnotationMetadata[];
   /** 旧来源原始元数据（如旧图片打印的日期范围/标题/生成时间），仅供审计，不作为 canonical 周期。 */
   legacySourceMetadata?: {
     sourcePrintedRange?: string;
@@ -660,6 +692,7 @@ export interface ActivityLogEntry {
 
 /** 完整导出/导入用的备份结构（version 1.0.0，与旧版兼容）。 */
 export interface BackupData {
+  backupSchemaVersion?: 0 | 1;
   version: string;
   exportDate: string;
   appInfo: { name: string; version: string };

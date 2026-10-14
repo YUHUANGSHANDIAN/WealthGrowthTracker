@@ -10,6 +10,7 @@ import { getLevelByAmount } from '../../constants/levels';
 import { APP_VERSION } from '../../constants/version';
 import {
   parseDateString,
+  addDays,
   todayString,
   weekStart,
   weekEnd,
@@ -49,21 +50,21 @@ export function reportTitle(reportType: ReportType, referenceDate: string): stri
 }
 
 /** 某日期及之前最近一次总资产（不含渠道构成）。 */
-export function assetAtDate(history: HistoryPoint[], date: string): number {
+export function assetAtDate(history: HistoryPoint[], date: string): number | null {
   const p = latestPointAtOrBefore(history, date);
-  return p ? p.totalAmount : 0;
+  return p && Number.isFinite(p.totalAmount) ? p.totalAmount : null;
 }
 
 /** 某日期及之前最近的一条历史记录（含渠道快照，若存在）。 */
 export function latestPointAtOrBefore(history: HistoryPoint[], date: string): HistoryPoint | null {
   if (history.length === 0) return null;
-  const sorted = [...history].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
   let candidate: HistoryPoint | null = null;
   for (const p of sorted) {
     if (p.date <= date) candidate = p;
     else break;
   }
-  return candidate ?? sorted[0]!;
+  return candidate;
 }
 
 export { buildChannelDetails } from './normalize';
@@ -85,10 +86,15 @@ export function generateReport(
   now: string = todayString(),
 ): FinancialReport {
   const { startDate, endDate } = periodRange(reportType, referenceDate);
-  const isCurrentPeriod = endDate >= now;
+  const isCurrentPeriod = startDate <= now && now <= endDate;
+  if (startDate > now) throw new Error('未来周期尚未发生，不能生成财务报告');
 
   const endPoint = latestPointAtOrBefore(history, endDate);
-  const startPoint = latestPointAtOrBefore(history, startDate);
+  const startPoint = latestPointAtOrBefore(history, addDays(startDate, -1));
+
+  if (!isCurrentPeriod && (!endPoint || !Number.isFinite(endPoint.totalAmount))) {
+    throw new Error('缺少有效期末历史快照，无法生成报告');
+  }
 
   let total: number;
   let endChannels: Channel[] | undefined;
@@ -108,9 +114,9 @@ export function generateReport(
     channelSnapshotMissing = true;
   }
 
-  const previous = startPoint ? startPoint.totalAmount : 0;
-  const change = diffMoney(total, previous);
-  const changePercentage = previous > 0 ? round2((change / previous) * 100) : 0;
+  const previous = startPoint && Number.isFinite(startPoint.totalAmount) ? startPoint.totalAmount : undefined;
+  const change = previous === undefined ? 0 : diffMoney(total, previous);
+  const changePercentage = previous !== undefined && previous > 0 ? round2((change / previous) * 100) : 0;
 
   const inPeriod = history.filter((p) => p.date >= startDate && p.date <= endDate);
   const amounts = inPeriod.map((p) => p.totalAmount);
@@ -136,7 +142,8 @@ export function generateReport(
     endDate,
     title: reportTitle(reportType, referenceDate),
     totalAmount: total,
-    previousTotalAmount: previous,
+    ...(previous !== undefined ? { previousTotalAmount: previous } : {}),
+    baselineStatus: previous === undefined ? 'unknown' as const : 'known' as const,
     changeAmount: change,
     changePercentage,
     channelDetails,
@@ -211,6 +218,9 @@ export function toggleReportArchive(report: FinancialReport, note?: string): Fin
 
 /** 报告摘要文案。 */
 export function reportSummary(report: FinancialReport): string {
+  if (report.baselineStatus === 'unknown' || report.previousTotalAmount === undefined) {
+    return `本期总资产 ${report.totalAmount.toFixed(2)} 元；缺少期初历史快照，无法计算本期变化。`;
+  }
   const pct = report.changePercentage;
   const direction = pct >= 0 ? '增长' : '减少';
   const level = report.wealthLevelName ?? '财富等级';

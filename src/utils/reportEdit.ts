@@ -45,9 +45,24 @@ export function diffReportFields(original: FinancialReport, edited: FinancialRep
       diffs.push({ field, label, oldValue, newValue });
     }
   }
-  // 渠道构成差异（父/子金额）
-  if (JSON.stringify(original.channels ?? null) !== JSON.stringify(edited.channels ?? null)) {
-    diffs.push({ field: 'channels', label: '渠道构成', oldValue: undefined, newValue: undefined });
+  // 渠道差异按稳定 ID 展开，避免同名渠道或父子层级变化被压成一个 undefined diff。
+  const flatten = (channels: FinancialReport['channels']) => {
+    const out = new Map<string, { label: string; amount: number; parentId?: string }>();
+    for (const parent of channels ?? []) {
+      out.set(parent.id, { label: parent.name, amount: parent.amount });
+      for (const child of parent.children ?? []) out.set(child.id, { label: `${parent.name} · ${child.name}`, amount: child.amount, parentId: parent.id });
+    }
+    return out;
+  };
+  const before = flatten(original.channels);
+  const after = flatten(edited.channels);
+  const ids = new Set([...before.keys(), ...after.keys()]);
+  for (const id of ids) {
+    const oldValue = before.get(id);
+    const newValue = after.get(id);
+    if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+      diffs.push({ field: `channels.${id}`, label: `渠道 ${newValue?.label ?? oldValue?.label ?? id}`, oldValue, newValue });
+    }
   }
   return diffs;
 }

@@ -5,6 +5,12 @@ import { generateReport } from '../../src/features/reports/generate';
 import { findReportConflict, displayTitle, repairReportFromHistory } from '../../src/features/reports/reportRepair';
 import type { FinancialReport, HistoryPoint } from '../../src/types';
 
+async function saveReport(report: FinancialReport): Promise<FinancialReport> {
+  const store = useAppStore.getState();
+  const proposal = store.prepareReport(report.reportType, report.endDate);
+  return store.confirmReport(proposal, { overwriteSnapshot: true, overwriteReport: true });
+}
+
 const channels = defaultChannels();
 const history: HistoryPoint[] = [
   { date: '2026-09-28', totalAmount: 1000 },
@@ -14,7 +20,7 @@ const history: HistoryPoint[] = [
 
 describe('报告冲突与更新流程（一周期唯一）', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     useAppStore.setState({
       hydrated: true,
       channels,
@@ -25,16 +31,16 @@ describe('报告冲突与更新流程（一周期唯一）', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it('第一次生成：无冲突，直接新增', () => {
+  it('第一次生成：无冲突，确认后新增', async () => {
     const generated = generateReport(history, 'weekly', '2026-10-04', channels);
     expect(findReportConflict(useAppStore.getState().reports, generated.periodKey)).toBeUndefined();
-    useAppStore.getState().commitReport(generated);
+    await saveReport(generated);
     expect(useAppStore.getState().reports).toHaveLength(1);
   });
 
-  it('第二次生成：返回 Conflict（不静默写 Store）', () => {
+  it('第二次生成：返回 Conflict（不静默写 Store）', async () => {
     const g1 = generateReport(history, 'weekly', '2026-10-04', channels);
-    useAppStore.getState().commitReport(g1);
+    await saveReport(g1);
     const before = useAppStore.getState().reports.length;
 
     const g2 = generateReport(history, 'weekly', '2026-10-04', channels);
@@ -43,61 +49,58 @@ describe('报告冲突与更新流程（一周期唯一）', () => {
     expect(useAppStore.getState().reports).toHaveLength(before);
   });
 
-  it('选择 Update：ID 不变，revision + 1，仍只有一份', () => {
+  it('重复确认相同报告：ID 与 revision 稳定，仍只有一份', async () => {
     const g1 = generateReport(history, 'weekly', '2026-10-04', channels);
-    const r1 = useAppStore.getState().commitReport(g1);
-    const conflict = findReportConflict(useAppStore.getState().reports, r1.periodKey)!;
-    const r2 = useAppStore.getState().commitReport(generateReport(history, 'weekly', '2026-10-04', channels), conflict);
+    const r1 = await saveReport(g1);
+    const r2 = await saveReport(generateReport(history, 'weekly', '2026-10-04', channels));
     expect(r2.id).toBe(r1.id);
-    expect(r2.revision).toBe(2);
+    expect(r2.revision).toBe(1);
     expect(useAppStore.getState().reports).toHaveLength(1);
   });
 
-  it('同周期唯一：commitReport 绝不新增第二份', () => {
-    const r1 = useAppStore.getState().commitReport(generateReport(history, 'weekly', '2026-10-04', channels));
-    const conflict = findReportConflict(useAppStore.getState().reports, r1.periodKey)!;
-    const r2 = useAppStore.getState().commitReport(generateReport(history, 'weekly', '2026-10-04', channels), conflict);
+  it('同周期唯一：确认更新绝不新增第二份', async () => {
+    const r1 = await saveReport(generateReport(history, 'weekly', '2026-10-04', channels));
+    const r2 = await saveReport(generateReport(history, 'weekly', '2026-10-04', channels));
     expect(r2.id).toBe(r1.id);
     expect(useAppStore.getState().reports).toHaveLength(1);
     // 不存在 copyOfReportId（已移除另存新版本概念）
     expect(r2.copyOfReportId).toBeUndefined();
   });
 
-  it('选择 Cancel：Store 不变', () => {
-    useAppStore.getState().commitReport(generateReport(history, 'weekly', '2026-10-04', channels));
+  it('选择 Cancel：Store 不变', async () => {
+    await saveReport(generateReport(history, 'weekly', '2026-10-04', channels));
     const snapshot = JSON.stringify(useAppStore.getState().reports);
-    // cancel = 不调用 commitReport
+    // cancel = 不确认候选提案
     expect(JSON.stringify(useAppStore.getState().reports)).toBe(snapshot);
   });
 
-  it('归档报告：不生成第二份（保留归档状态，revision 递增）', () => {
-    const r1 = useAppStore.getState().commitReport(generateReport(history, 'weekly', '2026-10-04', channels));
-    useAppStore.getState().archiveReport(r1.id, '已归档');
+  it('归档报告：不生成第二份（保留归档状态，revision 递增）', async () => {
+    const r1 = await saveReport(generateReport(history, 'weekly', '2026-10-04', channels));
+    await useAppStore.getState().archiveReport(r1.id, '已归档');
     const archived = useAppStore.getState().reports.find((r) => r.id === r1.id)!;
     expect(archived.isArchived).toBe(true);
-    const r2 = useAppStore.getState().commitReport(generateReport(history, 'weekly', '2026-10-04', channels), archived);
+    const r2 = await saveReport(generateReport(history, 'weekly', '2026-10-04', channels));
     expect(r2.id).toBe(r1.id);
     expect(useAppStore.getState().reports).toHaveLength(1);
   });
 });
 
 describe('自定义标题', () => {
-  it('auto 标题 → 改为 custom → 更新后保留', () => {
+  it('auto 标题 → 改为 custom → 更新后保留', async () => {
     const g = generateReport(history, 'weekly', '2026-10-04', channels);
-    const r = useAppStore.getState().commitReport(g);
-    useAppStore.getState().updateReportMetadata(r.id, { titleMode: 'custom', customTitle: '国庆假期资产报告' });
+    const r = await saveReport(g);
+    await useAppStore.getState().updateReportMetadata(r.id, { titleMode: 'custom', customTitle: '国庆假期资产报告' });
     const custom = useAppStore.getState().reports.find((x) => x.id === r.id)!;
     expect(displayTitle(custom)).toBe('国庆假期资产报告');
 
-    const conflict = findReportConflict(useAppStore.getState().reports, custom.periodKey)!;
-    const updated = useAppStore.getState().commitReport(generateReport(history, 'weekly', '2026-10-04', channels), conflict);
+    const updated = await saveReport(generateReport(history, 'weekly', '2026-10-04', channels));
     expect(displayTitle(updated)).toBe('国庆假期资产报告');
   });
 
-  it('切回 auto：恢复标准标题', () => {
-    const r = useAppStore.getState().commitReport(generateReport(history, 'weekly', '2026-10-04', channels));
-    useAppStore.getState().updateReportMetadata(r.id, { titleMode: 'custom', customTitle: 'X' });
-    useAppStore.getState().updateReportMetadata(r.id, { titleMode: 'auto' });
+  it('切回 auto：恢复标准标题', async () => {
+    const r = await saveReport(generateReport(history, 'weekly', '2026-10-04', channels));
+    await useAppStore.getState().updateReportMetadata(r.id, { titleMode: 'custom', customTitle: 'X' });
+    await useAppStore.getState().updateReportMetadata(r.id, { titleMode: 'auto' });
     const back = useAppStore.getState().reports.find((x) => x.id === r.id)!;
     expect(displayTitle(back)).toBe(back.standardTitle);
   });

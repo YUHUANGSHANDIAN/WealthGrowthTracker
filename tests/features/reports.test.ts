@@ -6,7 +6,9 @@ import {
   reportTitle,
   assetAtDate,
   toggleReportArchive,
+  reportSummary,
 } from '../../src/features/reports/generate';
+import { reportTextSummary } from '../../src/utils/share';
 
 const channels: Channel[] = [
   {
@@ -22,6 +24,9 @@ const history: HistoryPoint[] = [
 ];
 
 describe('报告生成', () => {
+  it('future period cannot use current assets as future facts', () => {
+    expect(()=>generateReport(history,'monthly','2026-11-01',channels,'2026-10-13')).toThrow('未来周期');
+  });
   it('periodRange 返回正确区间', () => {
     expect(periodRange('monthly', '2026-10-15')).toEqual({ startDate: '2026-10-01', endDate: '2026-10-31' });
     expect(periodRange('yearly', '2026-07-01')).toEqual({ startDate: '2026-01-01', endDate: '2026-12-31' });
@@ -31,7 +36,8 @@ describe('报告生成', () => {
     expect(assetAtDate(history, '2026-09-15')).toBe(100);
     expect(assetAtDate(history, '2026-10-01')).toBe(100);
     expect(assetAtDate(history, '2026-10-10')).toBe(130);
-    expect(assetAtDate([], '2026-01-01')).toBe(0);
+    expect(assetAtDate([], '2026-01-01')).toBeNull();
+    expect(assetAtDate(history, '2026-08-31')).toBeNull();
   });
 
   it('当前周期：用当前渠道状态计算期末，不冒充过去', () => {
@@ -68,6 +74,20 @@ describe('报告生成', () => {
     expect(report.totalAmount).toBe(80);
     expect(report.channelSnapshotMissing).toBe(true);
     expect(report.channelDetails.length).toBe(0);
+  });
+
+  it('missing opening history remains unknown instead of becoming a zero baseline', () => {
+    const report = generateReport([{ date: '2026-09-30', totalAmount: 80 }], 'monthly', '2026-09-15', channels, '2026-10-15');
+    expect(report.baselineStatus).toBe('unknown');
+    expect(report.previousTotalAmount).toBeUndefined();
+    expect(report.changeAmount).toBe(0);
+    expect(report.changePercentage).toBe(0);
+    expect(reportSummary(report)).toContain('无法计算本期变化');
+    expect(reportTextSummary(report)).toContain('期初总资产：未知');
+  });
+
+  it('does not generate a past report without a valid ending snapshot', () => {
+    expect(() => generateReport([], 'monthly', '2026-09-15', channels, '2026-10-15')).toThrow('缺少有效期末历史快照');
   });
 
   it('reportTitle 命名', () => {

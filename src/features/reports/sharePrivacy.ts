@@ -71,7 +71,7 @@ export function privacyFootnote(privacy: ReportPrivacy): string {
 /** 隐私模式下的文字摘要（用于剪贴板 / 邮件正文 / 系统分享 fallback）。 */
 export function reportSummaryWithPrivacy(report: FinancialReport, privacy: ReportPrivacy): string {
   const total = privacyAmount(report.totalAmount, privacy);
-  const prev = privacyAmount(report.previousTotalAmount ?? 0, privacy);
+  const prev = report.previousTotalAmount === undefined || report.baselineStatus === 'unknown' ? null : privacyAmount(report.previousTotalAmount, privacy);
   const change = privacyChange(report.changeAmount, report.changePercentage, privacy);
 
   const lines = [
@@ -79,8 +79,13 @@ export function reportSummaryWithPrivacy(report: FinancialReport, privacy: Repor
     `周期：${report.startDate} ~ ${report.endDate}`,
   ];
   if (total != null) lines.push(`期末总资产：${total}`);
-  if (prev != null) lines.push(`期初总资产：${prev}`);
-  lines.push(`本期变化：${change.amount != null ? `${change.amount}（${change.pct}）` : change.pct}`);
+  if (report.previousTotalAmount === undefined || report.baselineStatus === 'unknown') {
+    lines.push('期初总资产：未知');
+    lines.push('本期变化：无法计算（缺少期初历史快照）');
+  } else {
+    if (prev != null) lines.push(`期初总资产：${prev}`);
+    lines.push(`本期变化：${change.amount != null ? `${change.amount}（${change.pct}）` : change.pct}`);
+  }
   lines.push(`财富等级：${report.wealthLevelName ?? '—'}`);
   lines.push(privacy === 'full' ? '' : `（${privacyFootnote(privacy)}）`);
   return lines.join('\n');

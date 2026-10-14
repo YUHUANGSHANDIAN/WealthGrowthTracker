@@ -5,6 +5,9 @@ export type ImageFormat = 'png' | 'jpeg' | 'webp';
 
 /** 报告文字摘要（用于邮件正文 / 剪贴板 fallback）。 */
 export function reportTextSummary(report: FinancialReport): string {
+  if (report.baselineStatus === 'unknown' || report.previousTotalAmount === undefined) {
+    return `${report.title}\n周期：${report.startDate} ~ ${report.endDate}\n期末总资产：${formatCNY(report.totalAmount)}\n期初总资产：未知\n本期变化：无法计算（缺少期初历史快照）\n财富等级：${report.wealthLevelName ?? '—'}`;
+  }
   const positive = report.changeAmount >= 0;
   return `${report.title}\n周期：${report.startDate} ~ ${report.endDate}\n期末总资产：${formatCNY(report.totalAmount)}\n期初总资产：${formatCNY(report.previousTotalAmount ?? 0)}\n本期变化：${positive ? '+' : ''}${formatCNY(report.changeAmount)}（${positive ? '+' : ''}${Math.abs(report.changePercentage).toFixed(1)}%）\n财富等级：${report.wealthLevelName ?? '—'}`;
 }

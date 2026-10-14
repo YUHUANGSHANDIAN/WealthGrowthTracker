@@ -67,7 +67,7 @@ describe('Maintenance Action Engine', () => {
 
 describe('commitReportEdit（store）', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     useAppStore.setState({
       hydrated: true,
       channels: defaultChannels(),
@@ -80,23 +80,23 @@ describe('commitReportEdit（store）', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it('编辑报告：写入审计 + revision 保留', () => {
+  it('编辑报告：写入审计 + revision 保留', async () => {
     const original = useAppStore.getState().reports[0]!;
     const edited = { ...original, totalAmount: 200 };
     const audit = buildManualEditAudit(original, edited, '修正');
-    const r = useAppStore.getState().commitReportEdit(original.id, edited, audit);
+    const r = await useAppStore.getState().commitReportEdit(original.id, edited, audit);
     const stored = useAppStore.getState().reports.find((x) => x.id === original.id)!;
     expect(stored.totalAmount).toBe(200);
     expect(stored.repairAudit?.length).toBeGreaterThan(0);
     expect(stored.repairAudit!.some((a) => a.source === 'manual-repair')).toBe(true);
-    expect(r.reportSchemaVersion).toBe(4);
+    expect(r.reportSchemaVersion).toBe(5);
   });
 
-  it('编辑报告 + 同步 History：更新 dataAsOf 对应记录', () => {
+  it('编辑报告 + 同步 History：更新 dataAsOf 对应记录', async () => {
     const original = useAppStore.getState().reports[0]!;
     const edited = { ...original, totalAmount: 300, dataAsOf: '2026-10-05' };
     const audit = buildManualEditAudit(original, edited, '修正');
-    useAppStore.getState().commitReportEdit(original.id, edited, audit, { syncHistory: true });
+    await useAppStore.getState().commitReportEdit(original.id, edited, audit, { syncHistory: true });
     const h = useAppStore.getState().history.find((x) => x.date === '2026-10-05')!;
     expect(h.totalAmount).toBe(300);
     expect(useAppStore.getState().history.filter((x) => x.date === '2026-10-05')).toHaveLength(1);

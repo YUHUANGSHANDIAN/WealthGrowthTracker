@@ -25,7 +25,13 @@ export function prepareHistoryUpsert(history: HistoryPoint[], incoming: HistoryP
 
 /** 覆盖写历史点（同日期唯一，覆盖已有，日期升序）。 */
 export function overwriteHistoryPoint(history: HistoryPoint[], incoming: HistoryPoint): HistoryPoint[] {
-  return [...history.filter((h) => h.date !== incoming.date), incoming].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const previous = history.find((point) => point.date === incoming.date);
+  const next = {
+    ...(previous?.eventNote !== undefined ? { eventNote: previous.eventNote } : {}),
+    ...(previous?.eventNoteUpdatedAt !== undefined ? { eventNoteUpdatedAt: previous.eventNoteUpdatedAt } : {}),
+    ...incoming,
+  };
+  return [...history.filter((h) => h.date !== incoming.date), next].sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
 /** 检测历史中的重复日期（返回所有重复的日期）。 */

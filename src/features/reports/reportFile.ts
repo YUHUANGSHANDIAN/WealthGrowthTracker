@@ -79,9 +79,9 @@ td.child{padding-left:26px;color:#475569;font-size:13px}
 <div class="sub">${esc(report.startDate)} ~ ${esc(report.endDate)}${report.wealthLevelName ? ' · 财富等级：' + esc(report.wealthLevelName) : ''}${dataAsOfLine}</div>
 <div class="grid">
   <div class="card"><div class="label">期末总资产</div><div class="value">${formatCNY(report.totalAmount)}</div></div>
-  <div class="card"><div class="label">期初总资产</div><div class="value">${formatCNY(report.previousTotalAmount ?? 0)}</div></div>
-  <div class="card"><div class="label">本期变化</div><div class="value ${positive ? 'up' : 'down'}">${positive ? '+' : ''}${formatCNY(report.changeAmount)}</div></div>
-  <div class="card"><div class="label">变化率</div><div class="value ${positive ? 'up' : 'down'}">${positive ? '+' : ''}${pct.toFixed(1)}%</div></div>
+  <div class="card"><div class="label">期初总资产</div><div class="value">${report.baselineStatus === 'unknown' || report.previousTotalAmount === undefined ? '未知' : formatCNY(report.previousTotalAmount)}</div></div>
+  <div class="card"><div class="label">本期变化</div><div class="value ${positive ? 'up' : 'down'}">${report.baselineStatus === 'unknown' || report.previousTotalAmount === undefined ? '—' : `${positive ? '+' : ''}${formatCNY(report.changeAmount)}`}</div></div>
+  <div class="card"><div class="label">变化率</div><div class="value ${positive ? 'up' : 'down'}">${report.baselineStatus === 'unknown' || report.previousTotalAmount === undefined ? '—' : `${positive ? '+' : ''}${pct.toFixed(1)}%`}</div></div>
 </div>
 <table><thead><tr><th>渠道</th><th>金额</th><th>占总资产</th><th>占父渠道</th></tr></thead><tbody>${rows}</tbody></table>
 ${report.channelSnapshotMissing ? '<p class="note">注：旧版历史记录仅保存总资产，无法还原该日期的渠道构成。</p>' : ''}

@@ -20,6 +20,12 @@ export function parseDateString(s: string): Date {
   return new Date(y ?? 0, (m ?? 1) - 1, d ?? 1);
 }
 
+/** Validate a calendar date without accepting Date's overflow normalization. */
+export function isDateString(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+}
+
 /** 加上 n 天。 */
 export function addDays(s: string, days: number): string {
   const d = parseDateString(s);
