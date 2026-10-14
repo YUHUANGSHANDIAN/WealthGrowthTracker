@@ -32,6 +32,10 @@ jobs:
       - run: npm run build
       - run: npm ci --prefix ai-runtime
       - run: npm test --prefix ai-runtime
+      - name: Verify desktop packaging scripts
+        run: |
+          node scripts/fetch-node-sidecar.mjs
+          node scripts/prepare-ai-runtime-resources.mjs
 
   rust:
     runs-on: windows-latest

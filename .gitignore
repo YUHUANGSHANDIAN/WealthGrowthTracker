@@ -59,3 +59,10 @@ legacy-lottery/
 app-state.json
 wealth-backup*.json
 .codex-visual/
+
+# 本地桌面打包产物（Node sidecar 与 ai-runtime 资源副本）
+src-tauri/binaries/
+.ai-runtime-build/
+
+# Release 打包staging（本地）
+.release/

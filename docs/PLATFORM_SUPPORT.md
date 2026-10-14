@@ -53,5 +53,6 @@ AI 默认关闭，每次启动重置；关闭时不启动运行时、不联网�
 - **Windows**：当前未商业代码签名，SmartScreen 显示「未知发布者」。
 - **macOS**：当前为 ad-hoc 未签名、未公证构建，首次启动需系统安全确认。
 - **Android**：当前为 debug 签名的 APK 预览；正式 release 签名（keystore）待配置后提供 AAB。
-- Rust Broker 与 Node 运行时源码均已就绪（Broker 通过 clippy 与单元测试）；**跨平台打包尚未完成**：Node 二进制/sidecar 打包、资源路径与各平台启动验证仍待完成，打包后需在 Windows/macOS/Linux 目标上重新验证。
+- 桌面打包已集成 AI 运行时：官方 **Node 24.21.0** 以 Tauri sidecar 随包（下载时按官方 `SHASUMS256.txt` 校验），`ai-runtime/`（含依赖，符号链接已解引用）作为资源随包；打包版优先使用内置 Node，开发版回退 `WEALTH_AI_NODE`/PATH。
+- Windows 便携包已在本机构建（109 MB，含 node.exe 与 ai-runtime/）；NSIS/MSI 安装包、macOS 未签名 Universal DMG 与 Linux AppImage/DEB/RPM 由 CI 构建（本机无 macOS/Linux 工具链）。各平台安装后的 AI 冒烟仍需在对应系统人工确认。
 - 上述签名相关，仅在获得对应证书/密钥后在 CI 通过 GitHub Secrets 配置。

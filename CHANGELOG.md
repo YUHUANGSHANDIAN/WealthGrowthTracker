@@ -29,7 +29,7 @@
 
 ### 质量与供应链
 - Node 24、CI 分层质量门（privacy / lint / typecheck / unit / build / Rust）、隐私扫描审核 staged blob 与 NUL 路径。
-- 仍待完成（如实记录）：两类合法订阅路径的真实认证/推理/撤销验收、桌面打包中的 Node sidecar 与各平台启动验证、各平台签名凭据。
+- 仍待完成（如实记录）：两类合法订阅路径的真实认证/推理/撤销验收；Windows/macOS 无代码签名与公证凭据；Android 仅 debug 签名预览；各平台安装后 AI 冒烟仍需人工确认。
 
 ## [1.6.1] - 2026-10-05
 

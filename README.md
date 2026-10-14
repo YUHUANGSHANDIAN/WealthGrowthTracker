@@ -223,8 +223,10 @@ npm run build        # 产物在 dist/
 ## 🔒 隐私说明
 
 - 所有个人资产数据**仅存储在你自己的电脑本地**，默认不上传任何服务器。
-- AI 默认关闭且每次启动重置：关闭时**不启动运行时、不联网、不读取任何凭据**。启用后可在「AI 连接中心」配置你自有的连接（订阅授权、API Key、本地模型或自建 HTTPS 网关），业务数据只在你逐次确认的 ContextManifest 范围内发送。**当前只有 Web/PWA 会真正建立连接**；桌面端的受控运行时（Tauri `ai_*` 命令与 Node sidecar 打包）尚未接入，桌面 App 内会明确提示不可用，不会保存凭据。
-- 应用不读取 Codex、Claude、GitHub CLI 等其它程序的登录令牌，不嵌入 OAuth 客户端密钥；凭据只保留在当前会话，系统安全存储（Keyring / Keystore）尚未接入。API Key、本地模型与 mock 都不代表订阅权益。
+- AI 默认关闭且每次启动重置：关闭时**不启动运行时、不联网、不读取任何凭据**。启用后可在「AI 连接中心」配置你自有的连接（订阅授权、API Key、本地模型或自建 HTTPS 网关），业务数据只在你逐次确认的 ContextManifest 范围内发送。
+- 应用不读取 Codex、Claude、GitHub CLI 等其它程序的登录令牌，不嵌入 OAuth 客户端密钥。
+- 桌面端凭据写入系统安全存储（Windows Credential Manager / macOS Keychain / Linux Secret Service，失败或不可用时仅提供当前会话临时凭据，绝不落明文），Web 端只保留内存；二类合法订阅（OpenAI 开源应用订阅、GitHub Copilot 订阅）的真实认证/推理/撤销验收尚未完成，界面保持“待资格验证”。API Key、本地模型与 mock 都不代表订阅权益。
+- 桌面包内置官方 Node 24.21.0 运行时（Tauri sidecar，按官方 SHA256 校验）与私有 AI 运行时资源，无需另装 Node；Web 端不含 Node 运行时，只支持显式配置的 HTTPS 网关或本地端点。
 - 不接入任何追踪 / 广告 / 统计脚本；日志不记录任何金额/资产数据。
 - 建议定期导出 JSON 备份（桌面版会自动备份）。
 

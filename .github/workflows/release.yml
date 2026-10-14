@@ -68,6 +68,12 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
+      - name: Install AI runtime dependencies
+        run: npm ci --prefix ai-runtime
+      - name: Fetch bundled Node sidecar
+        run: node scripts/fetch-node-sidecar.mjs
+      - name: Prepare AI runtime resources
+        run: node scripts/prepare-ai-runtime-resources.mjs
       - name: Build Tauri (NSIS + MSI)
         run: npx tauri build --ci
       - name: Upload bundles
@@ -95,6 +101,12 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
+      - name: Install AI runtime dependencies
+        run: npm ci --prefix ai-runtime
+      - name: Fetch bundled Node sidecars (universal)
+        run: node scripts/fetch-node-sidecar.mjs --target aarch64-apple-darwin --target x86_64-apple-darwin
+      - name: Prepare AI runtime resources
+        run: node scripts/prepare-ai-runtime-resources.mjs
       - name: Build Tauri (universal DMG)
         run: npx tauri build --ci --target universal-apple-darwin
       - name: Upload bundles
@@ -124,6 +136,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
       - run: npm ci
+      - name: Install AI runtime dependencies
+        run: npm ci --prefix ai-runtime
+      - name: Fetch bundled Node sidecar
+        run: node scripts/fetch-node-sidecar.mjs
+      - name: Prepare AI runtime resources
+        run: node scripts/prepare-ai-runtime-resources.mjs
       - name: Build Tauri (AppImage + DEB + RPM)
         run: npx tauri build --ci
       - name: Upload bundles
@@ -222,24 +240,28 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: '财富成长记 ${{ github.ref_name }}'
           body: |
-            ## 财富成长记 ${{ github.ref_name }}（多平台）
+            ## 财富成长记 ${{ github.ref_name }}（预发布 Preview）
 
-            Local-First / Privacy-First 的个人财富管理工具。
+            Local-First / Privacy-First 的个人财富管理工具。本版本为 **预发布**，用于体验 v1.7.0 的工作台重构与受控 AI 能力，
+            不构成正式版。
 
-            ### 平台说明
-            - **Windows x64**：NSIS 安装包（推荐）与 MSI。
-            - **macOS**：Universal DMG（当前为 ad-hoc 未签名构建，首次打开需在「系统设置 → 隐私与安全性」允许）。
-            - **Linux x86_64**：AppImage、DEB、RPM。
-            - **Android**：APK（debug 签名的预览版，正式签名待配置）。
-            - **Web / PWA**：可安装的离线外壳。
+            ### 平台说明与签名状态
+            - **Windows x64**：NSIS 安装包（推荐）与 MSI — **未代码签名**，SmartScreen 会提示「未知发布者」。
+            - **macOS**：Universal DMG — **未签名、未公证**（ad-hoc），首次打开需在「系统设置 → 隐私与安全性」允许。
+            - **Linux x86_64**：AppImage、DEB、RPM（AppImage 无签名）。
+            - **Android**：APK — **debug 签名的预览版**，不是正式签名，请勿用于分发。
+            - **Web / PWA**：可安装的离线外壳（含受限 CSP）。
 
-            ### 数据位置
-            - 桌面端：`文档\财富成长记\`（卸载不删除）。
-            - Android：应用专属数据目录（scoped storage）。
-            - Web：浏览器本地存储。
+            ### AI 状态（如实说明）
+            - AI **默认关闭**，核心功能完全离线；AI 需要你自己配置**合法**的连接（自有 API Key、本地模型或自建 HTTPS 网关，桌面端含内置 Node 运行时）。
+            - **两类合法订阅路径（OpenAI 开源应用订阅、GitHub Copilot 订阅）的真实认证 / 推理 / 撤销验收尚未完成**，界面中保持“待资格验证”，不得视为已支持。
+            - API Key、本地模型与 mock **不计入订阅发布门**；未配置连接时 AI 保持关闭。
+            - 应用不读取 Codex / Claude / GitHub CLI 等其它程序的登录令牌，也不嵌入 OAuth 客户端密钥。
 
-            ### 校验
-            见附件 `SHA256SUMS.txt`。
+            ### 数据与隐私
+            - 本 Release **不包含任何用户数据**、报告、备份或迁移脚本；附件仅为程序与校验文件。
+            - 桌面端数据位于 `文档\财富成长记\`（卸载不删除）；Web 端位于浏览器 IndexedDB；Android 为应用专属目录。
+            - 校验：见附件 `SHA256SUMS.txt`。
 
             > 预测/报告仅供个人参考，不构成投资建议。
           files: release-assets/*

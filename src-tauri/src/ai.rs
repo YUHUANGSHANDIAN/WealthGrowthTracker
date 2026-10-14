@@ -189,10 +189,17 @@ fn runtime_entry(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(resources) = app.path().resource_dir() {
         candidates.push(resources.join("ai-runtime").join("main.mjs"));
+        candidates.push(
+            resources
+                .join("resources")
+                .join("ai-runtime")
+                .join("main.mjs"),
+        );
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("ai-runtime").join("main.mjs"));
+            candidates.push(dir.join("resources").join("ai-runtime").join("main.mjs"));
         }
     }
     // Development checkout: <repo>/ai-runtime/main.mjs relative to src-tauri.
@@ -210,7 +217,7 @@ fn runtime_entry(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 fn spawn_runtime(app: &tauri::AppHandle) -> Result<RuntimeProcess, String> {
     let entry = runtime_entry(app)?;
-    let node = std::env::var("WEALTH_AI_NODE").unwrap_or_else(|_| "node".to_string());
+    let node = resolve_node();
     let working_dir = std::env::temp_dir().join("wealth-ai-runtime");
     let _ = std::fs::create_dir_all(&working_dir);
 
@@ -287,6 +294,26 @@ fn spawn_runtime(app: &tauri::AppHandle) -> Result<RuntimeProcess, String> {
         pending,
         dead,
     })
+}
+
+/// Packaged builds prefer the bundled sidecar Node next to the executable; the
+/// development checkout falls back to `WEALTH_AI_NODE` and then PATH.
+fn resolve_node() -> String {
+    if let Ok(explicit) = std::env::var("WEALTH_AI_NODE") {
+        if std::path::Path::new(&explicit).is_file() {
+            return explicit;
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let name = if cfg!(windows) { "node.exe" } else { "node" };
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return candidate.to_string_lossy().to_string();
+            }
+        }
+    }
+    "node".to_string()
 }
 
 fn node_path_hint(node: &str) -> String {
