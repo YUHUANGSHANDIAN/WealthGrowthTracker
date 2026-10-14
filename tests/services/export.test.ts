@@ -78,10 +78,41 @@ describe('导出 / 导入（数据兼容核心）', () => {
     expect(parsed.data.history[0]!.totalAmount).toBe(30);
   });
 
+  it('preserves event notes, source and timestamps through a backup round trip', () => {
+    const source = makeSource();
+    source.history[0] = {
+      ...source.history[0]!, source: 'manual', updatedAt: '2026-10-01T10:00:00Z',
+      eventNote: '账户整理，不是现金流', eventNoteUpdatedAt: '2026-10-01T11:00:00Z',
+    };
+    const parsed = parseBackup(JSON.stringify(buildBackup(source)));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.data.history[0]).toEqual(source.history[0]);
+  });
+
   it('拒绝非法 JSON', () => {
     const r = parseBackup('not json');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('JSON');
+  });
+
+  it('retains unknown nested entity fields, verification evidence and original ordering', () => {
+    const backup = buildBackup(makeSource());
+    const data = backup.data as unknown as Record<string, unknown>;
+    const ledger = data.wealth_tracker_data as { channels: Record<string, unknown>[]; history: Record<string, unknown>[] };
+    ledger.channels[0]!.futureLabel = { zh: '保留这个字段' };
+    ledger.history[0]!.futureEvent = { source: 'user', value: 2 };
+    data.financial_reports = [{ id: 'r1', reportType: 'monthly', title: '自定义🐱', startDate: '2026-09-01', endDate: '2026-09-30', totalAmount: 100,
+      changeAmount: 0, changePercentage: 0, channelDetails: [], createdAt: '2026-10-01', isArchived: true,
+      reportRendererVersion: 3, integrityStatus: 'needs-review', verificationEvidence: { kind: 'snapshot-reconciliation', facts: 'exact', checkedAt: '2026-10-01', endDate: '2026-09-30' },
+      unknownReport: { retained: true } }];
+    data.lottery_state = { pool: { id: 'pool', name: 'pool', openingBalance: 0, futurePool: true }, projects: [], transactions: [], settings: { showLotteryAppendix: false, futureSetting: 'yes' }, futureState: 4 };
+    const parsed = parseBackup(JSON.stringify(backup));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.data.channels[0]).toHaveProperty('futureLabel', { zh: '保留这个字段' });
+    expect(parsed.data.history[0]).toHaveProperty('futureEvent', { source: 'user', value: 2 });
+    expect(parsed.data.reports[0]).toMatchObject({ title: '自定义🐱', unknownReport: { retained: true }, verificationEvidence: { facts: 'exact' } });
+    expect(parsed.data.lottery).toMatchObject({ futureState: 4, pool: { futurePool: true }, settings: { futureSetting: 'yes' } });
   });
 
   it('拒绝缺少 wealth_tracker_data 的文件', () => {
@@ -90,7 +121,7 @@ describe('导出 / 导入（数据兼容核心）', () => {
     if (!r.ok) expect(r.error).toContain('wealth_tracker_data');
   });
 
-  it('字段缺失时回退到安全默认值', () => {
+  it('非法金额拒绝导入，不能静默变成零', () => {
     const r = parseBackup(
       JSON.stringify({
         version: '1.0.0',
@@ -98,10 +129,29 @@ describe('导出 / 导入（数据兼容核心）', () => {
         data: { wealth_tracker_data: { channels: [{ id: 'x', amount: 'abc' }], history: [{ date: '2026-01-01', totalAmount: 10 }] } },
       }),
     );
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    // amount 非法 → 0；缺失字段被补齐
-    expect(r.data.channels[0]!.amount).toBe(0);
-    expect(r.data.channels[0]!.name).toBe('未命名渠道');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain('金额');
+  });
+
+  it('备份 Schema 独立于应用版本，拒绝未来 Schema', () => {
+    const backup = buildBackup(makeSource());
+    expect(backup.backupSchemaVersion).toBe(1);
+    expect(parseBackup(JSON.stringify({ ...backup, backupSchemaVersion: 2 })).ok).toBe(false);
+    expect(parseBackup(JSON.stringify({ ...backup, backupSchemaVersion: undefined, version: '1.6.1' })).ok).toBe(true);
+  });
+
+  it('备份总金额使用子渠道汇总，保留空账本和零值', () => {
+    const source = makeSource();
+    source.channels = [{ id: 'p', name: '父渠道', emoji: '🏦', color: '#000', amount: 999, isParent: true, isExpanded: false,
+      children: [{ id: 'c', parentId: 'p', name: '子渠道', emoji: '🌱', color: '#000', amount: 12.34 }] }];
+    expect(buildBackup(source).metadata?.totalAmount).toBe(12.34);
+    source.channels = [];
+    source.history = [];
+    const parsed = parseBackup(JSON.stringify(buildBackup(source)));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.data.channels).toEqual([]);
+      expect(parsed.data.history).toEqual([]);
+    }
   });
 });

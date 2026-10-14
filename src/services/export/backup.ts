@@ -1,3 +1,6 @@
+import { totalAssets } from '../../utils/channels';
+import { APP_VERSION } from '../../constants/version';
+import { validateLedgerShape, validateFinancialExtensions } from '../storage/validateLedger';
 import type {
   BackupData,
   Channel,
@@ -24,7 +27,7 @@ import { defaultChannels, defaultCountdownData } from '../../constants/defaults'
 import { getLevelByAmount } from '../../constants/levels';
 import { defaultLotteryState } from '../../features/lottery/lotteryMath';
 
-export const BACKUP_VERSION = '1.6.1';
+export const BACKUP_VERSION = APP_VERSION;
 export const APP_NAME = '财富成长记';
 
 /** 导出/导入时需要用到的完整应用状态（由 store 提供）。 */
@@ -101,6 +104,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 function normalizeSubChannel(raw: unknown, parentId: string): SubChannel {
   const r = isRecord(raw) ? raw : {};
   return {
+    ...r,
     id: toStr(r.id, randomId('sub')),
     name: toStr(r.name, '未命名渠道'),
     emoji: toStr(r.emoji, '💰'),
@@ -118,6 +122,7 @@ function normalizeChannel(raw: unknown): Channel {
     ? rawChildren.map((c) => normalizeSubChannel(c, id))
     : undefined;
   return {
+    ...r,
     id,
     name: toStr(r.name, '未命名渠道'),
     emoji: toStr(r.emoji, '🏦'),
@@ -137,6 +142,7 @@ function normalizeHistoryPoint(raw: unknown): HistoryPoint | null {
   const date = toStr(r.date, '');
   if (!date) return null;
   const point: HistoryPoint = {
+    ...r,
     date,
     totalAmount: round2(toNumber(r.totalAmount, 0)),
   };
@@ -145,6 +151,10 @@ function normalizeHistoryPoint(raw: unknown): HistoryPoint | null {
   if (r.timestamp !== undefined) point.timestamp = toNumber(r.timestamp, 0);
   if (r.wealthLevel !== undefined) point.wealthLevel = toStr(r.wealthLevel, '');
   if (r.linkedReportId !== undefined) point.linkedReportId = toStr(r.linkedReportId, '');
+  if (r.source !== undefined) point.source = toStr(r.source, '') as HistoryPoint['source'];
+  if (r.updatedAt !== undefined) point.updatedAt = toStr(r.updatedAt, '');
+  if (r.eventNote !== undefined) point.eventNote = toStr(r.eventNote, '');
+  if (r.eventNoteUpdatedAt !== undefined) point.eventNoteUpdatedAt = toStr(r.eventNoteUpdatedAt, '');
   if (Array.isArray(r.channels)) point.channels = r.channels.map(normalizeChannel);
   if (Array.isArray(r.events)) point.events = r.events;
   if (r.marketConditions !== undefined) point.marketConditions = r.marketConditions;
@@ -156,6 +166,7 @@ function normalizeChannelDetail(raw: unknown): FinancialReport['channelDetails']
   const id = toStr(raw.id, '');
   if (!id) return null;
   return {
+    ...raw,
     id,
     name: toStr(raw.name, '未命名渠道'),
     emoji: toStr(raw.emoji, '💰'),
@@ -163,7 +174,7 @@ function normalizeChannelDetail(raw: unknown): FinancialReport['channelDetails']
     isParent: toBool(raw.isParent, false),
     children: toArray(raw.children)
       .filter(isRecord)
-      .map((c) => ({ id: toStr(c.id, ''), name: toStr(c.name, ''), amount: round2(toNumber(c.amount, 0)) })),
+      .map((c) => ({ ...c, id: toStr(c.id, ''), name: toStr(c.name, ''), amount: round2(toNumber(c.amount, 0)) })),
     percentage: toNumber(raw.percentage, 0),
   };
 }
@@ -173,6 +184,7 @@ function normalizeAssetComposition(raw: unknown): FinancialReport['assetComposit
   const parents = toArray(raw.parents)
     .filter(isRecord)
     .map((p) => ({
+      ...p,
       id: toStr(p.id, ''),
       name: toStr(p.name, '未命名渠道'),
       emoji: toStr(p.emoji, '💰'),
@@ -182,6 +194,7 @@ function normalizeAssetComposition(raw: unknown): FinancialReport['assetComposit
       children: toArray(p.children)
         .filter(isRecord)
         .map((c) => ({
+          ...c,
           id: toStr(c.id, ''),
           name: toStr(c.name, ''),
           emoji: toStr(c.emoji, '💰'),
@@ -191,7 +204,7 @@ function normalizeAssetComposition(raw: unknown): FinancialReport['assetComposit
           percentageOfTotal: toNumber(c.percentageOfTotal, 0),
         })),
     }));
-  return { parents, totalAmount: round2(toNumber(raw.totalAmount, 0)) };
+  return { ...raw, parents, totalAmount: round2(toNumber(raw.totalAmount, 0)) };
 }
 
 function normalizeReport(raw: unknown): FinancialReport | null {
@@ -202,6 +215,7 @@ function normalizeReport(raw: unknown): FinancialReport | null {
     ? (toStr(r.reportType) as FinancialReport['reportType'])
     : 'weekly';
   return {
+    ...r,
     id,
     reportType,
     startDate: toStr(r.startDate, ''),
@@ -217,6 +231,7 @@ function normalizeReport(raw: unknown): FinancialReport | null {
     ...(r.yearlyChange !== undefined ? { yearlyChange: toNumber(r.yearlyChange, 0) } : {}),
     ...(r.yearlyChangePercentage !== undefined ? { yearlyChangePercentage: toNumber(r.yearlyChangePercentage, 0) } : {}),
     ...(r.previousTotalAmount !== undefined ? { previousTotalAmount: toNumber(r.previousTotalAmount, 0) } : {}),
+    ...(r.baselineStatus === 'known' || r.baselineStatus === 'unknown' ? { baselineStatus: r.baselineStatus } : {}),
     ...(r.year !== undefined ? { year: toNumber(r.year, 0) } : {}),
     ...(r.monthNumber !== undefined ? { monthNumber: toNumber(r.monthNumber, 0) } : {}),
     ...(r.weekNumber !== undefined ? { weekNumber: toNumber(r.weekNumber, 0) } : {}),
@@ -254,6 +269,7 @@ function normalizeReport(raw: unknown): FinancialReport | null {
     ...(isRecord(r.fieldProvenance) ? { fieldProvenance: r.fieldProvenance as FinancialReport['fieldProvenance'] } : {}),
     ...(Array.isArray(r.repairAudit)
       ? { repairAudit: r.repairAudit.filter(isRecord).map((a) => ({
+          ...a,
           field: toStr(a.field, ''),
           oldValue: a.oldValue,
           newValue: a.newValue,
@@ -279,6 +295,7 @@ function normalizeSortRule(raw: unknown): CustomSortRule | null {
   const key = toStr(r.key, '');
   if (!key) return null;
   return {
+    ...r,
     id: toStr(r.id, randomId('rule')),
     key,
     label: toStr(r.label, key),
@@ -299,6 +316,7 @@ function normalizeLotteryTransaction(raw: unknown): LotteryState['transactions']
     : null;
   if (!type) return null;
   return {
+    ...r,
     id: toStr(r.id, randomId('ltx')),
     projectId: r.projectId === null || r.projectId === undefined ? null : toStr(r.projectId, ''),
     occurredAt: toStr(r.occurredAt, new Date().toISOString()),
@@ -323,6 +341,7 @@ function normalizeLotteryProject(raw: unknown): LotteryState['projects'][number]
   const id = toStr(r.id, '');
   if (!id) return null;
   return {
+    ...r,
     id,
     name: toStr(r.name, '未命名项目'),
     category: ['sports-football', 'lotto', 'other'].includes(toStr(r.category))
@@ -337,7 +356,7 @@ function normalizeLotteryProject(raw: unknown): LotteryState['projects'][number]
     ...(r.notes !== undefined ? { notes: toStr(r.notes, '') } : {}),
     dataCompleteness: toStr(r.dataCompleteness, 'detailed') === 'summary-only' ? 'summary-only' : 'detailed',
     ...(isRecord(r.legacySummary)
-      ? { legacySummary: { income: round2(toNumber(r.legacySummary.income, 0)), expense: round2(toNumber(r.legacySummary.expense, 0)), netProfitLoss: round2(toNumber(r.legacySummary.netProfitLoss, 0)) } }
+      ? { legacySummary: { ...r.legacySummary, income: round2(toNumber(r.legacySummary.income, 0)), expense: round2(toNumber(r.legacySummary.expense, 0)), netProfitLoss: round2(toNumber(r.legacySummary.netProfitLoss, 0)) } }
       : {}),
     createdAt: toStr(r.createdAt, new Date().toISOString()),
     updatedAt: toStr(r.updatedAt, new Date().toISOString()),
@@ -348,6 +367,7 @@ function normalizeLotteryState(raw: unknown): LotteryState {
   if (!isRecord(raw)) return defaultLotteryState();
   const pool = isRecord(raw.pool)
     ? {
+        ...raw.pool,
         id: toStr(raw.pool.id, 'lottery_pool'),
         name: toStr(raw.pool.name, '彩票资金池'),
         openingBalance: round2(toNumber(raw.pool.openingBalance, 0)),
@@ -356,11 +376,12 @@ function normalizeLotteryState(raw: unknown): LotteryState {
       }
     : defaultLotteryState().pool;
   return {
+    ...raw,
     pool,
     projects: toArray(raw.projects).map(normalizeLotteryProject).filter((p): p is LotteryState['projects'][number] => p !== null),
     transactions: toArray(raw.transactions).map(normalizeLotteryTransaction).filter((t): t is LotteryState['transactions'][number] => t !== null),
     settings: isRecord(raw.settings)
-      ? { showLotteryAppendix: toBool(raw.settings.showLotteryAppendix, false) }
+      ? { ...raw.settings, showLotteryAppendix: toBool(raw.settings.showLotteryAppendix, false) }
       : { showLotteryAppendix: false },
   };
 }
@@ -371,9 +392,10 @@ function normalizeLotteryState(raw: unknown): LotteryState {
 
 /** 把当前状态打包成与旧版兼容的备份结构。 */
 export function buildBackup(src: BackupSource): BackupData {
-  const totalAmount = src.channels.reduce((acc, c) => acc + (c.amount || 0), 0);
+  const totalAmount = totalAssets(src.channels);
   const currentLevel = getLevelByAmount(totalAmount);
   return {
+    backupSchemaVersion: 1,
     version: BACKUP_VERSION,
     exportDate: new Date().toISOString(),
     appInfo: { name: APP_NAME, version: BACKUP_VERSION },
@@ -413,7 +435,7 @@ export function buildBackup(src: BackupSource): BackupData {
 
 /**
  * 解析备份 JSON 字符串，做 schema 校验、字段归一化与版本迁移。
- * 兼容旧版导出的所有字段；未知字段会被忽略（向前兼容）。
+ * 兼容旧版导出；已验证实体的未知字段保留，未来 Schema 拒绝写入。
  */
 export function parseBackup(text: string): ParseResult {
   let raw: unknown;
@@ -423,11 +445,23 @@ export function parseBackup(text: string): ParseResult {
     return { ok: false, error: '文件不是有效的 JSON 格式' };
   }
   if (!isRecord(raw)) return { ok: false, error: '备份根节点格式不正确' };
+  if (raw.backupSchemaVersion !== undefined && raw.backupSchemaVersion !== 0 && raw.backupSchemaVersion !== 1) {
+    return { ok: false, error: '备份 Schema 来自更新版本或无效，当前版本不能导入' };
+  }
 
   // 旧版校验顺序：先 data.wealth_tracker_data，再 version / appInfo。
   const data = isRecord(raw.data) ? raw.data : {};
   const wtd = isRecord(data.wealth_tracker_data) ? data.wealth_tracker_data : undefined;
   if (!wtd) return { ok: false, error: '文件格式不正确，不是有效的备份文件（缺少 wealth_tracker_data）' };
+  try {
+    validateLedgerShape(wtd, data.financial_reports ?? null);
+    validateFinancialExtensions(data);
+    if (data.wealth_tracker_history !== undefined) {
+      validateLedgerShape({ channels: [], history: data.wealth_tracker_history }, null);
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : '备份财务数据无效' };
+  }
 
   const version = toStr(raw.version, BACKUP_VERSION);
   // 未来版本号高于当前时，仍尝试导入核心数据（向前兼容），但保留提示信息。
@@ -450,6 +484,7 @@ export function parseBackup(text: string): ParseResult {
   const cdRaw = isRecord(data.countdown_data) ? data.countdown_data : undefined;
   const countdown: CountdownData = cdRaw
     ? {
+        ...cdRaw,
         targetAmount: toNumber(cdRaw.targetAmount, 1_000_000),
         targetDate: toStr(cdRaw.targetDate, todayString()),
         startDate: toStr(cdRaw.startDate, todayString()),
@@ -468,6 +503,7 @@ export function parseBackup(text: string): ParseResult {
 
   const goalRaw = isRecord(data.goal_achievement_status) ? data.goal_achievement_status : undefined;
   const goalAchieved: GoalAchievementStatus = {
+    ...goalRaw,
     hasAchievedGoal: toBool(goalRaw?.hasAchievedGoal, false),
     ...(goalRaw?.goalKey !== undefined ? { goalKey: toStr(goalRaw.goalKey, '') } : {}),
     ...(goalRaw?.achievedAt !== undefined ? { achievedAt: toStr(goalRaw.achievedAt, '') } : {}),
@@ -488,6 +524,7 @@ export function parseBackup(text: string): ParseResult {
 
   if (isRecord(data.coin_rain_config)) {
     imported.coinRainConfig = {
+      ...data.coin_rain_config,
       intensity: ['low', 'medium', 'high'].includes(toStr(data.coin_rain_config.intensity, 'medium'))
         ? (data.coin_rain_config.intensity as CoinRainConfig['intensity'])
         : 'medium',
@@ -499,6 +536,7 @@ export function parseBackup(text: string): ParseResult {
   }
   if (isRecord(data.chart_settings)) {
     imported.chartSettings = {
+      ...data.chart_settings,
       showHistoricalData: toBool(data.chart_settings.showHistoricalData, true),
       ...(data.chart_settings.chartTimeRangeStart !== undefined
         ? { chartTimeRangeStart: toStr(data.chart_settings.chartTimeRangeStart, '') }
@@ -524,16 +562,19 @@ export function parseBackup(text: string): ParseResult {
   }
   if (isRecord(data.sort_history)) {
     imported.sortHistory = {
+      ...data.sort_history,
       history: toArray(data.sort_history.history)
         .filter(isRecord)
-        .map((h) => ({ key: toStr(h.key, ''), label: toStr(h.label, ''), timestamp: toStr(h.timestamp, '') })),
+        .map((h) => ({ ...h, key: toStr(h.key, ''), label: toStr(h.label, ''), timestamp: toStr(h.timestamp, '') })),
     };
   }
   if (isRecord(data.time_range_history)) {
     imported.timeRangeHistory = {
+      ...data.time_range_history,
       records: toArray(data.time_range_history.records)
         .filter(isRecord)
         .map((h) => ({
+          ...h,
           timeRange: toStr(h.timeRange, ''),
           timeDimension: toStr(h.timeDimension, ''),
           label: toStr(h.label, ''),
@@ -544,10 +585,10 @@ export function parseBackup(text: string): ParseResult {
   if (Array.isArray(data.countdown_progress_history)) {
     imported.countdownProgressHistory = data.countdown_progress_history
       .filter(isRecord)
-      .map((p) => ({ date: toStr(p.date, ''), progress: toNumber(p.progress, 0), totalAmount: toNumber(p.totalAmount, 0) }));
+      .map((p) => ({ ...p, date: toStr(p.date, ''), progress: toNumber(p.progress, 0), totalAmount: toNumber(p.totalAmount, 0) }));
   }
   if (isRecord(data.current_wealth_level)) {
-    imported.currentWealthLevel = { level: toStr(data.current_wealth_level.level, '') };
+    imported.currentWealthLevel = { ...data.current_wealth_level, level: toStr(data.current_wealth_level.level, '') };
   }
   if (Array.isArray(data.wealth_tracker_history)) {
     imported.wealthTrackerHistory = data.wealth_tracker_history
@@ -559,9 +600,11 @@ export function parseBackup(text: string): ParseResult {
   }
   if (isRecord(data.goals)) {
     imported.goals = {
+      ...data.goals,
       goals: toArray(data.goals.goals)
         .filter(isRecord)
         .map((g) => ({
+          ...g,
           id: toStr(g.id, randomId('goal')),
           name: toStr(g.name, '财富目标'),
           icon: toStr(g.icon, '🎯'),
@@ -585,6 +628,7 @@ export function parseBackup(text: string): ParseResult {
   }
   if (Array.isArray(data.level_achievements)) {
     imported.levelAchievements = data.level_achievements.filter(isRecord).map((a) => ({
+      ...a,
       levelId: toStr(a.levelId, ''),
       levelName: toStr(a.levelName, ''),
       reachedAt: toStr(a.reachedAt, ''),

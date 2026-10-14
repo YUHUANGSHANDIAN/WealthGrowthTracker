@@ -10,6 +10,7 @@ export const STORAGE_KEYS = {
   wealthTrackerData: 'wealth_tracker_data',
   wealthTrackerHistory: 'wealth_tracker_history',
   financialReports: 'financial_reports',
+  reportProjectionQueue: 'report_projection_queue',
   customSortRules: 'custom_sort_rules',
   sortHistory: 'sort_history',
   sortConfig: 'sort_config',

@@ -9,4 +9,6 @@ export interface StorageAdapter {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;
   removeItem(key: string): Promise<void>;
+  /** Commit a complete business write together when the platform supports it. */
+  setItems?(entries: ReadonlyArray<{ key: string; value: string }>): Promise<void>;
 }

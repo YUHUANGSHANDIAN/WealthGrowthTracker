@@ -78,16 +78,54 @@ export async function getConfigDir(): Promise<string | null> {
   return invoke<string>('config_dir');
 }
 
+/** Read-only configuration inspection does not resolve paths through the damaged config. */
+export interface ConfigRecoveryStatus {
+  exists: boolean;
+  damaged: boolean;
+  detail: string | null;
+}
+
+export interface RecoveryRootInspection {
+  canonicalRoot: string;
+  hasPrimaryState: boolean;
+  backups: string[];
+}
+
+export interface ConfigRepairResult {
+  canonicalRoot: string;
+  preservedConfig: string;
+  preservedState: string | null;
+  durabilityWarning: string | null;
+}
+
+export async function inspectStorageConfigRecovery(): Promise<ConfigRecoveryStatus | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<ConfigRecoveryStatus>('storage_config_recovery_status');
+}
+
+export async function inspectRecoveryRoot(root: string): Promise<RecoveryRootInspection> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<RecoveryRootInspection>('storage_recovery_inspect_root', { root });
+}
+
+export async function readRecoveryCandidate(root: string, candidate: string): Promise<string> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('storage_recovery_read_candidate', { root, candidate });
+}
+
+/** Explicit confirmation only. Backend preserves original bytes and rechecks the preview. */
+export async function repairStorageConfigFromCandidate(
+  root: string, candidate: string, expectedRaw: string,
+): Promise<ConfigRepairResult> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<ConfigRepairResult>('storage_config_recovery_repair', { root, candidate, expectedRaw });
+}
+
 /** 把整个数据根目录从 src 复制到 dst（跨磁盘安全），返回复制的文件数。 */
 export async function migrateDataRoot(src: string, dst: string): Promise<number> {
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<number>('migrate_data_root', { src, dst });
-}
-
-/** 删除任意绝对路径（文件或目录），供存储迁移旧根清理等受控场景。 */
-export async function removePathAbsolute(path: string): Promise<void> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  await invoke<void>('remove_path_absolute', { path });
 }
 
 /** 原生打开一个路径（目录用资源管理器，文件用默认程序）。 */

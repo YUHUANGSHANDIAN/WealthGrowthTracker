@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { FileSystem } from '../../src/services/storage/fs';
+import { STORAGE_KEYS } from '../../src/constants/storageKeys';
 import {
   DesktopFileStorageAdapter,
   DesktopDataManager,
@@ -84,10 +85,11 @@ describe('桌面文件存储', () => {
     expect(fs.files.has(STATE_PATH)).toBe(true);
   });
 
-  it('损坏主文件：保留损坏文件并尝试从备份恢复', async () => {
+  it('损坏主文件：保留原文件，显式恢复之前拒绝读取与写入', async () => {
     // 先写一份有效状态 + 一份备份
     const a1 = new DesktopFileStorageAdapter(fs);
     await a1.setItem('foo', JSON.stringify({ ok: true }));
+    await a1.setItem(STORAGE_KEYS.wealthTrackerData, JSON.stringify({ channels: [], history: [] }));
     await a1.flush(); // 触发一次自动备份
     const mgr = new DesktopDataManager(fs);
     const backups = await mgr.listBackups();
@@ -97,14 +99,17 @@ describe('桌面文件存储', () => {
     fs.files.set(STATE_PATH, '{{{ not valid json');
 
     const a2 = new DesktopFileStorageAdapter(fs);
-    // 应能从备份恢复
+    await expect(a2.getItem('foo')).rejects.toThrow('主数据文件损坏');
+    await expect(a2.setItem('foo', 'empty')).rejects.toThrow();
+    await expect(a2.flush()).rejects.toThrow();
+    expect(fs.files.get(STATE_PATH)).toBe('{{{ not valid json');
+    await mgr.restoreBackup(backups[0]!);
+    expect([...fs.files.entries()].find(([name]) => name.startsWith(`${STATE_PATH}.preserved-`))?.[1]).toBe('{{{ not valid json');
+    await a2.reload();
     expect(JSON.parse((await a2.getItem('foo'))!)).toEqual({ ok: true });
-    // 损坏文件被保留
-    const corrupt = [...fs.files.keys()].filter((k) => k.includes('.corrupt-'));
-    expect(corrupt.length).toBe(1);
   });
 
-  it('自动备份：每天首次落盘生成备份，且轮换保留 60 个', async () => {
+  it('自动备份：每天首次落盘生成备份，保留全部旧备份供手动清理', async () => {
     const a = new DesktopFileStorageAdapter(fs);
     await a.setItem('foo', 'bar');
     await a.flush();
@@ -112,18 +117,19 @@ describe('桌面文件存储', () => {
     const backups = (await mgr.listBackups()).filter((f) => !f.includes('_manual_'));
     expect(backups.length).toBeGreaterThan(0);
 
-    // 制造 65 个自动备份，验证轮换到 60
+    // 制造 65 个自动备份，验证应用不批量删除旧备份
     for (let i = 0; i < 65; i++) {
       fs.files.set(`${BACKUPS_DIR}/wealth-backup_2026-01-01_${String(i).padStart(2, '0')}0000.json`, '{}');
     }
     await mgr.backupNow(false);
     const after = (await mgr.listBackups()).filter((f) => f.startsWith('wealth-backup_') && !f.includes('_manual_'));
-    expect(after.length).toBeLessThanOrEqual(60);
+    expect(after.length).toBe(backups.length + 66);
   });
 
   it('从备份恢复：覆盖主数据文件', async () => {
     const a = new DesktopFileStorageAdapter(fs);
     await a.setItem('foo', 'v1');
+    await a.setItem(STORAGE_KEYS.wealthTrackerData, JSON.stringify({ channels: [], history: [] }));
     await a.flush();
     const mgr = new DesktopDataManager(fs);
     const name = await mgr.backupNow(true);
@@ -134,7 +140,7 @@ describe('桌面文件存储', () => {
     await mgr.restoreBackup(name!);
 
     const restored = JSON.parse(fs.files.get(STATE_PATH)!);
-    expect(restored.foo).toBe('v1');
+    expect(restored.payload.foo).toBe('v1');
   });
 
   it('报告写入 weekly/monthly/yearly 目录', async () => {
@@ -146,5 +152,156 @@ describe('桌面文件存储', () => {
     expect(fs.files.has(`${REPORTS_DIR}/weekly/2026-W40-weekly-report.html`)).toBe(true);
     expect(fs.files.has(`${REPORTS_DIR}/monthly/2026-10-monthly-report.json`)).toBe(true);
     expect(fs.files.has(`${REPORTS_DIR}/yearly/2026-yearly-report.json`)).toBe(true);
+  });
+
+  it('未初始化 flush 不得覆盖磁盘上已有状态', async () => {
+    fs.files.set(STATE_PATH, JSON.stringify({ existing: 'saved' }));
+    const adapter = new DesktopFileStorageAdapter(fs);
+    await adapter.flush();
+    expect(JSON.parse(fs.files.get(STATE_PATH)!).payload).toEqual({ existing: 'saved' });
+  });
+
+  it('写入失败可见，下一次 flush 可重试', async () => {
+    const adapter = new DesktopFileStorageAdapter(fs);
+    await adapter.setItem('foo', 'bar');
+    const original = fs.rename.bind(fs);
+    fs.rename = async () => { throw new Error('permission denied'); };
+    await expect(adapter.flush()).rejects.toThrow('数据文件写入');
+    fs.rename = original;
+    await adapter.flush();
+    expect(JSON.parse(fs.files.get(STATE_PATH)!).payload).toEqual({ foo: 'bar' });
+  });
+
+  it('并发 flush 按顺序提交快照', async () => {
+    const adapter = new DesktopFileStorageAdapter(fs);
+    await adapter.setItem('foo', 'first');
+    const first = adapter.flush();
+    await adapter.setItem('foo', 'second');
+    const second = adapter.flush();
+    await Promise.all([first, second]);
+    expect(JSON.parse(fs.files.get(STATE_PATH)!).payload).toEqual({ foo: 'second' });
+  });
+
+  it('备份拷贝失败会阻止通过', async () => {
+    fs.files.set(STATE_PATH, JSON.stringify({ foo: 'saved' }));
+    fs.copyFile = async () => {};
+    await expect(new DesktopDataManager(fs).backupNow(true)).rejects.toThrow('创建数据备份失败');
+  });
+
+  it('旧格式升级保留未知 key，先逐字备份再写 Envelope', async () => {
+    const original = '{ "foo": "old", "unknown-extension": "保留🌱" }';
+    fs.files.set(STATE_PATH, original);
+    const adapter = new DesktopFileStorageAdapter(fs);
+    await adapter.setItem('foo', 'new');
+    await adapter.flush();
+    const state = JSON.parse(fs.files.get(STATE_PATH)!);
+    expect(state.storageSchemaVersion).toBe(1);
+    expect(state.payload).toEqual({ foo: 'new', 'unknown-extension': '保留🌱' });
+    const backups = await adapter.manager.listBackups();
+    const manual = backups.filter(name => name.includes('_manual_'));
+    expect(manual).toHaveLength(1);
+    expect(fs.files.get(`${BACKUPS_DIR}/${manual[0]}`)).toBe(original);
+    await adapter.flush();
+    expect((await adapter.manager.listBackups()).filter(name => name.includes('_manual_'))).toHaveLength(1);
+  });
+
+  it('Envelope 写回保留未知 metadata 和 revision 单调性', async () => {
+    fs.files.set(STATE_PATH, JSON.stringify({ storageSchemaVersion: 1, revision: 12, extension: { label: '中文' }, payload: { foo: 'old' } }));
+    const adapter = new DesktopFileStorageAdapter(fs);
+    await adapter.setItem('foo', 'new');
+    await adapter.flush();
+    const state = JSON.parse(fs.files.get(STATE_PATH)!);
+    expect(state.extension).toEqual({ label: '中文' });
+    expect(state.revision).toBeGreaterThan(12);
+    const reopened = new DesktopFileStorageAdapter(fs);
+    expect(await reopened.getItem('foo')).toBe('new');
+    await adapter.flush();
+    expect(JSON.parse(fs.files.get(STATE_PATH)!).revision).toBe(state.revision);
+  });
+
+  it('未来 Schema 即使存在旧备份也拒绝读写，不修改原文件', async () => {
+    const original = JSON.stringify({ storageSchemaVersion: 2, revision: 4, payload: { foo: 'future' } });
+    fs.files.set(STATE_PATH, original);
+    fs.files.set(`${BACKUPS_DIR}/wealth-backup_2026-01-01_000000.json`, '{"foo":"old"}');
+    const adapter = new DesktopFileStorageAdapter(fs);
+    await expect(adapter.getItem('foo')).rejects.toMatchObject({ reason: 'future-schema' });
+    await expect(adapter.setItem('foo', 'overwrite')).rejects.toThrow();
+    await expect(adapter.flush()).rejects.toThrow();
+    expect(fs.files.get(STATE_PATH)).toBe(original);
+  });
+
+  it('旧格式备份失败阻断升级，修复后可重试', async () => {
+    const original = '{"foo":"old"}';
+    fs.files.set(STATE_PATH, original);
+    const adapter = new DesktopFileStorageAdapter(fs);
+    await adapter.setItem('foo', 'new');
+    const copy = fs.copyFile.bind(fs);
+    fs.copyFile = async () => { throw new Error('disk full'); };
+    await expect(adapter.flush()).rejects.toThrow();
+    expect(fs.files.get(STATE_PATH)).toBe(original);
+    fs.copyFile = copy;
+    await adapter.flush();
+    expect(JSON.parse(fs.files.get(STATE_PATH)!).payload.foo).toBe('new');
+  });
+
+  it('备份在预览后改变或原文件保留失败时，不替换主文件', async () => {
+    const name = 'wealth-backup_2026-01-01_000000.json';
+    const original = '{"foo":"current"}';
+    fs.files.set(STATE_PATH, original);
+    fs.files.set(`${BACKUPS_DIR}/${name}`, '{"foo":"backup"}');
+    const manager = new DesktopDataManager(fs);
+    const preview = await manager.inspectBackup(name);
+    fs.files.set(`${BACKUPS_DIR}/${name}`, JSON.stringify({ foo: 'changed', [STORAGE_KEYS.wealthTrackerData]: JSON.stringify({ channels: [], history: [] }) }));
+    await expect(manager.restoreBackup(name, preview.raw)).rejects.toThrow('备份已变化');
+    expect(fs.files.get(STATE_PATH)).toBe(original);
+    fs.copyFile = async () => {};
+    await expect(manager.restoreBackup(name)).rejects.toThrow();
+    expect(fs.files.get(STATE_PATH)).toBe(original);
+  });
+
+  it('恢复旧备份不能绕过未来主文件只读限制', async () => {
+    const name = 'wealth-backup_2026-01-01_000000.json';
+    const original = '{"storageSchemaVersion":2,"revision":0,"payload":{}}';
+    fs.files.set(STATE_PATH, original);
+    fs.files.set(`${BACKUPS_DIR}/${name}`, JSON.stringify({ foo: 'old', [STORAGE_KEYS.wealthTrackerData]: JSON.stringify({ channels: [], history: [] }) }));
+    await expect(new DesktopDataManager(fs).restoreBackup(name)).rejects.toMatchObject({ reason: 'future-schema' });
+    expect(fs.files.get(STATE_PATH)).toBe(original);
+  });
+
+  it.each([
+    ['缺少主数据', { foo: 'backup' }],
+    ['损坏的内层 JSON', { [STORAGE_KEYS.wealthTrackerData]: '{' }],
+    ['非法渠道金额', { [STORAGE_KEYS.wealthTrackerData]: JSON.stringify({ channels: [{ id: 'bank', amount: null }], history: [] }) }],
+    ['非法历史日期', { [STORAGE_KEYS.wealthTrackerData]: JSON.stringify({ channels: [], history: [{ date: '2026-02-30', totalAmount: 100 }] }) }],
+    ['未来报告 Schema', { [STORAGE_KEYS.financialReports]: JSON.stringify([{ id: 'future', startDate: '2026-01-01', endDate: '2026-01-31', totalAmount: 100, reportSchemaVersion: 999 }]) }],
+  ])('恢复前拒绝%s，不写主文件或保留副本', async (_label, payload) => {
+    const name = 'wealth-backup_2026-01-01_000000.json';
+    const original = '{"foo":"current"}';
+    fs.files.set(STATE_PATH, original);
+    fs.files.set(`${BACKUPS_DIR}/${name}`, JSON.stringify({ storageSchemaVersion: 1, revision: 1, payload }));
+    const before = [...fs.files.entries()];
+    await expect(new DesktopDataManager(fs).restoreBackup(name)).rejects.toMatchObject({ reason: 'invalid-state' });
+    expect([...fs.files.entries()]).toEqual(before);
+  });
+
+  it('Envelope 兼容也不能覆盖含未来报告的主文件', async () => {
+    const name = 'wealth-backup_2026-01-01_000000.json';
+    const original = JSON.stringify({ [STORAGE_KEYS.financialReports]: JSON.stringify([{ reportSchemaVersion: 999 }]) });
+    fs.files.set(STATE_PATH, original);
+    fs.files.set(`${BACKUPS_DIR}/${name}`, JSON.stringify({ [STORAGE_KEYS.wealthTrackerData]: JSON.stringify({ channels: [], history: [] }) }));
+    await expect(new DesktopDataManager(fs).restoreBackup(name)).rejects.toMatchObject({ reason: 'future-schema' });
+    expect(fs.files.get(STATE_PATH)).toBe(original);
+    expect([...fs.files.keys()].filter(path => path.includes('.preserved-'))).toEqual([]);
+  });
+
+  it('有效备份的未知财务字段和 storage key 逐字恢复', async () => {
+    const name = 'wealth-backup_2026-01-01_000000.json';
+    const raw = JSON.stringify({
+      [STORAGE_KEYS.wealthTrackerData]: JSON.stringify({ channels: [{ id: 'bank', amount: 0, extension: '保留🌱' }], history: [], extension: { source: 'legacy' } }),
+      'unknown-storage-key': '保留扩展',
+    }, null, 2);
+    fs.files.set(`${BACKUPS_DIR}/${name}`, raw);
+    await new DesktopDataManager(fs).restoreBackup(name);
+    expect(fs.files.get(STATE_PATH)).toBe(raw);
   });
 });
