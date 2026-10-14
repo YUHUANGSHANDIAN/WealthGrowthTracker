@@ -6,6 +6,7 @@
  * Usage:
  *   node scripts/fetch-node-sidecar.mjs                 # host platform triple
  *   node scripts/fetch-node-sidecar.mjs --target aarch64-apple-darwin --target x86_64-apple-darwin
+ *   node scripts/fetch-node-sidecar.mjs --universal-darwin   # lipo both macOS slices
  *
  * Everything is verified against the official SHASUMS256.txt of the pinned release.
  */
@@ -38,13 +39,15 @@ function hostTriple() {
   return `${arch}-unknown-linux-gnu`;
 }
 
-function parseArgs(argv) {
+function parseArgs(argv = process.argv.slice(2)) {
+  const universalDarwin = argv.includes("--universal-darwin");
   const targets = [];
   for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] === "--target") targets.push(argv[index + 1]);
-    if (argv[index] === "--all-desktop") targets.push("x86_64-pc-windows-msvc", "aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu");
+    if (argv[index] === "--target" && argv[index + 1]) { targets.push(argv[index + 1]); index += 1; }
+    else if (argv[index] === "--all-desktop") targets.push("x86_64-pc-windows-msvc", "aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu");
   }
-  return targets.length ? targets : [hostTriple()];
+  if (!targets.length && !universalDarwin) targets.push(hostTriple());
+  return { universalDarwin, targets };
 }
 
 async function download(url, destination) {
@@ -54,7 +57,11 @@ async function download(url, destination) {
 }
 
 async function main() {
-  const targets = parseArgs(process.argv.slice(2));
+  const { universalDarwin, targets: requestedTargets } = parseArgs();
+  const targets = universalDarwin ? ["aarch64-apple-darwin", "x86_64-apple-darwin"] : requestedTargets;
+  if (universalDarwin && process.platform !== "darwin") {
+    throw new Error("--universal-darwin 只能在 macOS 上运行（需要 lipo）");
+  }
   for (const target of targets) {
     if (!ARTIFACTS[target]) throw new Error(`不支持的 target：${target}`);
   }
@@ -67,6 +74,7 @@ async function main() {
     return [name, hash];
   }));
   try {
+    const extractedBinaries = new Map();
     for (const target of targets) {
       const { file, binary } = ARTIFACTS[target];
       const archive = join(scratch, file);
@@ -84,10 +92,26 @@ async function main() {
       const source = join(folder, "bin", binary);
       const resolvedSource = existsSync(source) ? source : join(folder, binary);
       if (!existsSync(resolvedSource)) throw new Error(`压缩包内未找到 ${binary}`);
+      if (universalDarwin) {
+        extractedBinaries.set(target, resolvedSource);
+        console.log(`✓ ${target} 已下载（待合并为 universal）`);
+        continue;
+      }
       const destination = join(binariesDir, `node-${target}${binary.endsWith(".exe") ? ".exe" : ""}`);
       copyFileSync(resolvedSource, destination);
       if (!destination.endsWith(".exe")) chmodSync(destination, 0o755);
       console.log(`✓ ${basename(destination)}（sha256 ${actual.slice(0, 16)}…）`);
+    }
+    if (universalDarwin) {
+      const destination = join(binariesDir, "node-universal-apple-darwin");
+      execFileSync("lipo", [
+        "-create",
+        extractedBinaries.get("aarch64-apple-darwin"),
+        extractedBinaries.get("x86_64-apple-darwin"),
+        "-output", destination,
+      ], { stdio: ["ignore", "ignore", "inherit"] });
+      chmodSync(destination, 0o755);
+      console.log(`✓ node-universal-apple-darwin（aarch64 + x86_64 lipo 合并）`);
     }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
