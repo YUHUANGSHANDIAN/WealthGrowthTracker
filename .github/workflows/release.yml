@@ -75,7 +75,7 @@ jobs:
       - name: Prepare AI runtime resources
         run: node scripts/prepare-ai-runtime-resources.mjs
       - name: Build Tauri (NSIS + MSI)
-        run: npx tauri build --ci
+        run: npx tauri build --ci --config src-tauri/tauri.desktop.conf.json
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
@@ -108,7 +108,7 @@ jobs:
       - name: Prepare AI runtime resources
         run: node scripts/prepare-ai-runtime-resources.mjs
       - name: Build Tauri (universal DMG)
-        run: npx tauri build --ci --target universal-apple-darwin
+        run: npx tauri build --ci --config src-tauri/tauri.desktop.conf.json --target universal-apple-darwin
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
@@ -143,7 +143,7 @@ jobs:
       - name: Prepare AI runtime resources
         run: node scripts/prepare-ai-runtime-resources.mjs
       - name: Build Tauri (AppImage + DEB + RPM)
-        run: npx tauri build --ci
+        run: npx tauri build --ci --config src-tauri/tauri.desktop.conf.json
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
