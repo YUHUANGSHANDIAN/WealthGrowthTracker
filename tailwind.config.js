@@ -3,6 +3,19 @@ export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
+      // Preserve the existing scale while migrating the compiler to Tailwind 4.
+      borderRadius: {
+        sm: '0.125rem',
+        DEFAULT: '0.25rem',
+      },
+      blur: {
+        sm: '4px',
+        DEFAULT: '8px',
+      },
+      backdropBlur: {
+        sm: '4px',
+        DEFAULT: '8px',
+      },
       keyframes: {
         'pulse-slow': {
           '0%, 100%': { opacity: '1' },
@@ -28,6 +41,8 @@ export default {
         float: 'float 4s ease-in-out infinite',
       },
       boxShadow: {
+        sm: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+        DEFAULT: '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
         '3xl': '0 24px 48px -12px rgba(0,0,0,0.28)',
       },
     },

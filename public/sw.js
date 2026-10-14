@@ -1,18 +1,21 @@
-/* 财富成长记 Service Worker —— 仅缓存应用外壳（静态资源），不缓存任何用户资产数据。
- * 用户业务数据存放于 localStorage / IndexedDB，不经过 HTTP，因此不会进入 Cache Storage。 */
-const CACHE = 'wealth-growth-tracker-v1';
+/* Wealth Growth Tracker service worker. It owns only versioned app-shell caches. */
+const CACHE_PREFIX = 'wealth-growth-tracker-shell-';
+const CACHE = `${CACHE_PREFIX}v1.7.0`;
+const OWNED = (name) => name.startsWith(CACHE_PREFIX);
 
-self.addEventListener('install', () => {
-  self.skipWaiting();
+self.addEventListener('install', (event) => {
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['/','/index.html','/manifest.webmanifest'])));
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+    caches.keys().then((keys) => Promise.all(keys.filter((key) => OWNED(key) && key !== CACHE).map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', (event) => {
@@ -20,39 +23,16 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
-
-  // 导航请求：缓存优先，回退网络（离线 shell）
   if (req.mode === 'navigate') {
-    event.respondWith(
-      caches.match(req).then((cached) => {
-        const network = fetch(req)
-          .then((res) => {
-            const copy = res.clone();
-            caches.open(CACHE).then((cache) => cache.put(req, copy));
-            return res;
-          })
-          .catch(() => cached);
-        return cached || network;
-      }),
-    );
+    event.respondWith(fetch(req).then((res) => {
+      if (res.ok) caches.open(CACHE).then((cache) => cache.put(req, res.clone()));
+      return res;
+    }).catch(() => caches.match(req).then((cached) => cached || caches.match('/index.html'))));
     return;
   }
-
-  // 静态资源：缓存优先，网络回填
-  const STATIC = ['script', 'style', 'image', 'font', 'manifest'];
-  if (STATIC.includes(req.destination)) {
-    event.respondWith(
-      caches.match(req).then(
-        (cached) =>
-          cached ||
-          fetch(req).then((res) => {
-            if (res.ok) {
-              const copy = res.clone();
-              caches.open(CACHE).then((cache) => cache.put(req, copy));
-            }
-            return res;
-          }),
-      ),
-    );
-  }
+  if (!['script','style','image','font','manifest'].includes(req.destination)) return;
+  event.respondWith(caches.match(req).then((cached) => cached || fetch(req).then((res) => {
+    if (res.ok) caches.open(CACHE).then((cache) => cache.put(req, res.clone()));
+    return res;
+  })));
 });

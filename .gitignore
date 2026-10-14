@@ -58,3 +58,4 @@ legacy-lottery/
 *.xls
 app-state.json
 wealth-backup*.json
+.codex-visual/

@@ -1,93 +1,77 @@
 #!/usr/bin/env node
-/**
- * Privacy Guard（v1.5）—— 发布前隐私检查。
- *
- * 确保以下「用户真实数据」绝不进入 Git 仓库：
- *  - app-state.json / wealth-backup_*.json（应用主数据与备份）
- *  - 用户 *.xlsx（旧彩票 Excel）
- *  - 历史财务报告/ 目录（用户历史报告）
- *  - private-data/ / local-imports/ / migration-backups/（私人数据目录）
- *  - 源码中的真实银行卡尾号 / 真实项目名等敏感内容模式
- *
- * 基于「路径 / 文件名 / 数据目录」判断，不粗暴禁止所有 json / png。
- * 用法：npm run privacy:check
- */
-import { execSync } from 'node:child_process';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-const FORBIDDEN_PATH = [
-  /(^|\/)历史财务报告(\/|$)/,
-  /(^|\/)private-data(\/|$)/,
-  /(^|\/)local-imports(\/|$)/,
-  /(^|\/)migration-backups(\/|$)/,
-  /(^|\/)legacy-reports?(\/|$)/,
-  /(^|\/)legacy-lottery(\/|$)/,
-  /(^|\/)app-state\.json$/,
+const forbiddenPaths = [
+  /(^|\/)(历史财务报告|private-data|local-imports|migration-backups|legacy-reports?|legacy-lottery)(\/|$)/,
+  /(^|\/)app-state\.json(?:\.|$)/,
   /(^|\/)wealth-backup[^/]*\.json$/,
-  /\.xlsx$/i,
-  /\.xls$/i,
+  /\.(xlsx|xls)$/i,
 ];
-
-// 源码内不应出现的敏感内容模式（真实银行尾号、真实世界杯项目名等）
-const FORBIDDEN_CONTENT = [
-  /浦发银行\s*\(\d{4}\)/,
-  /FIFA20\d{2}/,
-  /卡塔尔世界杯/,
-  /美加墨世界杯/,
+const forbiddenContents = [
+  /浦发银行\s*\(\d{4}\)/, /FIFA20\d{2}/, /卡塔尔世界杯/, /美加墨世界杯/,
+  /\bgh[pousr]_[A-Za-z0-9]{30,}\b/,
+  /\bgithub_pat_[A-Za-z0-9_]{40,}\b/,
+  /\bsk-(?:proj-|ant-api\d+-)?[A-Za-z0-9_-]{32,}\b/,
+  /https?:\/\/[^\s"'<>]+[?&](?:access_token|refresh_token|id_token|code)=[^\s"'&<>]+/i,
 ];
+const textPath = /\.(ts|tsx|js|mjs|cjs|json|md|txt|html|css|yml|yaml|toml|rs|svg)$/i;
 
-function git(cmd) {
-  try {
-    return execSync(cmd, { encoding: 'utf8' }).split('\n').filter(Boolean);
-  } catch {
-    return [];
-  }
+export function parseIndexRecords(output) {
+  return output.split('\0').filter(Boolean).map(record => {
+    const match = /^(\d+) ([a-f0-9]+) ([0-3])\t([\s\S]+)$/.exec(record);
+    if (!match) throw new Error('无法解析 Git index');
+    const [, mode, oid, stage, path] = match;
+    if (stage !== '0') throw new Error('Git index 存在未解决冲突');
+    if (mode === '120000' || mode === '160000') throw new Error(`无法审核链接或子模块：${JSON.stringify(path)}`);
+    return { mode, oid, path };
+  });
 }
 
-const violations = [];
-const warnings = [];
-
-const tracked = git('git ls-files');
-const staged = git('git diff --cached --name-only');
-
-for (const f of new Set([...tracked, ...staged])) {
-  for (const re of FORBIDDEN_PATH) {
-    if (re.test(f)) violations.push(`[tracked/staged] 禁止文件进入 Git：${f}（匹配 ${re}）`);
-  }
-}
-
-// 内容检查（仅文本文件；跳过本脚本自身，避免匹配到 guard 里的正则字面量）
-const TEXT_RE = /\.(ts|tsx|js|mjs|cjs|json|md|txt|html|css|yml|yaml|toml)$/;
-for (const f of tracked) {
-  if (!TEXT_RE.test(f)) continue;
-  if (f.endsWith('privacy-check.mjs')) continue;
-  try {
-    const content = readFileSync(f, 'utf8');
-    for (const re of FORBIDDEN_CONTENT) {
-      if (re.test(content)) violations.push(`[content] ${f} 命中敏感模式 ${re}`);
+/** Inspect both the actual index blobs and the current working files. Git errors fail closed. */
+export function checkPrivacy(cwd = process.cwd()) {
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+  const records = parseIndexRecords(git('ls-files', '--stage', '-z'));
+  if (!records.length) throw new Error('Git index 为空，无法确认审核目标');
+  const violations = [];
+  for (const { oid, path } of records) {
+    if (forbiddenPaths.some((re) => re.test(path))) violations.push(`禁止路径：${JSON.stringify(path)}`);
+    if (!textPath.test(path) || path === 'scripts/privacy-check.mjs') continue;
+    const staged = git('cat-file', 'blob', oid);
+    let working;
+    try { working = readFileSync(resolve(cwd, path), 'utf8'); }
+    catch (error) {
+      // A tracked file missing from disk is still audited from its index blob.
+      if (error.code !== 'ENOENT') throw error;
     }
-  } catch {
-    /* ignore unreadable */
+    for (const [label, content] of [['index', staged], ['working', working]]) {
+      if (content !== undefined && forbiddenContents.some((re) => re.test(content))) {
+        violations.push(`${label} 敏感内容：${JSON.stringify(path)}`);
+      }
+    }
+  }
+  // New source and documentation must be reviewed before they enter the index, too.
+  for (const path of git('ls-files', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean)) {
+    if (forbiddenPaths.some((re) => re.test(path))) violations.push(`禁止路径：${JSON.stringify(path)}`);
+    if (textPath.test(path) && path !== 'scripts/privacy-check.mjs') {
+      const content = readFileSync(resolve(cwd, path), 'utf8');
+      if (forbiddenContents.some((re) => re.test(content))) violations.push(`untracked 敏感内容：${JSON.stringify(path)}`);
+    }
+  }
+  return violations;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  try {
+    const violations = checkPrivacy();
+    if (violations.length) {
+      console.error(violations.join('\n'));
+      process.exitCode = 1;
+    } else console.log('隐私检查通过：已审核 Git index blob 和工作区文本。');
+  } catch (error) {
+    console.error(`隐私检查无法完成，已阻止通过：${error.message}`);
+    process.exitCode = 1;
   }
 }
-
-// 工作区内存在但未跟踪的敏感目录（仅警告，因其不会被提交）
-const ROOT_SENSITIVE_DIRS = ['历史财务报告', 'private-data', 'local-imports', 'migration-backups'];
-for (const d of ROOT_SENSITIVE_DIRS) {
-  if (existsSync(d) && statSync(d).isDirectory()) {
-    warnings.push(`工作区存在敏感目录（已按未跟踪处理，切勿 git add）：${d}/`);
-  }
-}
-
-if (warnings.length > 0) {
-  console.warn('⚠️  Privacy warnings:');
-  for (const w of warnings) console.warn('  - ' + w);
-}
-
-if (violations.length > 0) {
-  console.error('❌ Privacy check FAILED：发现用户数据 / 备份 / Excel / 历史报告可能进入 Git：');
-  for (const v of violations) console.error('  - ' + v);
-  process.exit(1);
-}
-
-console.log('✅ Privacy check passed：未发现用户数据 / 备份 / Excel / 历史报告进入 Git。');
