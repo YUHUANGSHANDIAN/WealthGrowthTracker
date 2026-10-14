@@ -103,6 +103,13 @@ async function main() {
       console.log(`✓ ${basename(destination)}（sha256 ${actual.slice(0, 16)}…）`);
     }
     if (universalDarwin) {
+      // 通用（universal）构建分阶段执行：每个架构的 cargo 构建需要各自的
+      // sidecar，最终打包阶段需要 lipo 合并后的 universal 产物，因此三者都要。
+      for (const [target, source] of extractedBinaries) {
+        const perArch = join(binariesDir, `node-${target}`);
+        copyFileSync(source, perArch);
+        chmodSync(perArch, 0o755);
+      }
       const destination = join(binariesDir, "node-universal-apple-darwin");
       execFileSync("lipo", [
         "-create",
@@ -111,7 +118,7 @@ async function main() {
         "-output", destination,
       ], { stdio: ["ignore", "ignore", "inherit"] });
       chmodSync(destination, 0o755);
-      console.log(`✓ node-universal-apple-darwin（aarch64 + x86_64 lipo 合并）`);
+      console.log("✓ node-aarch64-apple-darwin / node-x86_64-apple-darwin / node-universal-apple-darwin");
     }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
