@@ -4,7 +4,7 @@
 
 本项目是从灵光 AI 导出的生产产物（压缩后的 React bundle）**完整重建**的可维护源码工程——不再依赖灵光运行时，可在普通现代浏览器中独立运行，也可作为 **Windows 桌面应用**（Tauri 2）安装使用。
 
-> ⚠️ 本应用是个人记账/目标管理工具，其中的「AI 分析」「财富预测」均为**本地规则算法**，仅对历史数据做数学外推，**不构成任何投资收益建议或保证**。
+> ⚠️ 本应用是个人记账/目标管理工具。「财富预测」为**本地规则算法**，仅对历史数据做数学外推；「AI 连接」默认关闭，只有在你启用、配置连接并在工作区逐次授权数据范围后才会发送所选事实，**不构成任何投资收益建议或保证**。
 
 ---
 
@@ -48,6 +48,11 @@
   - **ISO 8601 周报规范**：一周 Monday→Sunday、正好 7 天；旧周报周期元数据自动 canonicalize
   - **一周期唯一报告**：每周/月/年只保留一份报告，冲突只允许「更新」或「取消」
   - **一天一条历史记录**：手动添加/改日期撞车弹冲突确认；周报生成先写当天 Daily Snapshot，保证报告与历史一致
+- **工作台与可靠性（v1.7）**
+  - **新应用外壳**：桌面侧边导航 / 移动底部导航、独立总览页、全局搜索（Ctrl/Cmd+K，只在本地数据中检索）、金额隐私模式、Light/Dark/System 主题（图表与导出同步）
+  - **报告与历史事务化**：报告「准备 → 确认」一次提交，取消不改变历史；周期唯一性由领域层强制；报告编辑带 revision、审计与派生字段重算；报告文件投影 outbox 可重试
+  - **存储恢复**：桌面端单写入队列 + 原子替换 + 坏数据只读恢复界面；浏览器 IndexedDB 快照 + revision 校验
+  - **受控 AI 边界**：连接中心（多连接、模型探测、合成消息测试）与 AI 工作区逐次授权；AI 默认关闭并在每次启动重置
 - **设置与账户**
   - 个人资料、外观、**本地账户锁**（PBKDF2，不明文，登出不删除资产）、手动版本更新检查、隐私说明
 
@@ -58,11 +63,12 @@
 | 类别 | 选型 |
 |------|------|
 | 框架 | React 18 + TypeScript 5 |
-| 构建 | Vite 5 |
+| 构建 | Vite 6 |
 | 状态 | Zustand（单一 store，按领域拆分 action） |
-| 样式 | Tailwind CSS 3 |
+| 样式 | Tailwind CSS 4 |
 | 图表 | 自研轻量 SVG（折线 / 条形 / 雷达，无重型图表库） |
 | 桌面 | Tauri 2（Windows x64，文件持久化 + 自动备份） |
+| 运行时 | Node 24.21（CI 与桌面 sidecar 统一版本） |
 | 测试 | Vitest + Testing Library |
 
 刻意**不引入**的依赖：`three.js`（3D 雷达改用 2D SVG）、`math.js`（用少量纯函数替代）、`recharts/echarts`（自研 SVG 足够且更轻）。核心纯逻辑无副作用，便于单测。
@@ -85,6 +91,8 @@ npm run typecheck     # 仅类型检查
 npm run lint          # ESLint
 npm test              # 运行单元测试（Vitest）
 npm run privacy:check # 发布前隐私检查（阻止用户数据/备份/Excel/历史报告进入 Git）
+npm run privacy:test  # 隐私检查脚本自身的回归测试
+cd ai-runtime && npm test # AI 运行时（Node 内置 test runner，无网络、无凭据）
 ```
 
 ---
@@ -98,7 +106,7 @@ npm run privacy:check # 发布前隐私检查（阻止用户数据/备份/Excel/
   - `backups/` —— 自动/手动备份
   - `reports/{weekly,monthly,yearly}/` —— 报告（JSON + HTML）
   - `exports/` —— 导出的文件
-- 普通浏览器：`localStorage`
+- 普通浏览器：`IndexedDB`（单一快照 + revision 校验；仅在首次迁移时只读读取旧 `localStorage`）
 - 灵光小应用环境：若检测到 `window.lingguang.storage`，自动复用其存储 API 与**相同的存储键**
 
 存储键与灵光旧版逐字对齐（`wealth_tracker_data`、`financial_reports`、`countdown_data` 等），是数据兼容的核心契约。
@@ -203,7 +211,7 @@ npm run build        # 产物在 dist/
 ### Web / PWA（Stable）
 
 - 直接部署 `dist/`（`base: './'` 已配置相对路径），可安装为 PWA（离线外壳）。
-- 浏览器数据存于 `localStorage`，跨设备不互通（本应用无云同步）。
+- 浏览器数据存于 IndexedDB 单一快照（revision CAS + 上一版本备份），跨设备不互通（本应用无云同步）。
 
 ### HarmonyOS（见 docs/HARMONYOS.md）
 
@@ -215,7 +223,8 @@ npm run build        # 产物在 dist/
 ## 🔒 隐私说明
 
 - 所有个人资产数据**仅存储在你自己的电脑本地**，默认不上传任何服务器。
-- 「AI 分析」为本地规则算法，**不联网、不调用第三方 LLM、不含任何 API Key**。
+- AI 默认关闭且每次启动重置：关闭时**不启动运行时、不联网、不读取任何凭据**。启用后可在「AI 连接中心」配置你自有的连接（订阅授权、API Key、本地模型或自建 HTTPS 网关），业务数据只在你逐次确认的 ContextManifest 范围内发送。**当前只有 Web/PWA 会真正建立连接**；桌面端的受控运行时（Tauri `ai_*` 命令与 Node sidecar 打包）尚未接入，桌面 App 内会明确提示不可用，不会保存凭据。
+- 应用不读取 Codex、Claude、GitHub CLI 等其它程序的登录令牌，不嵌入 OAuth 客户端密钥；凭据只保留在当前会话，系统安全存储（Keyring / Keystore）尚未接入。API Key、本地模型与 mock 都不代表订阅权益。
 - 不接入任何追踪 / 广告 / 统计脚本；日志不记录任何金额/资产数据。
 - 建议定期导出 JSON 备份（桌面版会自动备份）。
 
