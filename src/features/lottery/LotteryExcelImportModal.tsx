@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { Modal } from '../../components/ui/Modal';
 import { Button, Badge } from '../../components/ui/primitives';
-import { readLotteryExcelFile, type LotteryExcelPreview } from './excelImport';
+import type { LotteryExcelPreview } from './excelImport';
+import { readLotteryExcelFile } from './excelReader';
 
 /** 旧彩票 Excel 导入（用户主动选择，幂等）。 */
 export function LotteryExcelImportModal({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -12,15 +13,26 @@ export function LotteryExcelImportModal({ open, onClose }: { open: boolean; onCl
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (!open) {request.current?.abort();setPreview(null);setError('');}
+    return () => request.current?.abort();
+  }, [open]);
+
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
+    setPreview(null);
     setBusy(true);
     setError('');
     try {
-      const p = await readLotteryExcelFile(file);
+      const p = await readLotteryExcelFile(file, controller.signal);
       setPreview(p);
     } catch (err) {
+      if (controller.signal.aborted) return;
       setError(`解析失败：${err instanceof Error ? err.message : '未知错误'}`);
       setPreview(null);
     } finally {

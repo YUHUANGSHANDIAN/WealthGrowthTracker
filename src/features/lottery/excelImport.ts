@@ -204,17 +204,3 @@ export function parseLotteryExcel(sheets: SheetLike[]): LotteryExcelPreview {
     warnings,
   };
 }
-
-/** 读取 Excel 文件（动态 import xlsx，不进入主 bundle）。 */
-export async function readLotteryExcelFile(file: File): Promise<LotteryExcelPreview> {
-  const XLSX = await import('xlsx');
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array' });
-  const sheets: SheetLike[] = wb.SheetNames.map((name) => {
-    const ws = wb.Sheets[name];
-    if (!ws) return { name, rows: [] };
-    const rows = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, raw: false, defval: '' });
-    return { name, rows: rows as string[][] };
-  });
-  return parseLotteryExcel(sheets);
-}
