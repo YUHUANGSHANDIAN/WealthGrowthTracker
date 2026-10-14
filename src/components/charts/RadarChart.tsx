@@ -106,8 +106,8 @@ export function RadarChart({
           <div key={a.dimension} className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full" style={{ background: a.color }} aria-hidden />
             <span className="text-slate-700">{a.dimension}</span>
-            <span className="text-slate-400 tabular">{Math.round(a.value)}</span>
-            {a.description && <span className="text-slate-400 text-xs">· {a.description}</span>}
+            <span className="text-slate-500 tabular">{Math.round(a.value)}</span>
+            {a.description && <span className="text-slate-500 text-xs">· {a.description}</span>}
           </div>
         ))}
       </div>

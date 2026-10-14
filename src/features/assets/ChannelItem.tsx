@@ -75,7 +75,7 @@ export function ChannelItem({ channel, handlers, isPinned = false }: { channel: 
           <div className="flex items-center gap-2">
             <span className="font-medium text-slate-800 truncate">{channel.name}</span>
             {hasChildren && (
-              <span className="text-[11px] text-slate-400 shrink-0">{children.length} 个子渠道</span>
+              <span className="text-[11px] text-slate-500 shrink-0">{children.length} 个子渠道</span>
             )}
           </div>
         </div>

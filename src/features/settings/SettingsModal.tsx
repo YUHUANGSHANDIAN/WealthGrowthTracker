@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { APP_VERSION } from '../../constants/version';
 import { getDefaultTimezone, TIMEZONE_OPTIONS } from '../../utils/countdown';
@@ -11,45 +11,106 @@ import { Button, Badge } from '../../components/ui/primitives';
 import { SliderField } from '../../components/ui/Slider';
 import { TextField, SelectField, TextArea } from '../../components/ui/form';
 import { EmojiPicker } from '../../components/ui/Pickers';
-
-type Section = 'profile' | 'appearance' | 'account' | 'update' | 'privacy' | 'about';
-
-const SECTIONS: { id: Section; label: string }[] = [
-  { id: 'profile', label: '个人资料' },
-  { id: 'appearance', label: '外观' },
-  { id: 'account', label: '账号与安全' },
-  { id: 'update', label: '版本更新' },
-  { id: 'privacy', label: '隐私' },
-  { id: 'about', label: '关于' },
-];
+import { SETTINGS_SECTIONS, type SettingsSectionId } from '../../constants/settings';
+import { useNavigationStore } from '../../store/navigationStore';
+import { useAIConnectionStore } from '../../store/aiConnectionStore';
 
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [section, setSection] = useState<Section>('profile');
+  const [section, setSection] = useState<SettingsSectionId>('profile');
   return (
     <Modal open={open} onClose={onClose} title="设置" size="lg">
-      <div className="flex gap-4 min-h-[320px]">
-        <nav className="w-32 shrink-0 space-y-1 border-r border-slate-100 pr-3" aria-label="设置分类">
-          {SECTIONS.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setSection(s.id)}
-              className={`w-full text-left px-2 py-1.5 rounded-lg text-sm transition-colors ${section === s.id ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-slate-600 hover:bg-slate-50'}`}
-              aria-current={section === s.id ? 'page' : undefined}
-            >
-              {s.label}
-            </button>
-          ))}
-        </nav>
-        <div className="flex-1 min-w-0">
-          {section === 'profile' && <ProfileSection />}
-          {section === 'appearance' && <AppearanceSection />}
-          {section === 'account' && <AccountSection />}
-          {section === 'update' && <UpdateSection />}
-          {section === 'privacy' && <PrivacySection />}
-          {section === 'about' && <AboutSection />}
-        </div>
-      </div>
+      <SettingsContent section={section} onSectionChange={setSection} />
     </Modal>
+  );
+}
+
+export function SettingsContent({ section, onSectionChange }: { section: SettingsSectionId; onSectionChange: (section: SettingsSectionId) => void }) {
+  const current = SETTINGS_SECTIONS.find((item) => item.id === section)!;
+  const titleId = useId();
+  return (
+    <div className="settings-layout">
+      <nav className="settings-nav" aria-label="设置分类">
+        {SETTINGS_SECTIONS.map((item) => (
+          <button key={item.id} type="button" onClick={() => onSectionChange(item.id)} aria-current={section === item.id ? 'page' : undefined}>
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      <section className="settings-section" aria-labelledby={titleId}>
+        <header className="settings-section-heading">
+          <h2 id={titleId}>{current.label}</h2>
+          <p>{current.description}</p>
+        </header>
+        {section === 'profile' && <ProfileSection />}
+        {section === 'appearance' && <AppearanceSection />}
+        {section === 'records' && <RecordsSection />}
+        {section === 'ai' && <AISection />}
+        {section === 'storage' && <StorageSection />}
+        {section === 'account' && <AccountSection />}
+        {section === 'update' && <UpdateSection />}
+        {section === 'privacy' && <PrivacySection />}
+        {section === 'about' && <AboutSection />}
+      </section>
+    </div>
+  );
+}
+
+function RecordsSection() {
+  const navigate = useNavigationStore((state) => state.navigate);
+  return (
+    <div className="space-y-5">
+      <div className="settings-note">
+        <h3>每日快照与周期报告</h3>
+        <p>修改渠道金额会同步当天历史快照；历史页面也可补充或覆盖指定日期。周报、月报和年报在报告页面主动生成与确认。改变默认时区不会重排既有历史日期。</p>
+      </div>
+      <div className="settings-actions">
+        <Button variant="outline" onClick={() => navigate({ tab: 'history' })}>管理历史快照</Button>
+        <Button variant="outline" onClick={() => navigate({ tab: 'reports' })}>打开报告工作区</Button>
+      </div>
+      <div className="settings-note">
+        <div className="flex flex-wrap items-center gap-2"><h3>定时记录与报告计划</h3><Badge tone="slate">尚未实现</Badge></div>
+        <p>渠道修改触发的当天快照与定时任务不同。当前未提供定时记录、定时生成或云端同步设置。</p>
+      </div>
+    </div>
+  );
+}
+
+function AISection() {
+  const navigate = useNavigationStore((state) => state.navigate);
+  const enabled = useAIConnectionStore((state) => state.enabled);
+  const profiles = useAIConnectionStore((state) => state.profiles);
+  const tested = profiles.filter((profile) => profile.state === 'tested').length;
+  return (
+    <div className="space-y-5">
+      <div className="settings-note">
+        <div className="flex flex-wrap items-center gap-2"><h3>AI 接入状态</h3>{enabled ? <Badge tone="emerald">已启用</Badge> : <Badge tone="slate">未启用</Badge>}<Badge tone="slate">连接 {profiles.length}</Badge><Badge tone="slate">合成测试通过 {tested}</Badge></div>
+        <p>AI 默认关闭，每次启动需重新启用；核心功能完全离线可用。业务请求必须在 AI 工作区逐次授权数据范围，凭据只交给系统安全存储或临时会话。</p>
+      </div>
+      <Button variant="outline" onClick={() => navigate({ tab: 'ai' })}>打开 AI 连接中心</Button>
+      <div className="settings-note">
+        <h3>订阅与发布边界</h3>
+        <p>合成测试通过只证明端点与凭据当前可用。正式发布要求至少两类厂商许可的订阅路径完成真实认证、推理与撤销验收；API Key、本地模型和 mock 都不计入该发布门。</p>
+      </div>
+    </div>
+  );
+}
+
+function StorageSection() {
+  const navigate = useNavigationStore((state) => state.navigate);
+  const isDesktop = storageService.getAdapterName() === 'desktop';
+  return (
+    <div className="space-y-5">
+      <div className="settings-note">
+        <h3>当前存储</h3>
+        <p>存储后端：{storageService.getAdapterName()}。核心数据在当前设备本地保存，未提供云端账户或自动云同步。</p>
+      </div>
+      <div className="settings-note">
+        <h3>导入、备份与恢复</h3>
+        <p>在数据中心检查数据健康、导入备份和导出数据。{isDesktop ? '桌面备份与存储位置也在数据中心管理。' : '当前平台可通过文件导出保留备份；桌面目录管理在此平台不可用。'}</p>
+      </div>
+      <Button variant="outline" onClick={() => navigate({ tab: 'data' })}>打开数据中心</Button>
+      <p className="text-sm text-slate-600">普通备份是数据文件，不等于加密备份。请自行保管备份文件，并在分享前检查其内容。</p>
+    </div>
   );
 }
 
@@ -89,7 +150,7 @@ function AppearanceSection() {
         options={[
           { value: 'light', label: '浅色' },
           { value: 'system', label: '跟随系统' },
-          { value: 'dark', label: '深色（即将推出）' },
+          { value: 'dark', label: '深色' },
         ]} />
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={appearance.followWealthTheme} onChange={(e) => setAppearance({ ...appearance, followWealthTheme: e.target.checked })}
@@ -155,7 +216,7 @@ function AccountSection() {
         </div>
       </div>
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
-        说明：PIN/密码仅作为本地应用锁，不加密磁盘上的数据文件（app-state.json 仍为明文 JSON）。真正的加密列入 FUTURE。
+        PIN/密码仅作为本地应用锁，不加密磁盘上的数据文件。磁盘数据加密尚未实现，请保护设备账户和备份文件。
       </div>
       <TextField label="验证并锁定" type="password" value={loginSecret} onChange={(e) => setLoginSecret(e.target.value)} placeholder="输入 PIN/密码" />
       <div className="flex gap-2">
@@ -182,6 +243,8 @@ function UpdateSection() {
     setChecking(true);
     setResult(null);
     setAsset(null);
+    setIsNewer(false);
+    setUrl('');
     try {
       const r = await checkForUpdate(APP_VERSION);
       setUrl(r.url);
@@ -202,15 +265,15 @@ function UpdateSection() {
       </div>
       <Button onClick={check} disabled={checking}>{checking ? '检查中…' : '检查更新'}</Button>
       {result && (
-        <div className="text-sm text-slate-700">
+        <div className="text-sm text-slate-700" role="status">
           {result}
           {isNewer && url && (
             <div className="mt-2 space-y-2">
               {asset && (
-                <Button size="sm" onClick={() => window.open(asset.downloadUrl, '_blank')}>⬇ 下载 {asset.name}</Button>
+                <Button size="sm" onClick={() => window.open(asset.downloadUrl, '_blank', 'noopener,noreferrer')}>下载 {asset.name}</Button>
               )}
               <div>
-                <Button size="sm" variant="outline" onClick={() => window.open(url, '_blank')}>查看 Release 全部资产</Button>
+                <Button size="sm" variant="outline" onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}>查看 Release 全部资产</Button>
               </div>
             </div>
           )}
@@ -223,12 +286,11 @@ function UpdateSection() {
 
 function PrivacySection() {
   return (
-    <div className="space-y-2 text-sm text-slate-600">
-      <p>· 所有资产数据仅保存在你自己的电脑本地，不上传服务器。</p>
-      <p>· 无 analytics / telemetry / 广告 SDK。</p>
-      <p>· 「AI 分析」为本地规则算法，不联网、不调用第三方 LLM。</p>
-      <p>· 唯一联网行为：用户主动「检查更新」时访问 GitHub API。</p>
-      <p>· 日志不记录任何金额/资产数据。</p>
+    <div className="space-y-4 text-sm text-slate-600">
+      <div className="settings-note"><h3>本地核心数据</h3><p>资产、历史和报告保存在当前设备使用的本地存储中。当前应用未集成广告或遥测 SDK；核心财富功能可离线使用。</p></div>
+      <div className="settings-note"><h3>AI 与联网边界</h3><p>AI 默认关闭。Web/PWA 只会连接你自己配置的 HTTPS 网关或本机端点，并且必须逐次授权数据范围后才会发送所选事实；凭据只保留在当前会话。桌面端运行时尚未接入，会明确提示不可用，也不会保存任何凭据。普通备份不含 AI 附注。主动检查更新会访问 GitHub API，下载与查看 Release 会打开外部页面。</p></div>
+      <div className="settings-note"><h3>界面隐藏与分享</h3><p>顶部金额隐藏用于遮挡界面，不代表数据加密。导出、分享和备份需单独检查内容并选择适用的脱敏选项；备份文件可能包含完整数据。</p></div>
+      <div className="settings-note"><h3>本地活动日志</h3><p>活动日志记录操作时间、实体与描述；部分渠道结构操作的描述可能包含渠道名称和金额。分享备份或诊断内容前请检查，不应视为完全匿名。</p></div>
     </div>
   );
 }
@@ -239,7 +301,7 @@ function AboutSection() {
     <div className="space-y-2 text-sm text-slate-600">
       <div className="flex items-center gap-2">
         <span className="text-2xl" aria-hidden>🌱</span>
-        <span className="font-semibold text-slate-800">财富成长记 / 财富梦想实现家</span>
+        <span className="font-semibold text-slate-800">财富成长记 / Wealth Growth Tracker</span>
       </div>
       <p>本地优先的个人财富管理工具（Local-First, Privacy-First）。</p>
       <div className="bg-slate-50 rounded-lg p-3 space-y-1 text-xs text-slate-600">

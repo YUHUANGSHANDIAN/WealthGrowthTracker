@@ -23,11 +23,11 @@ function Field({
       </label>
       {children}
       {error ? (
-        <p className="text-xs text-red-600" role="alert">
+        <p id={htmlFor ? htmlFor + '-error' : undefined} className="text-xs text-red-600" role="alert">
           {error}
         </p>
       ) : hint ? (
-        <p className="text-xs text-slate-400">{hint}</p>
+        <p id={htmlFor ? htmlFor + '-hint' : undefined} className="text-xs text-slate-400">{hint}</p>
       ) : null}
     </div>
   );
@@ -44,7 +44,7 @@ export function TextField({ label, hint, error, id, ...rest }: TextFieldProps) {
   const inputId = id ?? autoId;
   return (
     <Field label={label} hint={hint} error={error} htmlFor={inputId}>
-      <input id={inputId} className={baseInput} {...rest} />
+      <input id={inputId} aria-invalid={!!error} aria-describedby={error ? inputId+'-error' : hint ? inputId+'-hint' : undefined} className={baseInput} {...rest} />
     </Field>
   );
 }
@@ -69,6 +69,8 @@ export function MoneyField({ label, value, onChange, hint, error, id, ...rest }:
         </span>
         <input
           id={inputId}
+          aria-invalid={!!error}
+          aria-describedby={error ? inputId+'-error' : hint ? inputId+'-hint' : undefined}
           type="number"
           inputMode="decimal"
           min={0}
@@ -102,7 +104,7 @@ export function SelectField({ label, hint, error, options, id, ...rest }: Select
   const selectId = id ?? autoId;
   return (
     <Field label={label} hint={hint} error={error} htmlFor={selectId}>
-      <select id={selectId} className={baseInput} {...rest}>
+      <select id={selectId} aria-invalid={!!error} aria-describedby={error ? selectId+'-error' : hint ? selectId+'-hint' : undefined} className={baseInput} {...rest}>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
@@ -124,7 +126,7 @@ export function TextArea({ label, hint, error, id, ...rest }: TextAreaProps) {
   const areaId = id ?? autoId;
   return (
     <Field label={label} hint={hint} error={error} htmlFor={areaId}>
-      <textarea id={areaId} className={`${baseInput} resize-none`} rows={3} {...rest} />
+      <textarea id={areaId} aria-invalid={!!error} aria-describedby={error ? areaId+'-error' : hint ? areaId+'-hint' : undefined} className={`${baseInput} resize-none`} rows={3} {...rest} />
     </Field>
   );
 }

@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useAppStore } from '../../store/appStore';
+import { beginLedgerMaintenance, useAppStore } from '../../store/appStore';
 import { Card, Button, Badge } from '../../components/ui/primitives';
 import { Modal, ConfirmDialog } from '../../components/ui/Modal';
 import { storageService, getDocumentsDir, getDefaultDataDir, openPathInSystem } from '../../services/storage';
-import { readStorageConfig, writeStorageConfig, migrateDataRoot, removePathAbsolute } from '../../services/storage/fs';
+import { readStorageConfig, writeStorageConfig, migrateDataRoot, type DataRootConfig } from '../../services/storage/fs';
 import { TextField } from '../../components/ui/form';
 import { validateDataRootMigration } from '../../services/storage/migrate';
+import { StorageRootSwitchError, switchStorageRootConfig } from '../../services/storage/rootSwitch';
+import { restoreWithReadback } from '../../services/storage/restore';
 import { parseBackup } from '../../services/export';
 import { downloadCSV } from '../../components/charts/export';
 import { buildChannelsCsv, buildHistoryCsv } from '../../utils/dataCsv';
@@ -17,6 +19,11 @@ import { planBackfill, monthlyCoverageByYear } from '../reports/backfill';
 import { buildAnonymousDiagnostic } from '../../utils/anonymousDiagnostic';
 import { buildMaintenanceActions, type MaintenanceAction } from '../../utils/maintenance';
 import { saveTextFile, backupFilename } from '../../services/export/download';
+import { AIActionButton } from '../ai/AIActionButton';
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
 
 export function DataPanel() {
   const { exportData, importData, applyDataFixes, pushToast, hydrate, runMonthlyBackfill } = useAppStore();
@@ -43,6 +50,7 @@ export function DataPanel() {
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [backfillPreviewOpen, setBackfillPreviewOpen] = useState(false);
+  const [backfillBaseRevision, setBackfillBaseRevision] = useState<number | null>(null);
   const [dataRootMode, setDataRootMode] = useState<'default' | 'custom'>('default');
   const [storageModalOpen, setStorageModalOpen] = useState(false);
 
@@ -63,57 +71,84 @@ export function DataPanel() {
 
   useEffect(() => {
     if (!isDesktop) return;
+    let active = true;
     void (async () => {
-      const dir = await getDocumentsDir();
-      if (dir) setDataPath(dir);
-      const cfg = await readStorageConfig();
-      if (cfg) setDataRootMode(cfg.dataRootMode);
+      try {
+        const dir = await getDocumentsDir();
+        if (active && dir) setDataPath(dir);
+        const cfg = await readStorageConfig();
+        if (active && cfg) setDataRootMode(cfg.dataRootMode);
+      } catch {
+        if (active) pushToast('无法读取存储位置，请检查配置与权限', 'error');
+      }
     })();
-  }, [isDesktop]);
+    return () => { active = false; };
+  }, [isDesktop, pushToast]);
 
   async function refreshBackups() {
     const mgr = storageService.getDesktopManager();
-    if (mgr) setBackups(await mgr.listBackups());
+    try {
+      if (mgr) setBackups(await mgr.listBackups());
+      return true;
+    } catch {
+      pushToast('无法读取备份列表，请检查目录权限', 'error');
+      return false;
+    }
   }
 
   async function handleExport() {
-    await exportData();
+    try { await exportData(); } catch { pushToast('导出失败，请检查目标位置与权限', 'error'); }
   }
 
   async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const text = await file.text();
-    const result = parseBackup(text);
-    if (!result.ok) {
-      pushToast(result.error, 'error');
-    } else {
-      const merge = previewMerge(
-        { channels, history, reports },
-        { channels: result.data.channels, history: result.data.history, reports: result.data.reports },
-      );
-      setPreview({ text, channels: result.data.channels.length, history: result.data.history.length, reports: result.data.reports.length, merge });
+    try {
+      if (file.size > 32 * 1024 * 1024) throw new Error('JSON 文件超过 32 MiB 限制');
+      const text = await file.text();
+      const result = parseBackup(text);
+      if (!result.ok) {
+        pushToast(result.error, 'error');
+      } else {
+        const merge = previewMerge(
+          { channels, history, reports },
+          { channels: result.data.channels, history: result.data.history, reports: result.data.reports },
+        );
+        setPreview({ text, channels: result.data.channels.length, history: result.data.history.length, reports: result.data.reports.length, merge });
+      }
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : '无法读取导入文件', 'error');
+    } finally {
+      e.target.value = '';
     }
-    e.target.value = '';
   }
 
   async function doImport(mode: 'replace' | 'merge') {
     if (!preview) return;
     setImporting(true);
-    const res = await importData(preview.text, mode);
-    setImporting(false);
-    setPreview(null);
-    pushToast(res.message, res.ok ? 'success' : 'error');
+    try {
+      const res = await importData(preview.text, mode);
+      if (res.ok) setPreview(null);
+      pushToast(res.message, res.ok ? 'success' : 'error');
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : '导入失败，请检查保存状态', 'error');
+    } finally { setImporting(false); }
   }
 
   async function doManualBackup() {
     const mgr = storageService.getDesktopManager();
     if (!mgr) return;
     setBusy(true);
-    const name = await mgr.backupNow(true);
-    setBusy(false);
-    pushToast(name ? `已创建手动备份 ${name}` : '备份失败（尚无数据）', name ? 'success' : 'error');
-    await refreshBackups();
+    let release: (() => void) | undefined;
+    try {
+      release = beginLedgerMaintenance('正在创建备份');
+      await storageService.flush();
+      const name = await mgr.backupNow(true);
+      pushToast(name ? `已创建手动备份 ${name}` : '尚无可备份主文件', name ? 'success' : 'error');
+      await refreshBackups();
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : '创建备份失败', 'error');
+    } finally { release?.(); setBusy(false); }
   }
 
   async function doRestore() {
@@ -121,15 +156,21 @@ export function DataPanel() {
     const mgr = storageService.getDesktopManager();
     if (!mgr) return;
     setBusy(true);
+    let release: (() => void) | undefined;
     try {
-      await mgr.restoreBackup(confirmRestore);
-      await storageService.reload();
-      await hydrate();
+      release = beginLedgerMaintenance('正在恢复备份');
+      await restoreWithReadback({
+        drain: () => storageService.flush(), pause: () => storageService.pauseWrites(),
+        resume: () => storageService.resumeWrites(), restore: () => mgr.restoreBackup(confirmRestore),
+        reload: () => storageService.reload(), hydrate,
+        enterRecovery: message => useAppStore.setState({ hydrated: false, recoveryError: message, saveStatus: 'error' }),
+      });
       pushToast('已从备份恢复，数据已刷新', 'success');
     } catch (err) {
       console.error('[data] 恢复失败:', err);
-      pushToast('恢复失败', 'error');
+      pushToast(errorMessage(err, '恢复失败，请检查恢复界面'), 'error');
     } finally {
+      release?.();
       setBusy(false);
       setConfirmRestore(null);
       setRestoreOpen(false);
@@ -137,8 +178,10 @@ export function DataPanel() {
   }
 
   async function doFix() {
-    const res = await applyDataFixes();
-    pushToast(res.fixed > 0 ? `已安全修复 ${res.fixed} 类问题（修复前已自动备份）` : '无需修复', 'success');
+    try {
+      const res = await applyDataFixes();
+      pushToast(res.fixed > 0 ? `已修复 ${res.fixed} 类问题` : '无需修复', 'success');
+    } catch (error) { pushToast(errorMessage(error, '修复失败，请检查保存状态'), 'error'); }
   }
 
   function exportCsv(kind: 'channels' | 'history') {
@@ -170,26 +213,46 @@ export function DataPanel() {
   async function doMigrateDataRoot(target: string, mode: 'custom' | 'default'): Promise<string | null> {
     const validation = validateDataRootMigration(dataPath, target);
     if (!validation.ok) return validation.reason ?? '路径非法';
+    let recovered = true;
+    let release: (() => void) | undefined;
     try {
+      release = beginLedgerMaintenance('正在迁移数据目录');
+      const previousConfig = await readStorageConfig();
+      if (!previousConfig) throw new Error('无法读取原存储配置');
       await storageService.flush();
+      storageService.pauseWrites();
       const mgr = storageService.getDesktopManager();
       if (mgr) await mgr.backupNow(true); // 迁移前备份，随数据树一起复制
       await migrateDataRoot(dataPath, target);
-      await writeStorageConfig({
+      const nextConfig: DataRootConfig = {
         dataRootMode: mode,
         ...(mode === 'custom' ? { customDataRoot: target } : {}),
         updatedAt: new Date().toISOString(),
+      };
+      await switchStorageRootConfig(previousConfig, nextConfig, {
+        writeConfig: writeStorageConfig,
+        verifyCurrentRoot: async () => {
+          await storageService.reload();
+          // Hydration may perform upgrade writes only after the root reads successfully.
+          storageService.resumeWrites();
+          await hydrate();
+        },
       });
-      await storageService.reload();
-      await hydrate();
-      await removePathAbsolute(dataPath); // 成功后才删除旧根
       setDataPath(target);
       setDataRootMode(mode);
       return null; // 成功
     } catch (err) {
-      // 迁移失败：config 仍指向旧目录，旧数据未删除
       console.error('[storage] 迁移失败:', err);
-      return `迁移失败：${String(err)}（原数据未受影响）`;
+      if (err instanceof StorageRootSwitchError && !err.restored) {
+        recovered = false;
+        storageService.pauseWrites();
+        useAppStore.setState({ hydrated: false, recoveryError: '迁移读回与配置恢复均失败。请保留新旧目录并修复存储配置后重新读取。' });
+        return '迁移读回与配置恢复均失败，请停止编辑，并保留新旧目录用于恢复。';
+      }
+      return `迁移失败：${String(err)}。新旧目录均保留。`;
+    } finally {
+      if (recovered && !useAppStore.getState().recoveryError) storageService.resumeWrites();
+      release?.();
     }
   }
 
@@ -237,7 +300,8 @@ export function DataPanel() {
             )}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => setBackfillPreviewOpen(true)}>📅 预览补生成缺失月报</Button>
+            <Button size="sm" variant="outline" onClick={() => { setBackfillBaseRevision(useAppStore.getState().dataRevision); setBackfillPreviewOpen(true); }}>📅 预览补生成缺失月报</Button>
+            <AIActionButton task="data-health-explanation">AI 解释覆盖指标</AIActionButton>
             <Button size="sm" variant="outline" onClick={() => void exportAnonymousDiagnostic()}>🩺 导出匿名诊断</Button>
           </div>
         </div>
@@ -268,7 +332,7 @@ export function DataPanel() {
             <Button size="sm" variant="outline" onClick={() => void openPathInSystem('')}>📂 打开数据文件夹</Button>
             <Button size="sm" variant="outline" onClick={() => void openPathInSystem('backups')}>🗄 打开备份文件夹</Button>
             <Button size="sm" variant="outline" onClick={() => void doManualBackup()} disabled={busy}>💾 立即备份</Button>
-            <Button size="sm" variant="outline" onClick={() => { void refreshBackups().then(() => setRestoreOpen(true)); }}>♻ 从备份恢复</Button>
+            <Button size="sm" variant="outline" onClick={() => { void refreshBackups().then(ok => { if (ok) setRestoreOpen(true); }); }} disabled={busy}>♻ 从备份恢复</Button>
           </div>
         </Card>
       )}
@@ -324,7 +388,7 @@ export function DataPanel() {
             </div>
             <p className="text-xs text-slate-500">合并导入：新数据加入，冲突保留当前数据。覆盖导入：完全替换当前数据。</p>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
-              ⚠️ 导入前已自动创建当前数据的备份。
+              确认导入时会先保存当前数据；桌面版随后创建并验证备份，备份失败会中止导入。
             </div>
           </div>
         )}
@@ -345,7 +409,7 @@ export function DataPanel() {
       <ConfirmDialog
         open={confirmRestore !== null}
         title="确认恢复备份"
-        message={`确定用备份「${confirmRestore ?? ''}」覆盖当前数据吗？建议恢复前先手动备份当前数据。`}
+        message={`确定用备份「${confirmRestore ?? ''}」替换当前数据吗？恢复前会排空写入并保留原主文件；完成后读回验证。`}
         confirmLabel="恢复"
         onCancel={() => setConfirmRestore(null)}
         onConfirm={() => void doRestore()}
@@ -356,9 +420,15 @@ export function DataPanel() {
         plan={backfillPlan}
         onClose={() => setBackfillPreviewOpen(false)}
         onRun={() => {
-          const r = runMonthlyBackfill();
-          setBackfillPreviewOpen(false);
-          pushToast(`补生成 ${r.created.length} 份、修复 ${r.repaired.length} 份历史月报`, 'success');
+          void (async () => {
+            try {
+              const r = await runMonthlyBackfill(backfillBaseRevision ?? useAppStore.getState().dataRevision);
+              setBackfillPreviewOpen(false);
+              pushToast(`补生成 ${r.created.length} 份、修复 ${r.repaired.length} 份历史月报`, 'success');
+            } catch (error) {
+              pushToast(error instanceof Error ? error.message : '月报补全失败，请重试', 'error');
+            }
+          })();
         }}
       />
 
@@ -451,7 +521,7 @@ function StorageLocationModal({ open, currentRoot, onClose, onMigrate }: {
         </div>
         <TextField label="新数据目录（绝对路径）" value={target} onChange={(e) => setTarget(e.target.value)} error={error} placeholder="例如：D:\\WealthData" autoFocus />
         <p className="text-xs text-slate-400">
-          迁移会复制整个数据目录树（data/ reports/ backups/ exports/ 等），校验通过后才删除旧目录；失败自动回滚，原数据不受影响。目标目录应为空或尚不存在。
+          迁移会复制整个数据目录树并读回校验。旧目录保留，确认新位置可用后请手动清理。目标目录应为空或尚不存在，且父目录已存在。
         </p>
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
           ⚠️ 迁移前会先创建备份并随数据一起复制到新位置。请勿在迁移过程中关闭应用。

@@ -15,6 +15,7 @@ import { MoneyField, TextField, SelectField } from '../../components/ui/form';
 import { SliderField } from '../../components/ui/Slider';
 import { LineChart } from '../../components/charts/LineChart';
 import { PREDICTION } from '../../components/charts/palette';
+import { AIActionButton } from '../ai/AIActionButton';
 
 const GOAL_ICONS = ['🎯', '💵', '🏠', '🚗', '✈️', '💎', '🎓', '💍', '🏖️', '🍼', '📱', '🎁'];
 const GOAL_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#06B6D4', '#EC4899', '#D4AF37'];
@@ -85,6 +86,7 @@ export function GoalsPanel() {
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => triggerCoinRain()}>🪙 金币雨</Button>
             <Button variant="outline" size="sm" onClick={() => useNavigationStore.getState().navigate({ tab: 'prediction', goalId: primary?.id })}>🔭 查看预测</Button>
+            {primary && <AIActionButton task="goal-scenario" goalId={primary.id}>AI 解释目标情景</AIActionButton>}
             <Button variant="outline" size="sm" onClick={() => setEditor({ open: true, goal: primary })}>✎ 编辑主目标</Button>
           </div>
         </div>

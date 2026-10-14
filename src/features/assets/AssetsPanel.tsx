@@ -10,6 +10,8 @@ import { Modal, ConfirmDialog } from '../../components/ui/Modal';
 import { TextField, SelectField } from '../../components/ui/form';
 import { ChannelItem, type AmountTarget, type ChannelHandlers } from './ChannelItem';
 import { ChannelFormModal, SubChannelFormModal, AmountModal, FirstChildModal, LastChildModal } from './channelModals';
+import { AmountBatchModal } from './AmountBatchModal';
+import { AIActionButton } from '../ai/AIActionButton';
 import type { FirstChildStrategy, LastChildStrategy } from '../../utils/channels';
 import type { ChannelGrowth } from '../../types';
 
@@ -66,6 +68,8 @@ export function AssetsPanel() {
     updateSubChannelInfo,
     deleteSubChannel,
     setAmount,
+    prepareAmountBatch,
+    confirmAmountBatch,
     addSortRule,
     deleteSortRule,
     recordSortHistory,
@@ -80,6 +84,7 @@ export function AssetsPanel() {
   const [multiOpen, setMultiOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [levelExplorerOpen, setLevelExplorerOpen] = useState(false);
+  const [amountBatchOpen, setAmountBatchOpen] = useState(false);
   const [subSort, setSubSort] = useState<{ field: 'amount' | 'name' | 'g7d' | 'g30d' | 'g90d' | 'g365d'; direction: 'asc' | 'desc' }>({ field: 'amount', direction: 'desc' });
 
   // 渠道表单
@@ -223,6 +228,10 @@ export function AssetsPanel() {
         <Button variant="outline" size="sm" onClick={() => setMultiOpen(true)}>
           ⇶ 多维排序
         </Button>
+        <Button variant="outline" size="sm" onClick={() => setAmountBatchOpen(true)}>
+          批量更新金额
+        </Button>
+        <AIActionButton task="entry-draft">AI 余额录入草稿</AIActionButton>
         {sortConfig.mode === 'smart' && (
           <select
             value={smartSortConfig.timeRange ?? '30d'}
@@ -302,6 +311,14 @@ export function AssetsPanel() {
         onClose={() => setAmountForm((s) => ({ ...s, open: false }))}
         onSubmit={(amount) => setAmount(amountForm.target, amount)}
       />
+      {amountBatchOpen && (
+        <AmountBatchModal
+          channels={channels}
+          onClose={() => setAmountBatchOpen(false)}
+          onPrepare={prepareAmountBatch}
+          onConfirm={confirmAmountBatch}
+        />
+      )}
       <ConfirmDialog
         open={deleteConfirm.open}
         title={deleteConfirm.title}

@@ -52,7 +52,7 @@ export function BarChart({
           </div>
           <div className="w-32 sm:w-40 shrink-0 text-right text-sm tabular">
             <span className="font-medium text-slate-700">{valueFormatter(item.value)}</span>
-            {item.hint && <span className="text-slate-400 ml-1 text-xs">{item.hint}</span>}
+            {item.hint && <span className="text-slate-500 ml-1 text-xs">{item.hint}</span>}
           </div>
         </div>
       ))}

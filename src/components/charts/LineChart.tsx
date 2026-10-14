@@ -4,7 +4,7 @@ import { CHART_INK } from './palette';
 
 export interface LineChartPoint {
   date: string;
-  value: number;
+  value: number | null;
   lower?: number;
   upper?: number;
 }
@@ -83,7 +83,7 @@ export function LineChart({
     const values: number[] = [];
     for (const s of series) {
       for (const p of s.points) {
-        values.push(p.value);
+        if (p.value !== null && Number.isFinite(p.value)) values.push(p.value);
         if (p.lower !== undefined) values.push(p.lower);
         if (p.upper !== undefined) values.push(p.upper);
       }
@@ -115,13 +115,13 @@ export function LineChart({
               return {
                 date: p.date,
                 x: xScale(e),
-                y: yScale(p.value),
+                y: p.value === null || !Number.isFinite(p.value) ? NaN : yScale(p.value),
                 value: p.value,
                 lower: p.lower !== undefined ? yScale(p.lower) : undefined,
                 upper: p.upper !== undefined ? yScale(p.upper) : undefined,
               };
             })
-            .filter((p) => Number.isFinite(p.y)),
+,
         };
       }
       // 单日退化：按索引均匀展开
@@ -131,7 +131,7 @@ export function LineChart({
         pts: s.points.map((p, i) => ({
           date: p.date,
           x: M.left + ((i + 0.5) / n) * (W - M.left - M.right),
-          y: yScale(p.value),
+          y: p.value === null || !Number.isFinite(p.value) ? NaN : yScale(p.value),
           value: p.value,
           lower: p.lower !== undefined ? yScale(p.lower) : undefined,
           upper: p.upper !== undefined ? yScale(p.upper) : undefined,
@@ -147,7 +147,7 @@ export function LineChart({
     return { allDates, minDate, maxDate, spanDays, xScale, yScale, yTicks, xTicks, plotted, allElapsed };
   }, [series, referenceLines]);
 
-  function onMove(e: React.MouseEvent<SVGRectElement>) {
+  function onMove(e: React.PointerEvent<SVGRectElement>) {
     const svg = svgRef.current;
     if (!svg) return;
     const rect = svg.getBoundingClientRect();
@@ -167,11 +167,15 @@ export function LineChart({
     }
     if (!nearest) return;
 
+    showTip(nearest.date, model.spanDays > 0 ? model.xScale(nearest.e) : model.xScale(0), py);
+  }
+
+  function showTip(date: string, px: number, py: number) {
     const rows = model.plotted
       .filter((s) => !hidden.has(s.id))
       .map((s) => {
         const sorted = [...s.pts].sort((a, b) => (a.date < b.date ? -1 : 1));
-        const idx = sorted.findIndex((p) => p.date === nearest.date);
+        const idx = sorted.findIndex((p) => p.date === date);
         if (idx < 0) return { id: s.id, name: s.name, color: s.color, value: null, delta: null };
         const cur = sorted[idx]!;
         const prev = idx > 0 ? sorted[idx - 1]! : null;
@@ -180,13 +184,13 @@ export function LineChart({
           name: s.name,
           color: s.color,
           value: cur.value,
-          lower: cur.lower !== undefined ? cur.lower : undefined,
-          upper: cur.upper !== undefined ? cur.upper : undefined,
-          delta: prev ? cur.value - prev.value : null,
+          lower: s.points.find(p => p.date === date)?.lower,
+          upper: s.points.find(p => p.date === date)?.upper,
+          delta: prev && prev.value !== null && cur.value !== null ? cur.value - prev.value : null,
         };
       });
 
-    setTip({ px, py, date: nearest.date, rows });
+    setTip({ px, py, date, rows });
   }
 
   function toggle(id: string) {
@@ -198,10 +202,19 @@ export function LineChart({
     });
   }
 
-  const visibleSeries = model.plotted.filter((s) => !hidden.has(s.id));
+  const visibleSeries = model.plotted.filter(s => !hidden.has(s.id)).flatMap(s => {
+    const segments: (typeof s.pts)[] = [];
+    let segment: typeof s.pts = [];
+    for (const point of s.pts) {
+      if (Number.isFinite(point.y)) segment.push(point);
+      else if (segment.length) {segments.push(segment); segment=[];}
+    }
+    if(segment.length) segments.push(segment);
+    return segments.map((pts,index)=>({...s,id:s.id+':'+index,pts}));
+  });
 
   return (
-    <div className="relative" role="img" aria-label={ariaLabel}>
+    <div className="relative" role="group" aria-label={ariaLabel}>
       {model.plotted.length > 1 && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2 px-1">
           {model.plotted.map((s) => (
@@ -223,7 +236,18 @@ export function LineChart({
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
         className="w-full h-auto"
-        onMouseLeave={() => setTip(null)}
+        role="img"
+        aria-label={ariaLabel+'；方向键浏览日期，展开下方数据表读取数值'}
+        tabIndex={0}
+        onPointerLeave={() => setTip(null)}
+        onKeyDown={event=>{
+          if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+          event.preventDefault();
+          const current=model.allDates.indexOf(tip?.date??'');
+          const index=event.key==='Home'?0:event.key==='End'?model.allDates.length-1:Math.max(0,Math.min(model.allDates.length-1,current+(event.key==='ArrowLeft'?-1:1)));
+          const date=model.allDates[index];
+          if(date)showTip(date,model.xScale(daysBetweenDates(model.minDate,date)),M.top+30);
+        }}
       >
         {/* 网格与 y 轴刻度 */}
         {model.yTicks.map((t) => (
@@ -320,19 +344,19 @@ export function LineChart({
           </g>
         )}
 
-        <rect x={M.left} y={M.top} width={W - M.left - M.right} height={H - M.top - M.bottom} fill="transparent" onMouseMove={onMove} />
+        <rect x={M.left} y={M.top} width={W - M.left - M.right} height={H - M.top - M.bottom} fill="transparent" onPointerMove={onMove} onPointerDown={onMove} />
       </svg>
 
       {tip && (
         <div
-          className="absolute z-10 pointer-events-none bg-white border border-slate-200 rounded-lg shadow-lg px-3 py-2 text-xs min-w-[160px]"
+          role="status" aria-live="polite" className="absolute z-10 pointer-events-none bg-white border border-slate-200 rounded-lg shadow-lg px-3 py-2 text-xs min-w-[160px]"
           style={{
             left: Math.min(Math.max((tip.px / W) * 100, 18), 82) + '%',
             top: Math.max(8, tip.py - 20),
             transform: 'translateX(-50%)',
           }}
         >
-          <div className="text-slate-400 tabular mb-1">{tip.date}</div>
+          <div className="text-slate-500 tabular mb-1">{tip.date}</div>
           {tip.rows.map((r) => (
             <div key={r.id} className="flex items-center gap-1.5 whitespace-nowrap">
               <span className="w-2 h-2 rounded-full" style={{ background: r.color }} aria-hidden />
@@ -346,12 +370,13 @@ export function LineChart({
             </div>
           ))}
           {tip.rows.some((r) => r.lower !== undefined) && (
-            <div className="text-[10px] text-slate-400 mt-1 border-t border-slate-100 pt-1">
+            <div className="text-[10px] text-slate-500 mt-1 border-t border-slate-100 pt-1">
               95% 区间见阴影带
             </div>
           )}
         </div>
       )}
+      <details className="mt-3 text-xs"><summary className="cursor-pointer py-2">查看图表数据表</summary><div className="overflow-x-auto"><table className="w-full text-left"><caption className="sr-only">{ariaLabel}</caption><thead><tr><th scope="col">日期</th>{series.map(s=><th scope="col" key={s.id}>{s.name}</th>)}</tr></thead><tbody>{model.allDates.map(date=><tr key={date}><th scope="row">{date}</th>{series.map(s=>{const value=s.points.find(p=>p.date===date)?.value;return <td className="tabular" key={s.id}>{value==null||!Number.isFinite(value)?'未知':valueFormatter(value)}</td>;})}</tr>)}</tbody></table></div></details>
     </div>
   );
 }

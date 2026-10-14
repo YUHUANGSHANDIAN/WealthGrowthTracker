@@ -9,7 +9,7 @@ type Size = 'sm' | 'md' | 'lg';
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    'bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:ring-emerald-500 shadow-sm',
+    'bg-emerald-700 text-white hover:bg-emerald-800 focus-visible:ring-emerald-500 shadow-sm',
   secondary:
     'bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-blue-500 shadow-sm',
   ghost:
@@ -46,7 +46,7 @@ export function Card({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={`bg-white rounded-2xl border border-slate-200/80 shadow-sm ${className}`}
+      className={`ui-card bg-white rounded-2xl border border-slate-200/80 shadow-sm ${className}`}
       {...rest}
     >
       {children}
