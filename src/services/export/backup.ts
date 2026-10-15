@@ -30,7 +30,7 @@ import { getLevelByAmount } from '../../constants/levels';
 import { defaultLotteryState } from '../../features/lottery/lotteryMath';
 
 export const BACKUP_VERSION = APP_VERSION;
-export const APP_NAME = '财富成长记';
+export const APP_NAME = 'WealthGrowthTracker';
 
 /** 导出/导入时需要用到的完整应用状态（由 store 提供）。 */
 export interface BackupSource {

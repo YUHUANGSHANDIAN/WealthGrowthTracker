@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "财富成长记",
+        "title": "WealthGrowthTracker",
         "width": 1200,
         "height": 800,
         "minWidth": 920,

@@ -25,7 +25,7 @@ export function LockScreen() {
       <div className="w-full max-w-xs bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
         <div className="text-center mb-4">
           <div className="text-4xl mb-2" aria-hidden>{account?.avatarEmoji ?? '🔒'}</div>
-          <h1 className="text-lg font-semibold text-slate-800">{account?.displayName ?? '财富成长记'}</h1>
+        <h1 className="text-lg font-semibold text-slate-800">{account?.displayName ?? 'WealthGrowthTracker'}</h1>
           <p className="text-xs text-slate-400">已锁定 · 请输入{account?.lockMethod === 'pin' ? ' PIN 码' : '密码'}</p>
         </div>
         <div className="space-y-3">

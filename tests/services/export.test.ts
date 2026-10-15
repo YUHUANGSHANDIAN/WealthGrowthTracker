@@ -30,7 +30,7 @@ describe('导出 / 导入（数据兼容核心）', () => {
     const src = makeSource();
     const backup = buildBackup(src);
     expect(backup.version).toBe(BACKUP_VERSION);
-    expect(backup.appInfo.name).toBe('财富成长记');
+    expect(backup.appInfo.name).toBe('WealthGrowthTracker');
 
     const text = JSON.stringify(backup);
     const parsed = parseBackup(text);

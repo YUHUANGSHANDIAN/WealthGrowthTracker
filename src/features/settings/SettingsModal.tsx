@@ -301,7 +301,7 @@ function AboutSection() {
     <div className="space-y-2 text-sm text-slate-600">
       <div className="flex items-center gap-2">
         <span className="text-2xl" aria-hidden>🌱</span>
-        <span className="font-semibold text-slate-800">财富成长记 / Wealth Growth Tracker</span>
+          <span className="font-semibold text-slate-800">WealthGrowthTracker（财富成长记）</span>
       </div>
       <p>本地优先的个人财富管理工具（Local-First, Privacy-First）。</p>
       <div className="bg-slate-50 rounded-lg p-3 space-y-1 text-xs text-slate-600">

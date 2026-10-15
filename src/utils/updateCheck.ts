@@ -1,5 +1,6 @@
 import { compareSemVer } from './auth';
 import { platformCapabilities, type PlatformCapabilities } from './platform';
+import { APP_REPOSITORY, UPDATE_CHECK_REPOSITORIES } from '../constants/brand';
 
 export interface ReleaseAsset {
   name: string;
@@ -16,26 +17,34 @@ export interface UpdateCheckResult {
   assets: ReleaseAsset[];
 }
 
-const REPO = 'YUHUANGSHANDIAN/wealth-growth-tracker';
-const API = `https://api.github.com/repos/${REPO}/releases/latest`;
+const releaseApi = (repo: string) => `https://api.github.com/repos/${repo}/releases/latest`;
 
 /**
  * 手动检查更新：仅在用户主动点击时联网查询 GitHub Releases（不发送任何资产/个人数据）。
  */
 export async function checkForUpdate(current: string): Promise<UpdateCheckResult> {
-  const res = await fetch(API, { headers: { Accept: 'application/vnd.github+json' } });
-  if (!res.ok) throw new Error(`检查更新失败（HTTP ${res.status}）`);
-  const data = (await res.json()) as { tag_name: string; html_url: string; body: string; published_at: string; assets: { name: string; browser_download_url: string }[] };
-  const latest = data.tag_name.replace(/^v/, '');
-  return {
-    current,
-    latest,
-    isNewer: compareSemVer(latest, current) > 0,
-    url: data.html_url,
-    notes: data.body ?? '',
-    publishedAt: data.published_at,
-    assets: (data.assets ?? []).map((a) => ({ name: a.name, downloadUrl: a.browser_download_url })),
-  };
+  let lastError: unknown = null;
+  // 仓库改名后先请求新 slug；失败再回退旧 slug（GitHub 对改名仓库提供 301 重定向）。
+  for (const repo of UPDATE_CHECK_REPOSITORIES) {
+    try {
+      const res = await fetch(releaseApi(repo), { headers: { Accept: 'application/vnd.github+json' } });
+      if (!res.ok) { lastError = new Error(`检查更新失败（HTTP ${res.status}）`); continue; }
+      const data = (await res.json()) as { tag_name: string; html_url: string; body: string; published_at: string; assets: { name: string; browser_download_url: string }[] };
+      const latest = data.tag_name.replace(/^v/, '');
+      return {
+        current,
+        latest,
+        isNewer: compareSemVer(latest, current) > 0,
+        url: data.html_url,
+        notes: data.body ?? '',
+        publishedAt: data.published_at,
+        assets: (data.assets ?? []).map((a) => ({ name: a.name, downloadUrl: a.browser_download_url })),
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('检查更新失败');
 }
 
 /** 按当前平台推荐对应资产（Android→APK，macOS→DMG，Linux→AppImage/DEB，Windows→EXE）。 */
@@ -64,5 +73,5 @@ export function recommendAsset(assets: ReleaseAsset[], caps: PlatformCapabilitie
 }
 
 export function releasePageUrl(): string {
-  return `https://github.com/${REPO}/releases`;
+  return `https://github.com/${APP_REPOSITORY}/releases`;
 }
