@@ -2,7 +2,16 @@ import { isTauri } from '../storage/fs';
 
 export type ProviderId = 'openai' | 'copilot' | 'anthropic' | 'deepseek' | 'ollama' | 'lmstudio' | 'gateway';
 export type AuthKind = 'api-key' | 'local' | 'copilot-subscription' | 'openai-subscription';
-export type AITask = 'report-interpretation' | 'analysis-question' | 'entry-draft' | 'data-health-explanation' | 'goal-scenario';
+export type AITask =
+  | 'report-interpretation'
+  | 'analysis-question'
+  | 'entry-draft'
+  | 'data-health-explanation'
+  | 'goal-scenario'
+  | 'document-extraction'
+  | 'attribution-explanation'
+  | 'research-summary'
+  | 'monthly-narrative';
 export interface ConnectionProfile {
   profileId: string;
   providerId: ProviderId;

@@ -12,6 +12,10 @@ const TASKS = new Set([
   "entry-draft",
   "data-health-explanation",
   "goal-scenario",
+  "document-extraction",
+  "attribution-explanation",
+  "research-summary",
+  "monthly-narrative",
 ]);
 const PROVIDERS = new Set([
   "openai",
