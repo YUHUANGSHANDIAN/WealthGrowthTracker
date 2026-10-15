@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { isSettingsSection, type SettingsSectionId } from '../constants/settings';
-export const TAB_IDS = ['overview','assets','history','reports','analysis','prediction','goals','lottery','data','ai','settings'] as const;
+export const TAB_IDS = ['overview','assets','history','reports','analysis','monthly','prediction','goals','lottery','data','ai','settings'] as const;
 export type TabId = typeof TAB_IDS[number];
 export interface Route { tab: TabId; reportId?: string; channelId?: string; lotteryProjectId?: string; goalId?: string; startDate?: string; endDate?: string; historyDate?: string; healthFilter?: string; settingsSection?: SettingsSectionId }
 const EMPTY: Route = {tab:'overview',reportId:undefined,channelId:undefined,lotteryProjectId:undefined,goalId:undefined,startDate:undefined,endDate:undefined,historyDate:undefined,healthFilter:undefined,settingsSection:undefined};

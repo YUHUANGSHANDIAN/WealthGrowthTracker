@@ -6,6 +6,7 @@ export const NAV_ITEMS = [
   { id: 'history', label: '历史' },
   { id: 'reports', label: '报告' },
   { id: 'analysis', label: '分析' },
+  { id: 'monthly', label: '月度理财' },
   { id: 'prediction', label: '预测' },
   { id: 'goals', label: '目标' },
   { id: 'lottery', label: '彩票' },

@@ -26,9 +26,11 @@ import { AIWorkspace } from './features/ai/AIWorkspace';
 import { MobileNavigation } from './features/workspace/MobileNavigation';
 import { MaintenanceOverlay } from './features/workspace/MaintenanceOverlay';
 import { NAV_ITEMS as TABS } from './constants/navigation';
+import { APP_BRAND } from './constants/brand';
 const HistoryPanel=lazy(()=>import('./features/history/HistoryPanel').then(m=>({default:m.HistoryPanel})));
 const ReportsPanel=lazy(()=>import('./features/reports/ReportsPanel').then(m=>({default:m.ReportsPanel})));
 const AnalysisPanel=lazy(()=>import('./features/analysis/AnalysisPanel').then(m=>({default:m.AnalysisPanel})));
+const MonthlyPlannerPanel=lazy(()=>import('./features/monthlyPlanning/MonthlyPlannerPanel').then(m=>({default:m.MonthlyPlannerPanel})));
 const PredictionPanel=lazy(()=>import('./features/prediction/PredictionPanel').then(m=>({default:m.PredictionPanel})));
 const GoalsPanel=lazy(()=>import('./features/goals/GoalsPanel').then(m=>({default:m.GoalsPanel})));
 const LotteryPanel=lazy(()=>import('./features/lottery/LotteryPanel').then(m=>({default:m.LotteryPanel})));
@@ -51,9 +53,9 @@ export default function App(){
  if(locked)return <LockScreen/>;
  return <div className={'workspace '+(collapsed?'collapsed ':'')+(amountsHidden?'privacy-hidden':'')}>
   <a className="skip-link" href="#main-content">跳到主要内容</a>
-  <aside className="workspace-sidebar" aria-label="主导航"><div className="workspace-brand"><span className="text-2xl">{level.badge}</span><div>财富成长记<small>WEALTH WORKSPACE</small></div></div><nav className="workspace-nav">{TABS.map(t=><button key={t.id} onClick={()=>navigate({tab:t.id})} aria-current={tab===t.id?'page':undefined} title={t.label}><NavIcon id={t.id}/><span className="nav-label">{t.label}</span></button>)}</nav><div className="workspace-sidebar-footer">v{APP_VERSION} · 本地财富工作台</div></aside>
+  <aside className="workspace-sidebar" aria-label="主导航"><div className="workspace-brand"><span className="text-2xl">{level.badge}</span><div>WealthGrowthTracker<small>财富成长记 · 本地财富工作台</small></div></div><nav className="workspace-nav">{TABS.map(t=><button key={t.id} onClick={()=>navigate({tab:t.id})} aria-current={tab===t.id?'page':undefined} title={t.label}><NavIcon id={t.id}/><span className="nav-label">{t.label}</span></button>)}</nav><div className="workspace-sidebar-footer">v{APP_VERSION} · {APP_BRAND}</div></aside>
   <div className="workspace-body"><header className="workspace-header"><div><h1>{TABS.find(t=>t.id===tab)?.label??'总览'}</h1><p>本地优先 · 业务日期 {todayString()}</p></div><div className="workspace-actions"><span role="status" aria-live="polite" title={saveError??undefined}>{saveStatus==='saved'?'已保存':saveStatus==='saving'?'正在保存…':saveStatus==='pending'?'等待保存':'保存失败'}</span>{saveStatus==='error'&&<button onClick={()=>void retrySave()} title={saveError??undefined}>重试保存</button>}<button onClick={()=>setSearchOpen(true)} aria-label="搜索 (Ctrl+K)">⌕ <span className="desktop-action">搜索</span></button><button onClick={togglePrivacy} aria-label={amountsHidden?'显示金额':'隐藏金额'}>{amountsHidden?'◉':'◌'}</button><button className="desktop-action" onClick={toggleSidebar} aria-label="折叠或展开导航">{collapsed?'»':'«'}</button><button onClick={()=>navigate({tab:'settings'})} aria-label="打开设置页面">⚙</button></div></header>
-   <main id="main-content" className="workspace-content"><Suspense fallback={<PanelFallback/>}>{tab==='overview'&&<OverviewPanel onOpenLevels={()=>setLevelOpen(true)}/>} {tab==='assets'&&<AssetsPanel/>}{tab==='history'&&<HistoryPanel/>}{tab==='reports'&&<ReportsPanel/>}{tab==='analysis'&&<AnalysisPanel/>}{tab==='prediction'&&<PredictionPanel/>}{tab==='goals'&&<GoalsPanel/>}{tab==='lottery'&&<LotteryPanel/>}{tab==='data'&&<DataPanel/>}{tab==='ai'&&<AISettingsPanel/>}{tab==='settings'&&<SettingsPage/>}</Suspense></main>
+   <main id="main-content" className="workspace-content"><Suspense fallback={<PanelFallback/>}>{tab==='overview'&&<OverviewPanel onOpenLevels={()=>setLevelOpen(true)}/>} {tab==='assets'&&<AssetsPanel/>}{tab==='history'&&<HistoryPanel/>}{tab==='reports'&&<ReportsPanel/>}{tab==='analysis'&&<AnalysisPanel/>}{tab==='monthly'&&<MonthlyPlannerPanel/>}{tab==='prediction'&&<PredictionPanel/>}{tab==='goals'&&<GoalsPanel/>}{tab==='lottery'&&<LotteryPanel/>}{tab==='data'&&<DataPanel/>}{tab==='ai'&&<AISettingsPanel/>}{tab==='settings'&&<SettingsPage/>}</Suspense></main>
   </div><AIWorkspace/><ToastHost/><CoinRainOverlay/><LevelUpCelebrationOverlay/><LevelExplorer open={levelOpen} onClose={()=>setLevelOpen(false)}/><CommandPalette open={searchOpen} onClose={()=>setSearchOpen(false)}/><MobileNavigation/>{maintenanceLabel&&<MaintenanceOverlay label={maintenanceLabel}/>}
  </div>;
 }
