@@ -66,3 +66,6 @@ src-tauri/binaries/
 
 # Release 打包staging（本地）
 .release/
+
+# 本机开发布局（个人绝对路径，绝不提交）
+.wgt-local.json
