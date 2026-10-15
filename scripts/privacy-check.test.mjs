@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { checkPrivacy, parseIndexRecords } from './privacy-check.mjs';
 
 // Synthetic temporary repositories are retained; no bulk cleanup is performed.
@@ -43,4 +44,22 @@ test('Git failure and an empty index never pass',()=>{
   assert.throws(()=>checkPrivacy(cwd));
   execFileSync('git',['init'],{cwd,stdio:'ignore'});
   assert.throws(()=>checkPrivacy(cwd),/为空/);
+});
+test('CLI fails closed in a directory without Git instead of printing a pass',()=>{
+  // 回归：ZIP 解压出的无 .git 目录里运行隐私检查时，旧实现会输出"检查通过"，
+  // 发布门禁因此形同虚设。这里直接验证 CLI 的退出码与输出。
+  const cwd=mkdtempSync(join(tmpdir(),'wealth-privacy-nogit-'));
+  const script=fileURLToPath(new URL('./privacy-check.mjs',import.meta.url));
+  const result=spawnSync(process.execPath,[script],{cwd,encoding:'utf8'});
+  assert.notEqual(result.status,0,'非 Git 目录必须返回非零退出码');
+  assert.match(result.stderr,/无法完成|已阻止通过/);
+  assert.doesNotMatch(result.stdout??'',/检查通过/);
+});
+test('CLI rejects an initialized repository with an empty index',()=>{
+  const cwd=mkdtempSync(join(tmpdir(),'wealth-privacy-empty-cli-'));
+  execFileSync('git',['init'],{cwd,stdio:'ignore'});
+  const script=fileURLToPath(new URL('./privacy-check.mjs',import.meta.url));
+  const result=spawnSync(process.execPath,[script],{cwd,encoding:'utf8'});
+  assert.notEqual(result.status,0,'空索引必须返回非零退出码');
+  assert.match(result.stderr,/为空|无法完成|已阻止通过/);
 });
