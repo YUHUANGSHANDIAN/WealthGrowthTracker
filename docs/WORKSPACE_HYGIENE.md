@@ -8,21 +8,20 @@
 ## 目标布局
 
 ```text
-D:\Desktop\80 生活\07 财经类\
-  财富成长记AI主应用\        # 唯一主工作区（Git 权威仓库）
+<工作区父目录>\
+  <主工作区>\                 # 唯一主工作区（Git 权威仓库）
     src\  src-tauri\src\      # 源码
     node_modules\             # 唯一一份 JS 依赖
     ai-runtime\node_modules\  # AI 运行时依赖（唯一一份）
-    WealthGrowthTracker\      # 已安装、正在使用的程序（含 node.exe + ai-runtime）
-  wealth-growth-tracker-v1.7  # 旧 worktree：已归档后移除
 
-<外部缓存根>\                 # 由 .wgt-local.json 指定，例如 D:\DevCache\wealth-growth-tracker
+<外部缓存根>\                 # 由 .wgt-local.json 指定（本机绝对路径，不写入仓库）
   cargo\                      # CARGO_TARGET_DIR：桌面构建的全部 target
   temp\                       # 每次构建的会话 TEMP/TMP 目录
 
-<外部私人归档>\               # 例如 D:\PersonalArchives\wealth-growth-tracker\<日期>\
-  b-worktree-source.zip       # 已移除工作树的源码快照（含清单与 SHA256）
+<外部私人归档>\               # 存放源码快照、迁移清单与恢复材料（不进入仓库）
 ```
+
+本机具体路径记录在被忽略的 `.wgt-local.json` 与工作区外的私人说明文件中，不写入本仓库。
 
 ## 日常命令
 

@@ -8,7 +8,7 @@
 .EXAMPLE
     ./scripts/build-local.ps1
     ./scripts/build-local.ps1 -NoBundle
-    ./scripts/build-local.ps1 -CacheRoot D:\DevCache\wealth-growth-tracker
+    ./scripts/build-local.ps1 -CacheRoot <absolute-cache-root>
 #>
 [CmdletBinding()]
 param(
