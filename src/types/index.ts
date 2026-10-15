@@ -716,6 +716,8 @@ export interface BackupData {
     lottery_state?: LotteryState;
     level_achievements?: LevelAchievement[];
     goals?: GoalState;
+    /** 月度理财状态（新域；结构化备份含该键，附件内容不在此） */
+    monthly_planning?: MonthlyPlanningState;
   };
   metadata?: {
     totalRecords?: Record<string, number>;
@@ -726,3 +728,4 @@ export interface BackupData {
   reports?: FinancialReport[]; // financial_reports_batch 导出时使用
   totalCount?: number;
 }
+import type { MonthlyPlanningState } from '../domain/portfolio/types';

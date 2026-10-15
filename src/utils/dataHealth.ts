@@ -2,8 +2,9 @@ import type { Channel, FinancialReport, Goal, HistoryPoint, LevelAchievement, Lo
 import { round2 } from './money';
 import { isValidTimezone } from './goals';
 import { canonicalWeeklyPeriod, parseWeeklyPeriodKey } from './isoWeek';
+import type { MonthlyReview } from '../domain/portfolio/types';
 
-export type HealthDomain = 'assets' | 'history' | 'reports' | 'goals' | 'levels' | 'lottery' | 'storage' | 'settings';
+export type HealthDomain = 'assets' | 'history' | 'reports' | 'goals' | 'levels' | 'lottery' | 'storage' | 'settings' | 'monthly';
 
 export interface FixStrategy {
   id: string;
@@ -68,7 +69,63 @@ export function domainLabel(d: HealthDomain): string {
     case 'lottery': return '彩票';
     case 'storage': return '存储与备份';
     case 'settings': return '设置';
+    case 'monthly': return '月度理财';
   }
+}
+
+/**
+ * 月度理财健康检查：只报告问题，不自动修复。
+ * 覆盖附件缺失/哈希不符、重复观察、未归属余额、估算冒充观察、策略版本缺失、
+ * 已执行量大于可执行量、归档中仍含待办、承接来源过期。
+ */
+export function checkMonthlyHealth(
+  state: { sessions: MonthlyReview[]; policies: Array<{ id: string; version: number }> },
+  options: {
+    attachmentStatus?: ReadonlyArray<{ key: string; ok: boolean; reason?: string }>;
+    carriedItems?: ReadonlyArray<{ id: string; label: string; stale: boolean; status: string }>;
+  } = {},
+): DataIssue[] {
+  const issues: DataIssue[] = [];
+  const policyKeys = new Set(state.policies.map((policy) => `${policy.id}@${policy.version}`));
+  for (const session of state.sessions) {
+    if (session.policyId && session.policyVersion !== null && !policyKeys.has(`${session.policyId}@${session.policyVersion}`)) {
+      issues.push(makeIssue('monthly', 'error', '会话缺少可复现的策略版本', `会话 ${session.key} 指向的策略版本已不存在`, null, { entityId: session.key }));
+    }
+    const seen = new Map<string, number>();
+    for (const observation of session.observations) {
+      const key = `${observation.holdingId}@${observation.sessionKey}`;
+      seen.set(key, (seen.get(key) ?? 0) + 1);
+    }
+    for (const [key, count] of seen) {
+      if (count > 1) issues.push(makeIssue('monthly', 'error', '重复持仓观察', `${key} 出现 ${count} 次`, null, { entityId: session.key }));
+    }
+    const estimated = session.observations.filter((observation) => observation.quality.valuation === 'rule-estimated' && observation.shares !== null);
+    if (estimated.length) {
+      issues.push(makeIssue('monthly', 'warning', '估算值被当作份额使用', `${estimated.length} 条规则估算带份额，需人工核对`, null, { entityId: session.key }));
+    }
+    if (session.state === 'archived' && session.executions.length === 0 && (session.proposal?.actions.length ?? 0) > 0) {
+      issues.push(makeIssue('monthly', 'warning', '归档会话仍含未登记的执行', `会话 ${session.key} 有候选但无执行回执`, null, { entityId: session.key }));
+    }
+    if (session.state === 'confirmed' && session.baseDataRevision === null) {
+      issues.push(makeIssue('monthly', 'error', '确认缺少数据版本', `会话 ${session.key} 未记录确认时的数据版本`, null, { entityId: session.key }));
+    }
+    for (const record of session.executions) {
+      if (record.status === 'executed' && (record.actualAmount === null || record.actualAmount === undefined) && !record.actualShares) {
+        issues.push(makeIssue('monthly', 'warning', '执行回执缺少实际数量', `回执 ${record.id} 未填写金额或份额`, null, { entityId: session.key }));
+      }
+    }
+  }
+  for (const status of options.attachmentStatus ?? []) {
+    if (!status.ok) {
+      issues.push(makeIssue('monthly', 'error', '附件缺失或哈希不符', `${status.key}：${status.reason ?? '无法读取'}`, null, { entityId: status.key }));
+    }
+  }
+  for (const item of options.carriedItems ?? []) {
+    if (item.stale && item.status === 'open') {
+      issues.push(makeIssue('monthly', 'warning', '承接项来源已修订', `${item.label} 需要重新确认`, null, { entityId: item.id }));
+    }
+  }
+  return issues;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

@@ -22,6 +22,8 @@ export const STORAGE_KEYS = {
   chartSettings: 'chart_settings',
   countdownData: 'countdown_data',
   goals: 'goals',
+  /** 月度理财（WealthGrowthPlanner）状态：新域，独立键，不与旧键混用 */
+  monthlyPlanning: 'monthly_planning_state',
   countdownOpacity: 'countdown_opacity',
   coinRainConfig: 'coin_rain_config',
   countdownProgressHistory: 'countdown_progress_history',

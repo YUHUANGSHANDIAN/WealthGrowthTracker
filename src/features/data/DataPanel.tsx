@@ -584,6 +584,7 @@ function MaintenanceActions({ actions }: { actions: MaintenanceAction[] }) {
 
 const DOMAIN_ICONS: Record<HealthDomain, string> = {
   assets: '💰', history: '🕰️', reports: '📑', goals: '🎯', levels: '🏅', lottery: '🎟️', storage: '🗄️', settings: '⚙️',
+  monthly: '📅',
 };
 
 function issueNavigateTarget(i: DataIssue): { tab: import('../../store/navigationStore').TabId; extra?: Record<string, string> } | null {

@@ -1,4 +1,8 @@
 import { validateLedgerShape, validateFinancialExtensions } from '../services/storage/validateLedger';
+import {
+  emptyMonthlyPlanningState, parseMonthlyPlanningState, recordExecution, removeSession, upsertPolicy, upsertSession,
+} from '../services/monthlyPlanning/storage';
+import type { ExecutionRecord, InvestmentPolicy, MonthlyPlanningState, MonthlyReview } from '../domain/portfolio/types';
 import { create } from 'zustand';
 import type {
   AppearanceSettings,
@@ -150,6 +154,15 @@ interface AppState {
   lottery: LotteryState;
   activityLog: ActivityLogEntry[];
 
+  // ---- 月度理财（WealthGrowthPlanner） ----
+  monthlyPlanning: MonthlyPlanningState;
+  /** 事务式写入月度会话：维护租约 + 备份 + 单次 rawSet + persist + flush */
+  upsertMonthlySession: (session: MonthlyReview, label?: string) => Promise<void>;
+  saveMonthlyPolicy: (policy: InvestmentPolicy) => Promise<void>;
+  recordMonthlyExecution: (sessionKey: string, record: ExecutionRecord) => Promise<void>;
+  setMonthlySettings: (patch: Partial<MonthlyPlanningState['settings']>) => Promise<void>;
+  deleteMonthlySession: (key: string) => Promise<void>;
+
   // 数据管理弹窗状态
   importModalOpen: boolean;
 
@@ -287,6 +300,7 @@ const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
   { key: STORAGE_KEYS.levelAchievements, pick: (s) => s.levelAchievements },
   { key: STORAGE_KEYS.lotteryState, pick: (s) => s.lottery },
   { key: STORAGE_KEYS.activityLog, pick: (s) => s.activityLog },
+  { key: STORAGE_KEYS.monthlyPlanning, pick: (s) => s.monthlyPlanning },
 ];
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -364,6 +378,7 @@ const persistentFields: ReadonlyArray<keyof AppState> = [
   'countdownOpacity', 'coinRainConfig', 'goalAchieved', 'timeRangeHistory',
   'countdownProgressHistory', 'currentWealthLevel', 'wealthTrackerHistory',
   'levelAchievements', 'lottery', 'activityLog',
+  'monthlyPlanning',
 ];
 
 export const useAppStore = create<AppState>()((rawSet, get) => {
@@ -493,6 +508,76 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
     activityLog: [],
 
     importModalOpen: false,
+    monthlyPlanning: emptyMonthlyPlanningState(),
+    async upsertMonthlySession(session, label = '正在保存月度会话') {
+      const release = beginLedgerMaintenance(label);
+      try {
+        await storageService.flush();
+        const manager = storageService.getDesktopManager();
+        if (manager && !(await manager.backupNow(true))) throw new Error('操作前备份不可用');
+        const current = get();
+        const next = upsertSession(current.monthlyPlanning, session);
+        rawSet({ monthlyPlanning: next });
+        persist();
+        await storageService.flush();
+      } finally {
+        release();
+      }
+    },
+    async saveMonthlyPolicy(policy) {
+      const release = beginLedgerMaintenance('正在保存月度策略');
+      try {
+        await storageService.flush();
+        const manager = storageService.getDesktopManager();
+        if (manager && !(await manager.backupNow(true))) throw new Error('操作前备份不可用');
+        const next = upsertPolicy(get().monthlyPlanning, policy);
+        rawSet({ monthlyPlanning: next });
+        persist();
+        await storageService.flush();
+      } finally {
+        release();
+      }
+    },
+    async recordMonthlyExecution(sessionKey, record) {
+      const release = beginLedgerMaintenance('正在登记执行回执');
+      try {
+        await storageService.flush();
+        const manager = storageService.getDesktopManager();
+        if (manager && !(await manager.backupNow(true))) throw new Error('操作前备份不可用');
+        const next = recordExecution(get().monthlyPlanning, sessionKey, record);
+        rawSet({ monthlyPlanning: next });
+        persist();
+        await storageService.flush();
+      } finally {
+        release();
+      }
+    },
+    async setMonthlySettings(patch) {
+      const release = beginLedgerMaintenance('正在保存月度提醒设置');
+      try {
+        const current = get().monthlyPlanning;
+        const next = { ...current, settings: { ...current.settings, ...patch } };
+        rawSet({ monthlyPlanning: next });
+        persist();
+        await storageService.flush();
+      } finally {
+        release();
+      }
+    },
+    async deleteMonthlySession(key) {
+      const release = beginLedgerMaintenance('正在删除月度会话');
+      try {
+        await storageService.flush();
+        const manager = storageService.getDesktopManager();
+        if (manager && !(await manager.backupNow(true))) throw new Error('操作前备份不可用');
+        const next = removeSession(get().monthlyPlanning, key);
+        rawSet({ monthlyPlanning: next });
+        persist();
+        await storageService.flush();
+      } finally {
+        release();
+      }
+    },
 
     // ---------------------------------------------------------------------
     hydrate() {
@@ -525,6 +610,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         lotteryData,
         activityLogData,
         projectionData,
+        monthlyData,
       ] = await Promise.all([
         storageService.getJSON<{ channels: Channel[]; history: HistoryPoint[] }>(STORAGE_KEYS.wealthTrackerData),
         storageService.getJSON<FinancialReport[]>(STORAGE_KEYS.financialReports),
@@ -550,7 +636,9 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         storageService.getJSON<LotteryState>(STORAGE_KEYS.lotteryState),
         storageService.getJSON<ActivityLogEntry[]>(STORAGE_KEYS.activityLog),
         storageService.getJSON<ReportProjectionQueue>(STORAGE_KEYS.reportProjectionQueue),
+        storageService.getJSON<unknown>(STORAGE_KEYS.monthlyPlanning),
       ]);
+      const monthlyPlanning = parseMonthlyPlanningState(monthlyData);
 
       validateLedgerShape(wtd, reports);
       validateFinancialExtensions({ countdown_data: countdown, goal_achievement_status: goal,
@@ -650,6 +738,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         levelAchievements: mergedAchievements,
         lottery: lotteryData ?? defaultLotteryState(),
         activityLog: activityLogData ?? [],
+        monthlyPlanning,
         hydrated: false,
       });
 

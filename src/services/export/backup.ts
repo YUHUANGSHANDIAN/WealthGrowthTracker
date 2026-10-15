@@ -1,6 +1,8 @@
 import { totalAssets } from '../../utils/channels';
 import { APP_VERSION } from '../../constants/version';
 import { validateLedgerShape, validateFinancialExtensions } from '../storage/validateLedger';
+import { emptyMonthlyPlanningState, parseMonthlyPlanningState } from '../monthlyPlanning/storage';
+import type { MonthlyPlanningState } from '../../domain/portfolio/types';
 import type {
   BackupData,
   Channel,
@@ -49,6 +51,8 @@ export interface BackupSource {
   lottery?: LotteryState;
   goals?: { goals: Goal[]; primaryGoalId: string | null };
   levelAchievements?: LevelAchievement[];
+  /** 月度理财状态（结构化备份含该域；附件内容不在此，需「完整含附件备份」） */
+  monthlyPlanning?: MonthlyPlanningState | null;
 }
 
 /** 解析+归一化后的可导入数据。 */
@@ -70,6 +74,7 @@ export interface ImportedData {
   lottery?: LotteryState;
   goals?: { goals: Goal[]; primaryGoalId: string | null };
   levelAchievements?: LevelAchievement[];
+  monthlyPlanning?: MonthlyPlanningState;
 }
 
 export type ParseResult =
@@ -416,6 +421,7 @@ export function buildBackup(src: BackupSource): BackupData {
       lottery_state: src.lottery,
       goals: src.goals,
       level_achievements: src.levelAchievements,
+      monthly_planning: src.monthlyPlanning ?? undefined,
     },
     metadata: {
       totalRecords: {
@@ -637,6 +643,14 @@ export function parseBackup(text: string): ParseResult {
     }));
   }
 
+  if (data.monthly_planning !== undefined) {
+    try {
+      imported.monthlyPlanning = parseMonthlyPlanningState(data.monthly_planning);
+    } catch (error) {
+      return { ok: false, error: `月度理财数据无法导入：${error instanceof Error ? error.message : '格式无效'}` };
+    }
+  }
+
   const metaRaw = isRecord(raw.metadata) ? raw.metadata : undefined;
   const meta = {
     totalRecords: isRecord(metaRaw?.totalRecords) ? (metaRaw.totalRecords as Record<string, number>) : undefined,
@@ -656,5 +670,6 @@ export function emptyImportedData(): ImportedData {
     countdown: defaultCountdownData(),
     goalAchieved: { hasAchievedGoal: false },
     countdownOpacity: 1,
+    monthlyPlanning: emptyMonthlyPlanningState(),
   };
 }
