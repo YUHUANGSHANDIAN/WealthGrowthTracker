@@ -1011,6 +1011,8 @@ pub fn run() {
             ai::ai_configure_profile,
             ai::ai_models,
             ai::ai_infer,
+            ai::ai_vision_extract,
+            ai::ai_research_lookup,
             ai::ai_cancel,
             ai::ai_remove_profile
         ])

@@ -21,7 +21,8 @@ interface ConnectionsState {
 const key = 'wealth_ai_connections_v1';
 function metadata(profile: AIConnection): Omit<AIConnection, 'state' | 'testedAt'> {
   return { profileId: profile.profileId, providerId: profile.providerId, authKind: profile.authKind,
-    label: profile.label, modelId: profile.modelId, ...(profile.endpoint ? { endpoint: profile.endpoint } : {}) };
+    label: profile.label, modelId: profile.modelId, ...(profile.endpoint ? { endpoint: profile.endpoint } : {}),
+    ...(profile.supportsVision ? { supportsVision: true } : {}) };
 }
 function load(): AIConnection[] {
   try {

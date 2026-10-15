@@ -32,11 +32,14 @@ export function createPiAdapter(profile, { fetchImpl, apiLoader = loadApi, subsc
     },
     async generate({ task, input, signal }) {
       if (subscription && !subscriptionEnabled) throw new ProviderError("QUALIFICATION_REQUIRED");
+      const images = Array.isArray(input?.images) ? input.images : [];
+      // 只有用户显式声明该连接可读图时才发送图片；否则失败关闭，不静默丢图后假装识别成功。
+      if (images.length > 0 && profile.supportsVision !== true) throw new ProviderError("VISION_UNSUPPORTED");
       const { api, stream, normalizeContext } = await apiLoader(profile.providerId);
       const model = {
         id: profile.modelId, name: profile.modelId, provider: profile.providerId, api,
         baseUrl: profile.providerId === "anthropic" ? profile.endpoint.replace(/\/v1$/, "") : profile.endpoint,
-        reasoning: false, input: ["text"],
+        reasoning: false, input: images.length > 0 ? ["text", "image"] : ["text"],
         // Conservative transport limits, never advertised as verified model capabilities.
         contextWindow: 8_192, maxTokens: 2_048,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -44,7 +47,16 @@ export function createPiAdapter(profile, { fetchImpl, apiLoader = loadApi, subsc
       };
       const context = normalizeContext({
         systemPrompt: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userPrompt({ task, input }), timestamp: Date.now() }],
+        messages: [{
+          role: "user",
+          content: images.length > 0
+            ? [
+                { type: "text", text: userPrompt({ task, input }) },
+                ...images.map((image) => ({ type: "image", data: image.data, mimeType: image.mimeType })),
+              ]
+            : userPrompt({ task, input }),
+          timestamp: Date.now(),
+        }],
         tools: [],
       });
       let mappedError;
@@ -86,6 +98,10 @@ export function createPiAdapter(profile, { fetchImpl, apiLoader = loadApi, subsc
         text, providerId: profile.providerId, modelId: profile.modelId,
         usage: { inputTokens: tokenCount(result.usage?.input + (result.usage?.cacheRead ?? 0) + (result.usage?.cacheWrite ?? 0)), outputTokens: tokenCount(result.usage?.output) },
       };
+    },
+    /** 该连接是否可接收图片：由用户声明，未声明一律视为不可读图。 */
+    supportsVision() {
+      return profile.supportsVision === true;
     },
   };
 }

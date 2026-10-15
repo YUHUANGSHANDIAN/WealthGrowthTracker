@@ -16,9 +16,13 @@ const LOOPBACK = new Set(["127.0.0.1", "[::1]"]);
 
 export function validateProfile(value) {
   const profile = { ...value };
+  // 视觉能力是用户声明，不是模型探测结果；必须是布尔值，否则一律拒绝。
+  if (profile.supportsVision !== undefined && typeof profile.supportsVision !== "boolean") throw new ProviderError("INVALID_PROFILE");
   const local = profile.providerId === "ollama" || profile.providerId === "lmstudio";
   if (profile.providerId === "copilot") {
-    if (profile.authKind !== "copilot-subscription" || !profile.credential || profile.endpoint !== undefined) throw new ProviderError("INVALID_PROFILE");
+    // Copilot 会话始终是纯文本：拒绝被声明为可读图，避免界面假装支持视觉。
+    if (profile.authKind !== "copilot-subscription" || !profile.credential || profile.endpoint !== undefined ||
+        profile.supportsVision === true) throw new ProviderError("INVALID_PROFILE");
     return Object.freeze(profile);
   }
   if (profile.authKind === "openai-subscription") {

@@ -37,6 +37,8 @@ export function createCopilotAdapter(profile, {
       });
     },
     async generate({ task, input, signal }) {
+      const images = Array.isArray(input?.images) ? input.images : [];
+      if (images.length > 0) throw new ProviderError("VISION_UNSUPPORTED");
       return withClient(signal, async (client) => {
         const memoryFs = createMemorySessionFs();
         const session = await client.createSession({

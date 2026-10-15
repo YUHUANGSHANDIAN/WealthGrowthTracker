@@ -1,4 +1,4 @@
-import { MAX_FRAME_BYTES } from "./protocol.mjs";
+import { MAX_MANAGEMENT_FRAME_BYTES } from "./protocol.mjs";
 import { AIRuntime } from "./runtime.mjs";
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
@@ -43,7 +43,7 @@ export function serveStdio({ input, output, runtime }) {
         pending = Buffer.alloc(0);
         discardingOversizeFrame = false;
       } else if (!discardingOversizeFrame) {
-        if (pending.length >= MAX_FRAME_BYTES) {
+        if (pending.length >= MAX_MANAGEMENT_FRAME_BYTES) {
           pending = Buffer.alloc(0);
           discardingOversizeFrame = true;
         } else {

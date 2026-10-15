@@ -5,7 +5,7 @@ import { useAIConnectionStore, type AIConnection } from '../../store/aiConnectio
 import { useAppStore } from '../../store/appStore';
 import { isTauri } from '../../services/storage/fs';
 import {
-  inferAI, listAIModels,
+  inferAI, listAIModels, VISION_PROVIDERS,
   type AuthKind, type ConnectionProfile, type ModelInfo, type ProviderId,
 } from '../../services/ai/client';
 
@@ -50,6 +50,7 @@ function profileOf(connection: AIConnection): ConnectionProfile {
   return {
     profileId: connection.profileId, providerId: connection.providerId, authKind: connection.authKind,
     modelId: connection.modelId, ...(connection.endpoint ? { endpoint: connection.endpoint } : {}),
+    ...(connection.supportsVision ? { supportsVision: true } : {}),
   };
 }
 
@@ -72,6 +73,7 @@ export function AIConnectionCenter() {
   const [endpoint, setEndpoint] = useState('');
   const [credential, setCredential] = useState('');
   const [persistCredential, setPersistCredential] = useState(true);
+  const [supportsVision, setSupportsVision] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [modelTarget, setModelTarget] = useState<string | null>(null);
@@ -97,6 +99,7 @@ export function AIConnectionCenter() {
     const profile: ConnectionProfile = {
       profileId: crypto.randomUUID(), providerId: entry.providerId, authKind: entry.authKind,
       modelId: modelId.trim(), ...(entry.needsEndpoint ? { endpoint: endpoint.trim() } : {}),
+      ...(supportsVision && VISION_PROVIDERS.includes(entry.providerId) ? { supportsVision: true } : {}),
     };
     try {
       await connect(profile, label.trim(), entry.authKind === 'local' ? undefined : credential.trim(), persistCredential && desktop);
@@ -158,7 +161,7 @@ export function AIConnectionCenter() {
             认证方式与权益方式分开记录：OAuth/设备流不等于可用订阅，API Key 是按量计费，本地模型不显示云端额度。
           </p>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <SelectField label="连接类型" value={catalogKey} onChange={event => { setCatalogKey(event.target.value); setModels(null); setError(null); }}
+            <SelectField label="连接类型" value={catalogKey} onChange={event => { setCatalogKey(event.target.value); setModels(null); setError(null); setSupportsVision(false); }}
               options={CATALOG.map(item => ({ value: item.key, label: `${item.label}（${item.entitlement}）` }))} />
             <TextField label="连接名称" value={label} maxLength={80} onChange={event => setLabel(event.target.value)} placeholder="例如：我的 Copilot 订阅" />
             <TextField label="模型标识" value={modelId} maxLength={128} onChange={event => setModelId(event.target.value)} placeholder="例如：gpt-5 / claude-sonnet-4-5" />
@@ -176,6 +179,17 @@ export function AIConnectionCenter() {
               <input type="checkbox" checked={persistCredential && desktop} disabled={!desktop || busy} onChange={event => setPersistCredential(event.target.checked)} />
               保存到系统安全存储（Keyring / Android Keystore）{!desktop && '；此平台仅支持临时会话'}
             </label>
+          )}
+          {VISION_PROVIDERS.includes(entry.providerId) && (
+            <label className="mt-3 flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={supportsVision} disabled={busy} onChange={event => setSupportsVision(event.target.checked)} />
+              此连接可接收图片（用于票据截图与对账单识别）
+            </label>
+          )}
+          {VISION_PROVIDERS.includes(entry.providerId) && (
+            <p className="mt-1 text-xs text-slate-500">
+              读图能力由你声明，应用不会替你探测：未勾选时上传图片会在发送前失败关闭，不会退化成“看不出图片却给结论”。
+            </p>
           )}
           <p className="mt-2 text-xs text-slate-500">{entry.notes}</p>
           {platformBlocked && <p className="mt-2 text-sm text-amber-700">此平台不直接连接官方云服务，请改用用户自建 HTTPS 网关或本地端点。</p>}
@@ -204,6 +218,7 @@ export function AIConnectionCenter() {
                       <div className="mt-1 text-xs text-slate-500 break-all">
                         {connection.providerId} · {connection.authKind} · {connection.modelId}
                         {connection.endpoint ? ` · ${connection.endpoint}` : ''}
+                        {connection.supportsVision ? ' · 可读图' : ''}
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">

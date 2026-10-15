@@ -1,6 +1,7 @@
 import { validateProfile } from "./policy.mjs";
 import { createPiAdapter } from "./pi.mjs";
 import { createCopilotAdapter } from "./copilot.mjs";
+export { createResearchProvider, fetchResearchSource, stripHtml, RESEARCH_LIMITS } from "./research.mjs";
 
 // Subscription policy and sandbox paths are trusted host options, never management-frame fields.
 export function createProviderAdapter(input, options = {}) {

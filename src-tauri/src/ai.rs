@@ -31,8 +31,18 @@ const AUTH_KINDS: [&str; 4] = [
 ];
 const CONFIGURE_TIMEOUT: Duration = Duration::from_secs(15);
 const INFER_TIMEOUT: Duration = Duration::from_secs(60);
+const VISION_TIMEOUT: Duration = Duration::from_secs(90);
+const RESEARCH_TIMEOUT: Duration = Duration::from_secs(110);
 const CANCEL_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_CREDENTIAL_LEN: usize = 16_384;
+const MAX_INPUT_TEXT_LEN: usize = 8_000;
+const MAX_FACTS: usize = 48;
+const MAX_IMAGES: usize = 4;
+const MAX_IMAGE_BASE64_CHARS: usize = 1_500_000;
+const MAX_TOTAL_IMAGE_BASE64_CHARS: usize = 3_000_000;
+const MAX_RESEARCH_URLS: usize = 5;
+const IMAGE_MIME_TYPES: [&str; 3] = ["image/png", "image/jpeg", "image/webp"];
+const VISION_TASK: &str = "document-extraction";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +53,9 @@ pub struct ConnectionProfile {
     pub model_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
+    /// 用户声明的读图能力；缺省即视为不可读图，Broker 不会替用户猜测。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supports_vision: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -149,6 +162,100 @@ fn profile_frame(profile: &ConnectionProfile, credential: Option<&str>) -> Value
         object.insert("credential".into(), Value::String(credential.to_string()));
     }
     value
+}
+
+/// 视觉输入在 Broker 侧先做一次失败关闭校验：图片数量、MIME 与体积都被收紧，
+/// 运行时会再校验一次，两层都不允许“无图却能识别”的假成功。
+fn validate_vision_input(input: &Value) -> Result<(), &'static str> {
+    let object = input.as_object().ok_or("INVALID_REQUEST")?;
+    if object
+        .keys()
+        .any(|key| !matches!(key.as_str(), "images" | "text" | "facts"))
+    {
+        return Err("INVALID_REQUEST");
+    }
+    if let Some(text) = object.get("text") {
+        match text.as_str() {
+            Some(value) if value.len() <= MAX_INPUT_TEXT_LEN => {}
+            _ => return Err("INVALID_REQUEST"),
+        }
+    }
+    if let Some(facts) = object.get("facts") {
+        match facts.as_array() {
+            Some(entries) if entries.len() <= MAX_FACTS => {}
+            _ => return Err("INVALID_REQUEST"),
+        }
+    }
+    let images = object
+        .get("images")
+        .and_then(Value::as_array)
+        .ok_or("INVALID_REQUEST")?;
+    if images.is_empty() || images.len() > MAX_IMAGES {
+        return Err("INVALID_REQUEST");
+    }
+    let mut total = 0usize;
+    for image in images {
+        let image = image.as_object().ok_or("INVALID_REQUEST")?;
+        if image.len() != 2 || !image.contains_key("mimeType") || !image.contains_key("data") {
+            return Err("INVALID_REQUEST");
+        }
+        let mime = image
+            .get("mimeType")
+            .and_then(Value::as_str)
+            .ok_or("INVALID_REQUEST")?;
+        if !IMAGE_MIME_TYPES.contains(&mime) {
+            return Err("INVALID_REQUEST");
+        }
+        let data = image
+            .get("data")
+            .and_then(Value::as_str)
+            .ok_or("INVALID_REQUEST")?;
+        if data.is_empty()
+            || !data
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
+        {
+            return Err("INVALID_REQUEST");
+        }
+        if data.len() > MAX_IMAGE_BASE64_CHARS {
+            return Err("IMAGE_TOO_LARGE");
+        }
+        total += data.len();
+    }
+    if total > MAX_TOTAL_IMAGE_BASE64_CHARS {
+        return Err("IMAGE_TOO_LARGE");
+    }
+    Ok(())
+}
+
+/// 研究检索只接受用户显式给出的公网 HTTPS 链接。DNS、重定向与体积的限制在
+/// Node 运行时执行；这里先拒绝协议、凭据、片段与重复项。
+fn validate_research_urls(urls: &[String]) -> Result<(), &'static str> {
+    if urls.is_empty() || urls.len() > MAX_RESEARCH_URLS {
+        return Err("INVALID_REQUEST");
+    }
+    let mut seen: HashSet<&str> = HashSet::new();
+    for url in urls {
+        if url.len() > 2_048 || url.is_empty() {
+            return Err("INVALID_URL");
+        }
+        if !seen.insert(url.as_str()) {
+            return Err("INVALID_REQUEST");
+        }
+        let lower = url.to_ascii_lowercase();
+        if !lower.starts_with("https://") {
+            return Err("INVALID_URL");
+        }
+        let rest = &url["https://".len()..];
+        if rest.contains(['\r', '\n', '\t', '\0', ' ', '#']) {
+            return Err("INVALID_URL");
+        }
+        let authority = rest.split(['/', '?']).next().unwrap_or_default();
+        if authority.is_empty() || authority.contains('@') {
+            return Err("INVALID_URL");
+        }
+    }
+    Ok(())
 }
 
 fn keyring_entry(profile_id: &str) -> Result<keyring::Entry, String> {
@@ -569,6 +676,108 @@ impl InnerState {
         }
     }
 
+    /// 图片视觉提取：只有被声明为可读图的连接才会收到图片，其余一律失败关闭。
+    fn vision_extract(
+        &self,
+        app: &tauri::AppHandle,
+        request: InferenceRequest,
+    ) -> Result<Value, String> {
+        if !self.enabled.load(Ordering::SeqCst) {
+            return Ok(error_result("AI_DISABLED"));
+        }
+        if !is_identifier(&request.request_id)
+            || !is_identifier(&request.profile_id)
+            || !PROVIDERS.contains(&request.provider_id.as_str())
+            || request.task != VISION_TASK
+        {
+            return Ok(error_result("INVALID_REQUEST"));
+        }
+        if let Err(code) = validate_vision_input(&request.input) {
+            return Ok(error_result(code));
+        }
+        let declared = self
+            .profiles
+            .lock()
+            .unwrap()
+            .get(&request.profile_id)
+            .map(|entry| {
+                (
+                    entry.profile.provider_id.clone(),
+                    entry.profile.supports_vision,
+                )
+            });
+        match declared {
+            Some((provider_id, supports_vision)) if provider_id == request.provider_id => {
+                if supports_vision != Some(true) {
+                    return Ok(error_result("VISION_UNSUPPORTED"));
+                }
+            }
+            _ => return Ok(error_result("PROFILE_UNAVAILABLE")),
+        }
+        if let Err(code) = self.ensure_configured(app, &request.profile_id) {
+            return Ok(error_result(&code));
+        }
+        let frame = json!({
+            "protocolVersion": 1,
+            "requestId": request.request_id,
+            "operation": "vision-extract",
+            "profileId": request.profile_id,
+            "providerId": request.provider_id,
+            "task": request.task,
+            "input": request.input,
+        });
+        match self.request(app, frame, VISION_TIMEOUT).and_then(interpret) {
+            Ok(result) => Ok(ok_result(result)),
+            Err(code) => Ok(error_result(&code)),
+        }
+    }
+
+    /// 研究检索：由 Node 运行时按白名单抓取用户给出的公网 HTTPS 链接。
+    fn research_lookup(
+        &self,
+        app: &tauri::AppHandle,
+        profile_id: &str,
+        provider_id: &str,
+        urls: Vec<String>,
+    ) -> Result<Value, String> {
+        if !self.enabled.load(Ordering::SeqCst) {
+            return Ok(error_result("AI_DISABLED"));
+        }
+        if !is_identifier(profile_id) || !PROVIDERS.contains(&provider_id) {
+            return Ok(error_result("INVALID_REQUEST"));
+        }
+        if let Err(code) = validate_research_urls(&urls) {
+            return Ok(error_result(code));
+        }
+        let known = self
+            .profiles
+            .lock()
+            .unwrap()
+            .get(profile_id)
+            .map(|entry| entry.profile.provider_id.clone());
+        if known.as_deref() != Some(provider_id) {
+            return Ok(error_result("PROFILE_UNAVAILABLE"));
+        }
+        if let Err(code) = self.ensure_configured(app, profile_id) {
+            return Ok(error_result(&code));
+        }
+        let frame = json!({
+            "protocolVersion": 1,
+            "requestId": self.next_request_id(),
+            "operation": "research-lookup",
+            "profileId": profile_id,
+            "providerId": provider_id,
+            "urls": urls,
+        });
+        match self
+            .request(app, frame, RESEARCH_TIMEOUT)
+            .and_then(interpret)
+        {
+            Ok(result) => Ok(ok_result(result)),
+            Err(code) => Ok(error_result(&code)),
+        }
+    }
+
     fn cancel(&self, app: &tauri::AppHandle, target_request_id: &str) -> Result<Value, String> {
         if !is_identifier(target_request_id) {
             return Ok(error_result("INVALID_REQUEST"));
@@ -686,6 +895,34 @@ pub async fn ai_infer(
 }
 
 #[tauri::command]
+pub async fn ai_vision_extract(
+    app: tauri::AppHandle,
+    broker: tauri::State<'_, AiBroker>,
+    request: InferenceRequest,
+) -> Result<Value, String> {
+    let inner = Arc::clone(&broker.inner);
+    tauri::async_runtime::spawn_blocking(move || inner.vision_extract(&app, request))
+        .await
+        .map_err(|_| "BROKER_TASK_FAILED".to_string())?
+}
+
+#[tauri::command]
+pub async fn ai_research_lookup(
+    app: tauri::AppHandle,
+    broker: tauri::State<'_, AiBroker>,
+    profile_id: String,
+    provider_id: String,
+    urls: Vec<String>,
+) -> Result<Value, String> {
+    let inner = Arc::clone(&broker.inner);
+    tauri::async_runtime::spawn_blocking(move || {
+        inner.research_lookup(&app, &profile_id, &provider_id, urls)
+    })
+    .await
+    .map_err(|_| "BROKER_TASK_FAILED".to_string())?
+}
+
+#[tauri::command]
 pub async fn ai_cancel(
     app: tauri::AppHandle,
     broker: tauri::State<'_, AiBroker>,
@@ -720,6 +957,7 @@ mod tests {
             auth_kind: "api-key".into(),
             model_id: "synthetic-model".into(),
             endpoint: Some("https://gateway.example.com/v1".into()),
+            supports_vision: None,
         }
     }
 
@@ -799,5 +1037,90 @@ mod tests {
         assert!(broker.inner.runtime.lock().unwrap().is_none());
         broker.inner.set_enabled(false);
         assert!(!broker.inner.enabled.load(Ordering::SeqCst));
+    }
+
+    fn vision_input() -> Value {
+        json!({ "images": [{ "mimeType": "image/png", "data": "aGVsbG8=" }], "text": "读取这张合成截图" })
+    }
+
+    #[test]
+    fn vision_input_is_bounded_and_fails_closed() {
+        assert!(validate_vision_input(&vision_input()).is_ok());
+        // 未知字段、空图片列表与非法 MIME 都必须被拒绝。
+        assert!(validate_vision_input(&json!({ "images": [], "toolCalls": [] })).is_err());
+        assert!(validate_vision_input(
+            &json!({ "images": [{ "mimeType": "image/gif", "data": "aGVsbG8=" }] })
+        )
+        .is_err());
+        assert!(validate_vision_input(
+            &json!({ "images": [{ "mimeType": "image/png", "data": "not base64!" }] })
+        )
+        .is_err());
+        assert!(validate_vision_input(&json!({ "images": [{ "mimeType": "image/png", "data": "aGVsbG8=", "url": "https://x" }] })).is_err());
+        // 单张超限与总量超限返回明确的体积错误码。
+        let huge = "A".repeat(MAX_IMAGE_BASE64_CHARS + 1);
+        assert_eq!(
+            validate_vision_input(
+                &json!({ "images": [{ "mimeType": "image/jpeg", "data": huge }] })
+            )
+            .unwrap_err(),
+            "IMAGE_TOO_LARGE"
+        );
+        let image = json!({ "mimeType": "image/png", "data": "A".repeat(MAX_IMAGE_BASE64_CHARS) });
+        assert_eq!(
+            validate_vision_input(&json!({ "images": [image.clone(), image.clone(), image] }))
+                .unwrap_err(),
+            "IMAGE_TOO_LARGE"
+        );
+        let count = json!({ "images": (0..MAX_IMAGES + 1).map(|_| json!({ "mimeType": "image/png", "data": "aGVsbG8=" })).collect::<Vec<_>>() });
+        assert_eq!(
+            validate_vision_input(&count).unwrap_err(),
+            "INVALID_REQUEST"
+        );
+    }
+
+    #[test]
+    fn research_urls_require_public_https_without_credentials_or_duplicates() {
+        assert!(validate_research_urls(&["https://example.com/article".into()]).is_ok());
+        for invalid in [
+            vec!["http://example.com".to_string()],
+            vec!["https://user:pass@example.com".to_string()],
+            vec!["https://example.com/a#section".to_string()],
+            vec!["https://example.com/a\nGET /".to_string()],
+            vec!["https:/example.com".to_string()],
+            vec!["".to_string()],
+        ] {
+            assert_eq!(validate_research_urls(&invalid).unwrap_err(), "INVALID_URL");
+        }
+        assert_eq!(validate_research_urls(&[]).unwrap_err(), "INVALID_REQUEST");
+        assert!(validate_research_urls(&[
+            "https://example.com".into(),
+            "https://example.com".into()
+        ])
+        .is_err());
+        let many: Vec<String> = (0..MAX_RESEARCH_URLS + 1)
+            .map(|index| format!("https://example.com/{index}"))
+            .collect();
+        assert_eq!(
+            validate_research_urls(&many).unwrap_err(),
+            "INVALID_REQUEST"
+        );
+    }
+
+    #[test]
+    fn profiles_serialize_the_declared_vision_capability_only_when_set() {
+        let declared = ConnectionProfile {
+            supports_vision: Some(true),
+            ..profile()
+        };
+        assert_eq!(
+            profile_frame(&declared, None)
+                .get("supportsVision")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert!(profile_frame(&profile(), None)
+            .get("supportsVision")
+            .is_none());
     }
 }
