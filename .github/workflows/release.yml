@@ -39,6 +39,10 @@ jobs:
         run: npm run privacy:test
       - name: Web build
         run: npm run build
+      - name: AI runtime dependencies
+        run: npm ci --prefix ai-runtime
+      - name: AI runtime tests
+        run: npm test --prefix ai-runtime
       - name: Privacy check
         run: npm run privacy:check
       - name: Rust format check
@@ -238,7 +242,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           test -f artifacts/web-dist/index.html
           (cd artifacts/web-dist && zip -r "../../release-assets/WealthGrowthTracker_${VERSION}_web.zip" .)
-          for f in release-assets/*.apk; do [ -e "$f" ] && mv "$f" "release-assets/WealthGrowthTracker_${VERSION}_android-preview.apk"; done
+          for f in release-assets/*.apk; do [ -e "$f" ] || continue; mv "$f" "release-assets/WealthGrowthTracker_${VERSION}_android-preview.apk"; done
           cd release-assets
           sha256sum * > SHA256SUMS.txt
           ls -la
@@ -248,7 +252,13 @@ jobs:
           {
             echo "## 财富成长记 ${GITHUB_REF_NAME}（预发布 Preview）"
             echo ""
-            echo "Local-First / Privacy-First 的个人财富管理工具。本版本为 **预发布**，用于体验 v1.7.0 的工作台重构与受控 AI 能力，不构成正式版。"
+            echo "Local-First / Privacy-First 的个人财富管理工具。本版本为 **预发布（prerelease）**，不是正式版：功能可用，但订阅发布门与签名尚未满足，详见下方「未完成事项」。"
+            echo ""
+            echo "### 本版主要变化"
+            echo "- **月度理财工作台（WealthGrowthPlanner）**：新增 \`#/monthly\` 七区工作台与分步向导；文档在本地解析并按 SHA256 幂等入库；每月一份正式会话，跨月结转携带来源会话与 revision，来源变更即标记过期且不自动改写。"
+            echo "- **品牌统一为 WealthGrowthTracker**：窗口标题、PWA 名称、关于页与导出元数据一致；\`identifier\`、存储键、IndexedDB 库名与 Service Worker 缓存前缀保持不变，旧安装与旧数据可原地升级。"
+            echo "- **AI 新增两条只读能力**：图片视觉提取（只有你显式声明可读图的连接才会收到图片）与网页研究检索（只抓取你给出的公网 HTTPS 链接，仅桌面可用）。"
+            echo "- **AI 默认关闭**，关闭时不启动运行时、不联网、不读取凭据。"
             echo ""
             echo "### 本次构建实际包含的附件"
             for check in "*.exe|Windows 安装包（NSIS）" "*.msi|Windows MSI" "*.dmg|macOS DMG" "*.AppImage|Linux AppImage" "*.deb|Linux DEB" "*.rpm|Linux RPM" "*android-preview.apk|Android APK（debug 签名预览）" "*_web.zip|Web/PWA 静态包"; do
@@ -268,7 +278,15 @@ jobs:
             echo "- **两类合法订阅路径（OpenAI 开源应用订阅、GitHub Copilot 订阅）的真实认证 / 推理 / 撤销验收尚未完成**，界面保持“待资格验证”，不得视为已支持。"
             echo "- API Key、本地模型与 mock **不计入订阅发布门**；未配置连接时 AI 保持关闭。"
             echo "- 应用不读取 Codex / Claude / GitHub CLI 等其它程序的登录令牌，也不嵌入 OAuth 客户端密钥。"
+            echo "- 图片视觉提取：仅当连接被显式声明为可读图时才发送图片（最多 4 张 PNG/JPEG/WebP，超限即失败关闭）；识别质量取决于你选的视觉模型，应用不做本地 OCR，本轮**未用真实账号验收**。"
+            echo "- 网页研究检索：只抓取你显式给出的公网 HTTPS 链接，**仅桌面端可用**；Web/移动端如实提示不可用，模型不能自行生成 URL。本轮**未用真实来源验收**。"
             echo "- 桌面包内置官方 Node 24.21.0 sidecar 运行时（按官方 SHA256 校验）；若某平台未包含运行时，AI 会明确报 AI_RUNTIME_MISSING。"
+            echo ""
+            echo "### 未完成事项（本版不宣称已具备）"
+            echo "- 两类合法订阅路径的真实认证 / 推理 / 撤销验收：**未完成**（因此本版只能作为 prerelease 发布）。"
+            echo "- Windows 未代码签名，macOS 未签名未公证；Android 若出现在下方附件中即为 **debug 签名预览版**，若未出现则表示本次未构建（缺 Android SDK/NDK 或构建失败）。"
+            echo "- 含附件的单文件归档导入/导出尚未实现；附件当前以内容寻址单独存放，读取时逐次校验哈希。"
+            echo "- 各平台安装后的 AI 冒烟仍需在对应系统人工确认。"
             echo ""
             echo "### 数据与隐私"
             echo "- 本 Release **不包含任何用户数据**、报告、备份或迁移脚本；附件仅为程序与校验文件。"
@@ -285,6 +303,6 @@ jobs:
           name: '财富成长记 ${{ github.ref_name }}'
           body_path: release-notes.md
           files: release-assets/*
-          # Full release remains gated by real subscription acceptance, licensing and artifact audit.
-          draft: true
+          # 发布为可下载的 prerelease：正式版仍以两类真实订阅验收、签名与许可证审计为前置条件。
+          draft: false
           prerelease: true

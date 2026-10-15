@@ -1,13 +1,13 @@
 # 平台支持矩阵（Platform Support）
 
-> 版本：v1.7.0 · 更新：2026-10-14
+> 版本：v1.8.0 · 更新：2026-10-16
 
 | 平台 | 架构 | 状态 | 签名 / 公证 |
 |------|------|------|-------------|
 | Windows | x64 | ✅ Stable | 未代码签名（SmartScreen 提示，可绕过） |
 | macOS | Apple Silicon + Intel（Universal） | ✅ Stable build | ❌ ad-hoc 未签名 / 未公证 |
 | Linux | x86_64 | ✅ Stable | — |
-| Android | arm64-v8a / armeabi-v7a / x86_64 | ✅ 可构建（APK 预览） | ❌ 正式 release 签名待配置 |
+| Android | arm64-v8a / armeabi-v7a / x86_64 | ⚠️ 需要 Android SDK/NDK 与 JDK 17 才能构建；本机无该工具链，v1.8.0 未产出 APK | ❌ 正式 release 签名待配置 |
 | Web / PWA | 任意现代浏览器 | ✅ Stable | — |
 | HarmonyOS | — | ⚠️ Experimental / PWA fallback | 见 [HARMONYOS.md](HARMONYOS.md) |
 
@@ -31,7 +31,7 @@
 - **Android**：应用专属内部数据目录（`app_data_dir`），遵守 Scoped Storage，不申请 `MANAGE_EXTERNAL_STORAGE`；备份/恢复通过系统文件选择器（SAF）。
 - **Web**：IndexedDB 业务快照；生产构建注入受限 CSP（`script-src 'self'`，无 `unsafe-eval`，联网仅本应用、HTTPS 与本地回环端点）。Service Worker 不缓存用户资产 JSON。
 
-## AI 支持矩阵（v1.7.0 实现状态）
+## AI 支持矩阵（v1.8.0 实现状态）
 
 AI 默认关闭，每次启动重置；关闭时不启动运行时、不联网、不读取凭据。以下为代码与官方依据可核实的现状；**没有两类合法订阅的真实认证/推理/撤销验收前，不得宣称“订阅已支持”**。
 
@@ -46,13 +46,20 @@ AI 默认关闭，每次启动重置；关闭时不启动运行时、不联网�
 | 用户自建 HTTPS 网关 | 用户自有认证/账单 | Web、桌面、Android | 桌面 Broker + Web 显式网关 | 未执行（Web 无默认代理） |
 | Gemini | — | — | 官方资料未稳定核实前不显示入口 | 阻塞 |
 
+## 视觉与联网检索（v1.8.0 新增，默认关闭）
+
+| 能力 | 认证与权益 | 平台 | 代码现状 | 真实验收状态 |
+|------|------------|------|----------|--------------|
+| 图片视觉提取 `vision-extract` | 复用已配置连接的权益 | 桌面（Broker）；Web/移动需自建网关或本地端点 | 只有用户显式勾选“此连接可接收图片”的连接才会收到图片；最多 4 张 PNG/JPEG/WebP，单张与总量均有上限，超出即失败关闭；Copilot 订阅会话在登记阶段拒绝读图声明 | 未执行（取决于用户所选视觉模型；应用不做本地 OCR） |
+| 网页研究检索 `research-lookup` | 不消耗订阅额度，仅抓取用户给出的公网链接 | **仅桌面**（经 Node 私有运行时） | 只接受公网 HTTPS、禁止重定向、不带凭据与 Cookie、限制体积与超时；结果字段走白名单，模型不能自行生成 URL。Web/移动端如实返回“不可用” | 未执行 |
+
 发布门（未满足即只能发布 preview）：至少两类厂商许可的订阅路径完成真实认证、真实推理与撤销验收；API Key、本地模型与 mock 均不计入。
 
 ## 签名与发布状态（如实说明）
 
 - **Windows**：当前未商业代码签名，SmartScreen 显示「未知发布者」。
 - **macOS**：当前为 ad-hoc 未签名、未公证构建，首次启动需系统安全确认。
-- **Android**：当前为 debug 签名的 APK 预览；正式 release 签名（keystore）待配置后提供 AAB。
+- **Android**：v1.8.0 未产出 APK（本机缺 Android SDK/NDK 与 JDK 17）；如需 Android 预览包，请先配置该工具链，届时仍为 debug 签名的预览版。
 - 桌面打包已集成 AI 运行时：官方 **Node 24.21.0** 以 Tauri sidecar 随包（下载时按官方 `SHASUMS256.txt` 校验），`ai-runtime/`（含依赖，符号链接已解引用）作为资源随包；打包版优先使用内置 Node，开发版回退 `WEALTH_AI_NODE`/PATH。
 - Windows 便携包已在本机构建（109 MB，含 node.exe 与 ai-runtime/）；NSIS/MSI 安装包、macOS 未签名 Universal DMG 与 Linux AppImage/DEB/RPM 由 CI 构建（本机无 macOS/Linux 工具链）。各平台安装后的 AI 冒烟仍需在对应系统人工确认。
 - 上述签名相关，仅在获得对应证书/密钥后在 CI 通过 GitHub Secrets 配置。

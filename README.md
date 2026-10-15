@@ -56,6 +56,12 @@
 - **设置与账户**
   - 个人资料、外观、**本地账户锁**（PBKDF2，不明文，登出不删除资产）、手动版本更新检查、隐私说明
 
+- **月度理财与 AI 能力（v1.8）**
+  - **月度理财工作台**（`#/monthly`）：本期总览 / 资料与对账 / 渠道与持仓 / 资金与风险 / 计划与执行 / 情报与目标 / 月度归档七区 + 分步向导；文档在本地解析入库（按 SHA256 幂等），每月一份正式会话，跨月结转携带来源会话与 revision，来源变更后标记过期而不自动改写
+  - **图片视觉提取**：只有你显式勾选「此连接可接收图片」的连接才会收到图片；最多 4 张 PNG/JPEG/WebP，超限即在发送前失败关闭，不做本地 OCR
+  - **网页研究检索**：只抓取你显式给出的公网 HTTPS 链接（禁止重定向、无凭据、限额限时），**仅桌面可用**，Web/移动端如实提示不可用；模型不能自行生成 URL
+  - **品牌统一为 WealthGrowthTracker**：窗口标题、PWA 名称、关于页与导出元数据一致；`identifier`、存储键、IndexedDB 库名与 Service Worker 缓存前缀保持不变，旧安装与旧数据可原地升级
+
 ---
 
 ## 🛠 技术栈
@@ -203,10 +209,10 @@ npm run build        # 产物在 dist/
 - `*.deb`：系统安装器或 `sudo apt install ./xxx.deb`。
 - `*.rpm`：`sudo rpm -i xxx.rpm`。
 
-### Android（构建可用，正式签名待配置）
+### Android（需自备工具链；v1.8.0 未提供安装包）
 
-- `*.apk`：从 GitHub Release 下载安装，需允许「安装未知来源应用」。
-- 当前 APK 为 **debug 签名的预览版**；正式 release 签名（Play Store / 通用 AAB）待配置密钥后提供。
+- v1.8.0 未上传 APK：构建 Android 包需要 Android SDK/NDK 与 JDK 17，本轮开发机不具备该工具链，因此没有可验证的产物，这里不提供未经验证的下载。
+- 需要自行构建时，先安装上述工具链，再运行 Tauri 的 Android 目标；即便成功也仍是 **debug 签名的预览版**，正式 release 签名（Play Store / 通用 AAB）需配置密钥后提供。
 
 ### Web / PWA（Stable）
 
@@ -227,6 +233,7 @@ npm run build        # 产物在 dist/
 - 应用不读取 Codex、Claude、GitHub CLI 等其它程序的登录令牌，不嵌入 OAuth 客户端密钥。
 - 桌面端凭据写入系统安全存储（Windows Credential Manager / macOS Keychain / Linux Secret Service，失败或不可用时仅提供当前会话临时凭据，绝不落明文），Web 端只保留内存；二类合法订阅（OpenAI 开源应用订阅、GitHub Copilot 订阅）的真实认证/推理/撤销验收尚未完成，界面保持“待资格验证”。API Key、本地模型与 mock 都不代表订阅权益。
 - 桌面包内置官方 Node 24.21.0 运行时（Tauri sidecar，按官方 SHA256 校验）与私有 AI 运行时资源，无需另装 Node；Web 端不含 Node 运行时，只支持显式配置的 HTTPS 网关或本地端点。
+- 图片只在你启用 AI、选择被声明为可读图的连接、并在发送前看到外发范围预览后才会离开本机；网页检索只抓取你粘贴的公网 HTTPS 链接，**仅桌面端可用**，不做后台抓取，也不会用搜索引擎替你补链接。
 - 不接入任何追踪 / 广告 / 统计脚本；日志不记录任何金额/资产数据。
 - 建议定期导出 JSON 备份（桌面版会自动备份）。
 

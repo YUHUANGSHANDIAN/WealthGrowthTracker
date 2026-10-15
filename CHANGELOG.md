@@ -2,6 +2,35 @@
 
 本文件记录「财富成长记 / 财富梦想实现家」各版本的变更。
 
+## [1.8.0] - 2026-10-16
+
+### 品牌与命名
+- 用户可见名称统一为 **WealthGrowthTracker**（窗口标题、HTML 标题、PWA manifest、关于页、锁屏、导出与备份元数据、README）；`identifier`、旧 storage key、IndexedDB 库名与 Service Worker 缓存前缀保持不变，旧安装与旧数据可原地升级。
+- 品牌字符串收敛到单一来源 `src/constants/brand.ts`；更新检查先请求新仓库名，失败后回退旧仓库名，迁移期间两条路径都可用。
+
+### 月度理财工作台（WealthGrowthPlanner）
+- 新增独立域 `src/domain/portfolio/`：金额按分、份额与净值用十进制字符串、比例在域内统一为 0–1；四类总额口径、现金流语义、对账、止盈与再平衡候选、目标情景。
+- 结转可追溯：每个跨月项目携带来源会话、revision、条目与快照日期；只从已确认或已归档会话结转，来源 revision 变化后标记为过期且不自动解决。
+- 文档入库：DOCX/XLSX/图片按 SHA256 幂等入库，解析在本地完成；附件按内容寻址单独存放，状态只保存哈希引用，读取时逐次校验哈希。
+- 七区工作台界面并入主导航（`#/monthly`），共享同一组 selector 与日期范围；JSON 备份包含月度规划结构化数据（不含附件内容）。
+- **未完成**：含附件的单文件归档导入/导出尚未实现（当前只能通过数据目录整体复制，并用附件哈希校验确认完整性），已列入下一版工作包。
+- 数据健康新增 `monthly` 域检查项。
+
+### AI 能力（默认关闭，只读）
+- 新增 `vision-extract`：最多 4 张 PNG/JPEG/WebP，单张与总量均有上限；**只有用户显式声明“此连接可接收图片”的连接才会收到图片**，未声明时发送前失败关闭；Copilot 订阅会话在登记阶段就拒绝读图声明。
+- 新增 `research-lookup`：只抓取用户显式给出的公网 HTTPS 链接，DNS 解析后校验全部地址为公网、禁止重定向、不带凭据与 Cookie、限制体积与超时；结果字段走白名单。**仅桌面端可用**，Web/移动端如实返回不可用，模型不能自行生成 URL。
+- 新增桌面 Broker 命令 `ai_vision_extract` / `ai_research_lookup`，Rust 侧对图片数量、MIME、编码、体积与链接协议独立校验。
+- 新增四个月度理财任务：`document-extraction`、`attribution-explanation`、`research-summary`、`monthly-narrative`；客户端任务白名单同步补齐。
+
+### 质量
+- 新增 AI 运行时测试 `ai-runtime/test/visionResearch.test.mjs`（协议边界、失败关闭、DNS/重定向/内容类型/截断/取消）与客户端测试 `tests/services/aiClient.test.ts`。
+- 本轮实测：typecheck / lint / 584 个前端测试 / Web 构建 / 隐私检查 / 隐私脚本回归 / AI 运行时 55 个测试 / `cargo fmt` / `clippy -D warnings` / `cargo test`（20 个）全部通过。
+
+### 仍待完成（如实记录）
+- 两类合法订阅路径（OpenAI 开源应用订阅、GitHub Copilot 订阅）**真实认证/推理/撤销验收未完成**，界面保持“待资格验证”，本版只能发布 preview。
+- Windows/macOS 无代码签名与公证凭据；本机无 macOS/Linux 交叉工具链；本机无 Android SDK/NDK 与 JDK 17，**Android APK 本轮未构建**，也没有可用的 Android 打包配置。
+- 图片识别质量取决于用户所选视觉模型，应用不做本地 OCR（v1.8.0 不引入离线 OCR 引擎）。
+
 ## [1.7.0] - 2026-10-13
 
 ### 工作台与视觉

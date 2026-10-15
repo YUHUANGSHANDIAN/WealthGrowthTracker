@@ -1,7 +1,7 @@
 {
   "name": "wealth-growth-tracker",
   "private": true,
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "财富成长记 / 财富梦想实现家 —— 本地个人财富管理 Web + Windows 桌面应用（React + TypeScript + Vite + Tauri）",
   "type": "module",
   "engines": {
