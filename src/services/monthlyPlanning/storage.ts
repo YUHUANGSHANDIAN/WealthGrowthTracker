@@ -62,10 +62,19 @@ export function upsertSession(state: MonthlyPlanningState, session: MonthlyRevie
   return { ...state, sessions };
 }
 
+/**
+ * 策略落库：同一 id 的**新版本按版本追加**，同版本原地更新，版本回退一律拒绝。
+ * 旧版本必须保留，否则已确认会话记录的“所用版本”会查不到，
+ * 面板承诺的“改策略产新版本、旧结果仍可复现”也就不成立了。
+ */
 export function upsertPolicy(state: MonthlyPlanningState, policy: InvestmentPolicy): MonthlyPlanningState {
-  const existing = state.policies.find((item) => item.id === policy.id);
-  if (existing && policy.version < existing.version) throw new Error(`策略 ${policy.id} 的版本不能回退`);
-  const policies = existing ? state.policies.map((item) => (item.id === policy.id ? policy : item)) : [...state.policies, policy];
+  const versions = state.policies.filter((item) => item.id === policy.id);
+  const latest = versions.reduce<InvestmentPolicy | null>((acc, item) => (!acc || item.version > acc.version ? item : acc), null);
+  if (latest && policy.version < latest.version) throw new Error(`策略 ${policy.id} 的版本不能回退`);
+  const sameVersion = versions.some((item) => item.version === policy.version);
+  const policies = sameVersion
+    ? state.policies.map((item) => (item.id === policy.id && item.version === policy.version ? policy : item))
+    : [...state.policies, policy];
   return { ...state, policies };
 }
 

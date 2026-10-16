@@ -72,6 +72,100 @@ export function canTransition(from: MonthlyReviewState, to: MonthlyReviewState):
   return MONTHLY_TRANSITIONS[from].includes(to);
 }
 
+/** 自动提取产生的持仓 ID 前缀：holding:doc:<hash12>:<表>:<行>。 */
+export const EXTRACTED_HOLDING_PREFIX = 'holding:doc:';
+
+/**
+ * 沿 MONTHLY_TRANSITIONS 的合法边把会话推进到目标状态：不跳级、不猜路径。
+ * blocked 只作为明确目标时才使用，否则会绕出一条“看起来更短”的错误路径。
+ */
+export function advanceSession(
+  session: MonthlyReview,
+  target: MonthlyReviewState,
+  ctx: TransitionContext,
+): MonthlyReview {
+  if (session.state === target) return session;
+  const path = findTransitionPath(session.state, target);
+  if (!path) throw new Error(`不允许的状态流转：${session.state} → ${target}`);
+  let current = session;
+  for (const [index, next] of path.entries()) {
+    const last = index === path.length - 1;
+    current = transitionSession(current, next, last ? ctx : { now: ctx.now });
+  }
+  return current;
+}
+
+function findTransitionPath(from: MonthlyReviewState, to: MonthlyReviewState): MonthlyReviewState[] | null {
+  const queue: MonthlyReviewState[][] = [[from]];
+  const visited = new Set<MonthlyReviewState>([from]);
+  while (queue.length) {
+    const path = queue.shift() as MonthlyReviewState[];
+    const tail = path[path.length - 1] as MonthlyReviewState;
+    for (const next of MONTHLY_TRANSITIONS[tail]) {
+      if (next === 'blocked' && to !== 'blocked') continue;
+      if (next === to) return [...path.slice(1), next];
+      if (visited.has(next)) continue;
+      visited.add(next);
+      queue.push([...path, next]);
+    }
+  }
+  return null;
+}
+
+export interface ConfirmBlockerInput {
+  session: MonthlyReview | null;
+  issues: readonly SessionIssue[];
+  /** 当前生效策略的版本；没有策略时传 null。 */
+  currentPolicyVersion: number | null;
+}
+
+/**
+ * 确认月度计划的前置条件，按顺序给出用户能直接照做的原因。
+ * 面板用它禁用按钮并说明原因，而不是让用户点下去才吃到一个异常。
+ */
+export function confirmBlockers(input: ConfirmBlockerInput): string[] {
+  const { session, issues, currentPolicyVersion } = input;
+  if (!session) return ['请先创建本月会话'];
+  if (session.state === 'confirmed' || session.state === 'archived') return ['月度计划已确认，无需重复确认'];
+  const blockers: string[] = [];
+  const errors = issues.filter((issue) => issue.severity === 'error');
+  if (errors.length) blockers.push(`存在 ${errors.length} 项错误级问题：${errors[0]?.message ?? ''}`);
+  if (!session.proposal) blockers.push('还没有候选方案，请先点「生成候选」');
+  if (session.policyId === null || session.policyVersion === null) {
+    blockers.push('会话还没有绑定策略版本，请先点「生成候选」');
+  } else if (session.proposal && session.proposal.policyVersion !== session.policyVersion) {
+    blockers.push(`候选基于策略 v${session.proposal.policyVersion}，会话记录 v${session.policyVersion}，请重新生成候选`);
+  } else if (currentPolicyVersion !== null && currentPolicyVersion !== session.policyVersion) {
+    blockers.push(`策略已更新到 v${currentPolicyVersion}，候选基于 v${session.policyVersion}，请重新生成候选`);
+  }
+  return blockers;
+}
+
+export interface ClearAutoFactsResult {
+  session: MonthlyReview;
+  removedHoldings: number;
+  removedObservations: number;
+}
+
+/**
+ * 清空自动提取出来的持仓与观察（保留资料、附件、资金流、策略、研究与执行回执）。
+ * 只认 id 前缀，不依赖文档内容；已进入计划或已完成的会话拒绝清空。
+ */
+export function clearAutoExtractedFacts(session: MonthlyReview, now: string): ClearAutoFactsResult {
+  if (session.state === 'planned' || session.state === 'confirmed' || session.state === 'archived') {
+    throw new Error('会话已进入计划或已完成，如需重来请先删除会话');
+  }
+  const holdings = session.holdings.filter((holding) => !holding.id.startsWith(EXTRACTED_HOLDING_PREFIX));
+  const keptIds = new Set(holdings.map((holding) => holding.id));
+  const observations = session.observations.filter((observation) => keptIds.has(observation.holdingId));
+  const cleared: MonthlyReview = { ...session, holdings, observations, proposal: null };
+  return {
+    session: session.state === 'ready' ? transitionSession(cleared, 'reviewing', { now }) : cleared,
+    removedHoldings: session.holdings.length - holdings.length,
+    removedObservations: session.observations.length - observations.length,
+  };
+}
+
 export interface TransitionContext {
   issues?: readonly SessionIssue[];
   baseDataRevision?: number;

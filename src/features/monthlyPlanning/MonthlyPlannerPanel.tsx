@@ -15,7 +15,9 @@ import { reconcile } from '../../domain/portfolio/reconcile';
 import { evaluatePolicy } from '../../domain/portfolio/policy';
 import { generateProposal, type ProposalPosition } from '../../domain/portfolio/proposals';
 import { goalScenarios, impliedAnnualRate, requiredMonthlyContribution } from '../../domain/portfolio/goalScenarios';
-import { createDraftSession, monthlyPlanKey, transitionSession } from '../../domain/portfolio/session';
+import {
+  advanceSession, clearAutoExtractedFacts, confirmBlockers, createDraftSession, monthlyPlanKey,
+} from '../../domain/portfolio/session';
 import { buildDraftInput } from './sessionDraft';
 import { validateMonthlySession, type SessionIssue } from '../../domain/portfolio/invariants';
 import { carryOverPlan, markCarryOverStale, summarizeCarryOver, checkPeriodContinuity, type CarriedItem } from '../../domain/portfolio/carryOver';
@@ -56,6 +58,13 @@ function previousMonth(month: string): string {
   const [year, mon] = month.split('-').map(Number);
   if (!year || !mon) return month;
   return mon === 1 ? `${year - 1}-12` : `${year}-${String(mon - 1).padStart(2, '0')}`;
+}
+
+/** 策略按版本追加保存，取“该 id 的最高版本”；没有指定 id 时取全局最高版本。 */
+function latestPolicy(policies: readonly InvestmentPolicy[], policyId: string | null | undefined): InvestmentPolicy | null {
+  const scoped = policyId ? policies.filter((item) => item.id === policyId) : [];
+  const pool = scoped.length ? scoped : policies;
+  return pool.reduce<InvestmentPolicy | null>((acc, item) => (!acc || item.version > acc.version ? item : acc), null);
 }
 
 function defaultPolicy(now: string): InvestmentPolicy {
@@ -105,7 +114,7 @@ export function MonthlyPlannerPanel() {
 
   const session = planning.sessions.find((item) => item.key === monthlyPlanKeySafe(month)) ?? null;
   const previous = planning.sessions.find((item) => item.key === monthlyPlanKeySafe(previousMonth(month)) && (item.state === 'confirmed' || item.state === 'archived')) ?? null;
-  const policy = planning.policies.find((item) => item.id === session?.policyId) ?? planning.policies[planning.policies.length - 1] ?? null;
+  const policy = latestPolicy(planning.policies, session?.policyId);
 
   useEffect(() => {
     if (!importChannelId && channels[0]) setImportChannelId(channels[0].id);
@@ -135,14 +144,19 @@ export function MonthlyPlannerPanel() {
   }, [session, channels]);
 
   const hardErrors = issues.filter((issue) => issue.severity === 'error');
+  const confirmationBlockers = confirmBlockers({ session, issues, currentPolicyVersion: policy?.version ?? null });
   const dueToday = todayString().slice(8, 10) >= String(planning.settings.reminderDay).padStart(2, '0');
 
-  async function save(next: MonthlyReview, label?: string) {
+  /** 保存会话；成功时返回落库后的对象（revision 已递增），失败返回 null。 */
+  async function save(next: MonthlyReview, label?: string): Promise<MonthlyReview | null> {
     setBusy(true); setError(null);
+    const updated: MonthlyReview = { ...next, revision: next.revision + 1 };
     try {
-      await upsertMonthlySession({ ...next, revision: next.revision + 1 }, label);
+      await upsertMonthlySession(updated, label);
+      return updated;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '保存失败');
+      return null;
     } finally {
       setBusy(false);
     }
@@ -160,9 +174,17 @@ export function MonthlyPlannerPanel() {
 
   async function handleFiles(files: FileList | null) {
     if (!files?.length || !session) return;
+    if (session.state === 'planned' || session.state === 'confirmed' || session.state === 'archived') {
+      setError('会话已进入计划或已完成，如需重新导入请先删除会话，或先清空自动候选再重来');
+      return;
+    }
+    const startedAt = new Date().toISOString();
+    // 先落一次 extracting：导入中断时留下可见的阶段痕迹，而不是只报错不留痕。
+    const started = await save(advanceSession(session, 'extracting', { now: startedAt }), '正在提取资料');
+    if (!started) return;
     setBusy(true); setError(null);
     try {
-      let next: MonthlyReview = { ...session };
+      let next: MonthlyReview = { ...started };
       const documents = [...next.documents];
       const holdings = [...next.holdings];
       const observations = [...next.observations];
@@ -180,13 +202,14 @@ export function MonthlyPlannerPanel() {
         const document = { ...intake.document, relativePath: attachment.key, parseState: 'parsed' as const };
         if (kind === 'docx') {
           const extraction = await extractDocxFromPackage(bytes);
-          const { rows, duplicates } = extractHoldingRows(extraction.tables, {
+          const { rows, duplicates, tableIssues } = extractHoldingRows(extraction.tables, {
             sourceId: document.id, extractor: 'ooxml', extractorVersion: '1',
           });
           if (duplicates) warnings.push(`${file.name}：忽略 ${duplicates} 行重复内容（替代表示或重复行）`);
+          if (tableIssues.length) warnings.push(`${file.name}：${tableIssues.join('；')}`);
           for (const candidate of rows) {
             const holdingId = `holding:${document.id}:${candidate.tableIndex}:${candidate.rowIndex}`;
-            holdings.push(candidateToHolding(candidate, holdingId, importChannelId));
+            holdings.push(candidateToHolding(candidate, holdingId, importChannelId, document.platform));
             observations.push(candidateToObservation(candidate, holdingId, session.key, document.id));
           }
           if (!rows.length) warnings.push(`${file.name}：未识别到持仓行，请手工补充`);
@@ -209,7 +232,7 @@ export function MonthlyPlannerPanel() {
         documents.push(document);
       }
       next = { ...next, documents, holdings, observations };
-      await save(next, '正在保存导入资料');
+      await save(advanceSession(next, 'reviewing', { now: new Date().toISOString() }), '正在保存导入资料');
       if (warnings.length) pushToast(warnings.join('；'), 'info');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '导入失败');
@@ -218,10 +241,10 @@ export function MonthlyPlannerPanel() {
     }
   }
 
-  function candidateToHolding(candidate: HoldingRowCandidate, id: string, channelId: string): Holding {
+  function candidateToHolding(candidate: HoldingRowCandidate, id: string, channelId: string, platform: Holding['platform']): Holding {
     return {
       id,
-      platform: 'manual',
+      platform,
       parentChannelId: channelId,
       fundCode: candidate.fundCode ?? undefined,
       originalName: candidate.name ?? candidate.fundCode ?? '未命名持仓',
@@ -239,7 +262,7 @@ export function MonthlyPlannerPanel() {
       shares: candidate.shares,
       marketValue: candidate.marketValue,
       nav: candidate.nav,
-      ...(candidate.nav ? { navDate: todayString() } : {}),
+      ...(candidate.navDate ? { navDate: candidate.navDate } : {}),
       evidence: candidate.evidence.map((ref) => ({ ...ref, sourceId })),
       quality: {
         source: 'evidence',
@@ -276,29 +299,59 @@ export function MonthlyPlannerPanel() {
 
   async function generate() {
     if (!session) return;
-    const active = policy ?? defaultPolicy(todayString());
-    const positions = buildPositions(session);
-    const investable = investableTotalOf(session, channelsTotal(channels), restrictedTotal);
-    const unknownCount = session.observations.filter((observation) => observation.marketValue === null).length;
-    const proposal = generateProposal(active, {
-      investableTotal: investable,
-      availableCash: usableCash(liabilityTotal === '' ? null : Number(liabilityTotal), annualIncomeByMonth),
-      positions,
-      dataRed: unknownCount > 0 && session.observations.length > 0,
-      ...(unknownCount ? { dataRedReasons: [`存在 ${unknownCount} 条金额未知的持仓，请先补齐或标记为未知`] } : {}),
-    }, { sessionKey: session.key, now: new Date().toISOString() });
-    await save({ ...session, proposal }, '正在保存候选方案');
+    const now = new Date().toISOString();
+    try {
+      // 默认策略必须先落库再使用，否则会话记录的策略版本查不到，健康检查会报“策略版本缺失”。
+      let active = policy;
+      if (!active) {
+        active = defaultPolicy(todayString());
+        await saveMonthlyPolicy(active);
+      }
+      const positions = buildPositions(session);
+      const investable = investableTotalOf(session, channelsTotal(channels), restrictedTotal);
+      const unknownCount = session.observations.filter((observation) => observation.marketValue === null).length;
+      const proposal = generateProposal(active, {
+        investableTotal: investable,
+        availableCash: usableCash(liabilityTotal === '' ? null : Number(liabilityTotal), annualIncomeByMonth),
+        positions,
+        dataRed: unknownCount > 0 && session.observations.length > 0,
+        ...(unknownCount ? { dataRedReasons: [`存在 ${unknownCount} 条金额未知的持仓，请先补齐或标记为未知`] } : {}),
+      }, { sessionKey: session.key, now });
+      const ready = advanceSession(
+        { ...session, proposal, policyId: active.id, policyVersion: active.version },
+        'ready',
+        { now },
+      );
+      await save(ready, '正在保存候选方案');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '生成候选失败');
+    }
   }
 
   async function confirmPlan() {
     if (!session) return;
+    const blockers = confirmBlockers({ session, issues, currentPolicyVersion: policy?.version ?? null });
+    if (blockers.length) { setError(blockers.join('；')); return; }
     try {
-      const planned = transitionSession(session, 'planned', { now: new Date().toISOString() });
-      const confirmed = transitionSession(planned, 'confirmed', { now: new Date().toISOString(), baseDataRevision: dataRevision, issues });
+      const now = new Date().toISOString();
+      const confirmed = advanceSession(session, 'confirmed', { now, baseDataRevision: dataRevision, issues });
       await save(confirmed, '正在确认月度计划');
       pushToast('月度计划已确认（未成交，需要你手工执行）', 'success');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '确认失败');
+    }
+  }
+
+  /** 清空自动提取的持仓与观察，保留资料、附件与手工内容。 */
+  async function clearAutoCandidates() {
+    if (!session) return;
+    try {
+      const result = clearAutoExtractedFacts(session, new Date().toISOString());
+      const saved = await save(result.session, '正在清空自动提取的候选');
+      if (!saved) return;
+      pushToast(`已清空 ${result.removedHoldings} 条自动提取的持仓、${result.removedObservations} 条观察；资料与附件保留`, 'success');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '清空失败');
     }
   }
 
@@ -352,7 +405,7 @@ export function MonthlyPlannerPanel() {
             {session && <span className="ml-2 text-xs text-slate-500">revision {session.revision} · 快照 {session.snapshotAsOf}</span>}
           </div>
           <Button disabled={busy} onClick={() => void openOrCreate()}>{session ? '本月会话已存在' : '创建本月会话'}</Button>
-          <Button variant="outline" disabled={!session || busy || hardErrors.length > 0} onClick={() => void confirmPlan()}>确认月度计划</Button>
+          <Button variant="outline" disabled={!session || busy || confirmationBlockers.length > 0} onClick={() => void confirmPlan()}>确认月度计划</Button>
           <div className="ml-auto text-xs text-slate-500">
             提醒：每月 {planning.settings.reminderDay} 日 {planning.settings.reminderTime}（{planning.settings.timezone}）
             <label className="ml-2 inline-flex items-center gap-1">
@@ -367,6 +420,9 @@ export function MonthlyPlannerPanel() {
           </p>
         )}
         {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
+        {!error && session && confirmationBlockers.length > 0 && (
+          <p className="mt-3 text-sm text-slate-600">还不能确认月度计划：{confirmationBlockers.join('；')}</p>
+        )}
         <div className="mt-3 flex flex-wrap gap-1.5">
           {SECTIONS.map((item) => (
             <button key={item.id} type="button" aria-current={section === item.id ? 'page' : undefined}
@@ -460,6 +516,18 @@ export function MonthlyPlannerPanel() {
       {section === 'holdings' && (
         <Card className="p-4">
           <h3 className="font-semibold mb-2">渠道与持仓</h3>
+          {session && (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline"
+                disabled={busy || ['planned', 'confirmed', 'archived'].includes(session.state)}
+                onClick={() => void clearAutoCandidates()}>清空自动提取的候选</Button>
+              <span className="text-xs text-slate-500">
+                {['planned', 'confirmed', 'archived'].includes(session.state)
+                  ? '已进入计划或已完成，如需重来请先删除会话。'
+                  : '删除由文档自动提取的持仓与观察（保留资料与附件），用于重新核对列含义或改用手工录入。'}
+              </span>
+            </div>
+          )}
           {!session?.holdings.length ? <EmptyState icon="📊" title="还没有持仓" description="先导入资料，或在下方手工补充。" /> : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

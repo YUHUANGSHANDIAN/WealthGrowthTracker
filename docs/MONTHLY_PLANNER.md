@@ -23,6 +23,18 @@
 `draft → extracting → reviewing → ready → planned → confirmed → archived`，另有 `blocked` 分支。
 「确认数据」「批准计划」「实际执行」是三个不同事件；确认需要候选方案、策略版本与主应用数据版本齐备，且无错误级问题。
 
+当前实现里各状态由这些动作推进（`advanceSession` 只沿合法边前进，不跳级）：
+
+| 用户动作 | 状态推进 |
+|---|---|
+| 创建本月会话 | → `draft` |
+| 导入资料 | `draft → extracting`，解析成功后再 `→ reviewing` |
+| 生成候选（同时把策略版本绑进会话） | `→ ready` |
+| 确认月度计划 | `→ planned → confirmed` |
+
+`archived` 与 `blocked` 目前没有界面入口；`confirmed` 与 `archived` 一样会被下月会话承接（T02）。
+确认前若策略被改过，「确认月度计划」会提示重新生成候选，而不是让旧版本候选被确认。
+
 ## 4. 月初承接与可追溯性（验收项 T）
 
 新月份开始时，工作台从上月**已确认或已归档**会话承接未完成事项，每一项都必须能回溯来源：

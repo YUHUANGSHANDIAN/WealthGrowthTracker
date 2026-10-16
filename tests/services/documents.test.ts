@@ -224,3 +224,58 @@ describe('结构化持仓候选', () => {
     expect(duplicates).toBe(1);
   });
 });
+
+describe('真实导出表头形状的列映射', () => {
+  const extract = (body: string) =>
+    extractHoldingRows(extractDocx(documentXml(body)).tables, { sourceId: 'doc-real', extractor: 'ooxml', extractorVersion: '1' });
+
+  it('微信：序号被忽略，查询份额进 shares、查询市值进 marketValue', () => {
+    const wechat = `<w:tbl>${row('序号NO.', '基金名称Fund name', '基金代码Fund code', '查询份额Fund shares', '查询市值(元)Market value(CNY)')}${row('01', '华泰柏瑞鼎利混合C', '004011', '1,234.56', '8,000.00')}</w:tbl>`;
+    const { rows, columnMap, tableIssues } = extract(wechat);
+    expect(columnMap).toMatchObject({ fundCode: 2, name: 1, shares: 3, marketValue: 4 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.fundCode).toBe('004011');
+    expect(rows[0]!.name).toBe('华泰柏瑞鼎利混合C');
+    // 回归：修复前这两列被取反（序号被当成市值）。
+    expect(rows[0]!.shares).toBe('1234.56');
+    expect(rows[0]!.marketValue).toBe(8000);
+    expect(rows[0]!.issues).toEqual([]);
+    expect(tableIssues).toEqual([]);
+  });
+
+  it('支付宝：交易账号与序号被忽略，净值日期不被当成净值，分页续表的行沿用同一映射', () => {
+    const alipay = `<w:tbl>${row('序号', '基金交易账号', '基金名称', '基金代码', '总份额', '单位净值', '单位净值日期', '资产小计')}${row('1', '1234567890', '华安乾煜债券A(鑫选目标盈)', '013650', '1,000.50', '1.2340', '20260720', '1,234.56')}</w:tbl>`
+      + `<w:tbl>${row('2', '1234567890', '鹏华丰享债券', '004388', '2,000.00', '1.5000', '2026-07-20', '3,000.00')}</w:tbl>`;
+    const { rows, columnMap } = extract(alipay);
+    expect(columnMap).toMatchObject({ fundCode: 3, name: 2, shares: 4, nav: 5, navDate: 6, marketValue: 7 });
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!).toMatchObject({ fundCode: '013650', shares: '1000.50', nav: '1.2340', navDate: '2026-07-20', marketValue: 1234.56 });
+    expect(rows[1]!).toMatchObject({ fundCode: '004388', shares: '2000.00', nav: '1.5000', navDate: '2026-07-20', marketValue: 3000 });
+    expect(rows[0]!.issues).toEqual([]);
+  });
+
+  it('没有表头时退回位置推定，但必须带问题提示', () => {
+    const headerless = `<w:tbl>${row('000001', '华夏成长', '1,234.56')}</w:tbl>`;
+    const { rows, columnMap, tableIssues } = extract(headerless);
+    expect(columnMap).toBeNull();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.marketValue).toBe(1234.56);
+    expect(tableIssues.join()).toContain('未识别表头');
+  });
+
+  it('同一列命中多个关键字时忽略该列并提示', () => {
+    const ambiguous = `<w:tbl>${row('基金代码', '产品名称', '份额净值', '市值')}${row('000001', '华夏成长', '1,200.00', '1,234.56')}</w:tbl>`;
+    const { tableIssues } = extract(ambiguous);
+    expect(tableIssues.join()).toContain('同时匹配');
+  });
+
+  it('有净值却读不到净值日期时不写净值，避免用当天日期冒充', () => {
+    const noDate = `<w:tbl>${row('基金代码', '基金名称', '总份额', '单位净值', '资产小计')}${row('013650', '华安乾煜债券A', '1,000.50', '1.2340', '1,234.56')}</w:tbl>`;
+    const { rows } = extract(noDate);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.nav).toBeNull();
+    expect(rows[0]!.navDate).toBeNull();
+    expect(rows[0]!.issues.join()).toContain('缺少净值日期');
+    expect(rows[0]!.marketValue).toBe(1234.56);
+  });
+});

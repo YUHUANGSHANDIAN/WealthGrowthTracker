@@ -49,6 +49,17 @@ describe('月度理财持久化', () => {
     expect(() => recordExecution(executed, 'monthly-planning:2026-07', { id: 'e2', proposalId: 'p1', actionId: 'missing', status: 'executed', evidence: [] })).toThrow('不存在');
     expect(() => recordExecution(executed, 'monthly-planning:2026-08', { id: 'e3', proposalId: 'p1', actionId: 'a1', status: 'executed', evidence: [] })).toThrow('会话不存在');
   });
+  it('同 id 的新策略版本按版本追加，旧版本仍可查，同版本原地更新', () => {
+    let state = upsertPolicy(emptyMonthlyPlanningState(), policy(1));
+    state = upsertPolicy(state, policy(2));
+    expect(state.policies.map((item) => item.version).sort()).toEqual([1, 2]);
+    // 已确认会话记录的旧版本必须仍然查得到，否则会被健康检查误报“策略版本缺失”。
+    expect(state.policies.find((item) => item.version === 1)).toBeDefined();
+    state = upsertPolicy(state, { ...policy(2), cooldownDays: 5 });
+    expect(state.policies).toHaveLength(2);
+    expect(state.policies.find((item) => item.version === 2)?.cooldownDays).toBe(5);
+    expect(() => upsertPolicy(state, policy(1))).toThrow('版本不能回退');
+  });
   it('删除会话按明确键，汇总统计可用', () => {
     const state = upsertSession(emptyMonthlyPlanningState(), session({ state: 'confirmed' }));
     expect(summarizeMonthlyState(state).confirmed).toBe(1);
