@@ -84,9 +84,14 @@ Windows 本地已完成该冒烟（见下方“签名与发布状态”）；mac
 - **macOS**：当前为 ad-hoc 未签名、未公证构建，首次启动需系统安全确认。
 - **Android**：由 CI 构建 debug 签名的预览包，**不是正式签名**，请勿用于分发；若某次 Release 未列出 APK，说明该次构建未产出（本机不具备 Android SDK/NDK 与 JDK 17，无法本地复现）。
 - 桌面打包已集成 AI 运行时：官方 **Node 24.21.0** 以 Tauri sidecar 随包（下载时按官方 `SHASUMS256.txt` 校验），`ai-runtime/`（含依赖，符号链接已解引用）作为资源随包；打包版优先使用内置 Node，开发版回退 `WEALTH_AI_NODE`/PATH。
-- **Windows 打包运行时冒烟：已通过（2026-10-16）**。对安装版的 sidecar 直接跑协议帧：`status`
-  返回 `runtime=enabled`、`tools=[]`、`credentials=private-broker-memory-only`、各 provider 如实报
-  `unsupported`；未配置连接时 `infer` 与 `vision-extract` 都返回 `PROFILE_UNAVAILABLE`（失败关闭，
-  不泄漏内部信息）；不带 `--enable-ai-runtime` 时进程以退出码 2 拒绝启动（AI 默认关闭在进程级成立）。
+- **Windows 打包运行时冒烟：已通过（2026-10-16，对已安装的 v1.8.0-preview.3 构建复测）**。
+  对安装版的 sidecar 直接跑协议帧：`status` 返回 `runtime=enabled`、`tools=[]`、
+  `credentials=private-broker-memory-only`、各 provider 如实报 `unsupported`；未配置连接时 `infer` 与
+  `vision-extract` 都返回 `PROFILE_UNAVAILABLE`（失败关闭，不泄漏内部信息）；不带 `--enable-ai-runtime`
+  时进程以退出码 2 拒绝启动（AI 默认关闭在进程级成立）。
+- 同一次冒烟里，`research-lookup` 走通了真实网络：`https://example.com/` 返回 `ok=true`、状态 200、
+  标题 `Example Domain` 与去标签后的摘录（未截断，577 字节）；`https://example.com/a` 如实报 404
+  `FETCH_FAILED`；含 `http://`、带凭据或回环地址的整批请求被协议层以 `INVALID_URL` 拒绝。
+  也就是说**抓取这一段已是真实链路**，仍需真实账号验收的是拿到摘录之后的模型这一步。
 - macOS / Linux / Android：本机无对应系统，AI 冒烟**未执行**，请用上面的可复制命令在对应系统确认。
 - 上述签名相关，仅在获得对应证书/密钥后在 CI 通过 GitHub Secrets 配置。
