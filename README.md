@@ -209,10 +209,10 @@ npm run build        # 产物在 dist/
 - `*.deb`：系统安装器或 `sudo apt install ./xxx.deb`。
 - `*.rpm`：`sudo rpm -i xxx.rpm`。
 
-### Android（需自备工具链；v1.8.0 未提供安装包）
+### Android（CI 构建的 debug 签名预览包）
 
-- v1.8.0 未上传 APK：构建 Android 包需要 Android SDK/NDK 与 JDK 17，本轮开发机不具备该工具链，因此没有可验证的产物，这里不提供未经验证的下载。
-- 需要自行构建时，先安装上述工具链，再运行 Tauri 的 Android 目标；即便成功也仍是 **debug 签名的预览版**，正式 release 签名（Play Store / 通用 AAB）需配置密钥后提供。
+- `WealthGrowthTracker_*_android-preview.apk`：由 CI 使用 Android SDK/NDK 与 JDK 17 构建；若某次 Release 未列出该附件，说明该次未产出（开发机不具备该工具链，无法本地复现）。
+- 该 APK 为 **debug 签名的预览版**，仅供试用；正式 release 签名（Play Store / 通用 AAB）需配置密钥后提供。
 
 ### Web / PWA（Stable）
 

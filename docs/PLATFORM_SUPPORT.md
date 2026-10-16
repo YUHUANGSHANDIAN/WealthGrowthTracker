@@ -7,7 +7,7 @@
 | Windows | x64 | ✅ Stable | 未代码签名（SmartScreen 提示，可绕过） |
 | macOS | Apple Silicon + Intel（Universal） | ✅ Stable build | ❌ ad-hoc 未签名 / 未公证 |
 | Linux | x86_64 | ✅ Stable | — |
-| Android | arm64-v8a / armeabi-v7a / x86_64 | ⚠️ 需要 Android SDK/NDK 与 JDK 17 才能构建；本机无该工具链，v1.8.0 未产出 APK | ❌ 正式 release 签名待配置 |
+| Android | arm64-v8a / armeabi-v7a / x86_64 | ⚠️ 由 CI 用 Android SDK/NDK 与 JDK 17 构建 debug 签名预览包（本机无该工具链，未做本机验证） | ❌ 正式 release 签名待配置 |
 | Web / PWA | 任意现代浏览器 | ✅ Stable | — |
 | HarmonyOS | — | ⚠️ Experimental / PWA fallback | 见 [HARMONYOS.md](HARMONYOS.md) |
 
@@ -59,7 +59,7 @@ AI 默认关闭，每次启动重置；关闭时不启动运行时、不联网�
 
 - **Windows**：当前未商业代码签名，SmartScreen 显示「未知发布者」。
 - **macOS**：当前为 ad-hoc 未签名、未公证构建，首次启动需系统安全确认。
-- **Android**：v1.8.0 未产出 APK（本机缺 Android SDK/NDK 与 JDK 17）；如需 Android 预览包，请先配置该工具链，届时仍为 debug 签名的预览版。
+- **Android**：由 CI 构建 debug 签名的预览包，**不是正式签名**，请勿用于分发；若某次 Release 未列出 APK，说明该次构建未产出（本机不具备 Android SDK/NDK 与 JDK 17，无法本地复现）。
 - 桌面打包已集成 AI 运行时：官方 **Node 24.21.0** 以 Tauri sidecar 随包（下载时按官方 `SHASUMS256.txt` 校验），`ai-runtime/`（含依赖，符号链接已解引用）作为资源随包；打包版优先使用内置 Node，开发版回退 `WEALTH_AI_NODE`/PATH。
 - Windows 便携包已在本机构建（109 MB，含 node.exe 与 ai-runtime/）；NSIS/MSI 安装包、macOS 未签名 Universal DMG 与 Linux AppImage/DEB/RPM 由 CI 构建（本机无 macOS/Linux 工具链）。各平台安装后的 AI 冒烟仍需在对应系统人工确认。
 - 上述签名相关，仅在获得对应证书/密钥后在 CI 通过 GitHub Secrets 配置。

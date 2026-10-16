@@ -28,7 +28,7 @@
 
 ### 仍待完成（如实记录）
 - 两类合法订阅路径（OpenAI 开源应用订阅、GitHub Copilot 订阅）**真实认证/推理/撤销验收未完成**，界面保持“待资格验证”，本版只能发布 preview。
-- Windows/macOS 无代码签名与公证凭据；本机无 macOS/Linux 交叉工具链；本机无 Android SDK/NDK 与 JDK 17，**Android APK 本轮未构建**，也没有可用的 Android 打包配置。
+- Windows/macOS 无代码签名与公证凭据；本机只有 Windows 工具链，macOS/Linux 包由 CI 构建。本机无 Android SDK/NDK 与 JDK 17，**Android 预览包只能由 CI 构建且未经本机验证**；若某次构建未产出 APK，则该附件不会出现在 Release 中。
 - 图片识别质量取决于用户所选视觉模型，应用不做本地 OCR（v1.8.0 不引入离线 OCR 引擎）。
 
 ## [1.7.0] - 2026-10-13
