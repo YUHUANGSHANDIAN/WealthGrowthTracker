@@ -2,6 +2,7 @@ import { validateLedgerShape, validateFinancialExtensions } from '../services/st
 import {
   emptyMonthlyPlanningState, parseMonthlyPlanningState, recordExecution, removeSession, upsertPolicy, upsertSession,
 } from '../services/monthlyPlanning/storage';
+import { migrateInlineAttachments } from '../services/monthlyPlanning/attachmentStore';
 import type { ExecutionRecord, InvestmentPolicy, MonthlyPlanningState, MonthlyReview } from '../domain/portfolio/types';
 import { create } from 'zustand';
 import type {
@@ -755,6 +756,17 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         if (migrationNote) get().pushToast(migrationNote, 'info');
       }
       await storageService.flushAdapter();
+      // 历史版本把附件内联在状态文件里（导致状态文件涨到 9 MB、每次保存都在重写它）。
+      // 这里把它们搬到数据根下的独立文件；失败不阻塞启动，附件仍可按内联值读取。
+      try {
+        const moved = await migrateInlineAttachments();
+        if (moved) {
+          await storageService.flushAdapter();
+          get().pushToast(`已把 ${moved} 个附件移出状态文件（改为独立文件存储）`, 'info');
+        }
+      } catch (error) {
+        console.warn('[monthly] 附件外移失败，仍按内联值读取:', error);
+      }
       set({ hydrated: true });
       } catch (error) {
         storageService.pauseWrites();

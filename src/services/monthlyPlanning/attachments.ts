@@ -1,12 +1,14 @@
-import { storageService } from '../storage';
-import { StorageWriteError } from '../storage/desktop';
+import { attachmentBackend } from './attachmentStore';
+import {
+  ATTACHMENT_PREFIX, AttachmentError, attachmentKey, base64ToBytes, bytesToBase64, isAttachmentKey, sha256Hex,
+} from './attachmentCodec';
 
 /**
  * 附件库：内容寻址存储，状态里只保留引用 + SHA-256。
- * 存的是独立存储键（`monthly-attach:<sha256>.<ext>`），因此结构化备份不会包含附件内容；
- * 完整含附件备份需要显式枚举这些键。
+ * 桌面端落在数据根下的 `monthly-planning/attachments/`，浏览器端落在适配器键上；
+ * 无论哪种，**状态文件本身都不再承载附件内容**（否则每次保存都要重写几 MB）。
  */
-export const ATTACHMENT_PREFIX = 'monthly-attach:';
+export { ATTACHMENT_PREFIX, AttachmentError, attachmentKey, isAttachmentKey, base64ToBytes, bytesToBase64, sha256Hex };
 
 export interface AttachmentRef {
   key: string;
@@ -16,63 +18,21 @@ export interface AttachmentRef {
   name: string;
 }
 
-export class AttachmentError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'AttachmentError';
-  }
-}
-
-export function attachmentKey(hash: string, name: string): string {
-  if (!/^[a-f0-9]{64}$/.test(hash)) throw new AttachmentError('附件哈希无效');
-  const extension = /\.([A-Za-z0-9]+)$/.exec(name)?.[1]?.toLowerCase() ?? 'bin';
-  return `${ATTACHMENT_PREFIX}${hash}.${extension}`;
-}
-
-export function isAttachmentKey(key: string): boolean {
-  return key.startsWith(ATTACHMENT_PREFIX) && /^[a-f0-9]{64}\.[a-z0-9]+$/.test(key.slice(ATTACHMENT_PREFIX.length));
-}
-
-export function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunk = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
-  }
-  return btoa(binary);
-}
-
-export function base64ToBytes(text: string): Uint8Array {
-  const binary = atob(text);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
-}
-
-export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes.slice().buffer);
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
 export async function putAttachment(input: { name: string; mime: string; bytes: Uint8Array }): Promise<AttachmentRef> {
   if (!input.bytes.length) throw new AttachmentError('附件为空');
   const hash = await sha256Hex(input.bytes);
   const key = attachmentKey(hash, input.name);
-  const existing = await storageService.getRaw(key);
-  if (existing) {
+  const backend = attachmentBackend();
+  if (await backend.exists(key)) {
     return { key, sha256: hash, bytes: input.bytes.length, mime: input.mime, name: input.name };
   }
-  try {
-    await storageService.setRaw(key, bytesToBase64(input.bytes));
-  } catch (error) {
-    throw new AttachmentError(`附件保存失败：${error instanceof StorageWriteError ? error.message : '存储不可用'}`);
-  }
+  await backend.write(key, bytesToBase64(input.bytes));
   return { key, sha256: hash, bytes: input.bytes.length, mime: input.mime, name: input.name };
 }
 
 export async function getAttachment(ref: Pick<AttachmentRef, 'key' | 'sha256'>): Promise<Uint8Array> {
   if (!isAttachmentKey(ref.key)) throw new AttachmentError('附件引用无效');
-  const raw = await storageService.getRaw(ref.key);
+  const raw = await attachmentBackend().read(ref.key);
   if (raw === null) throw new AttachmentError('附件不存在（可能已被清理）');
   const bytes = base64ToBytes(raw);
   const hash = await sha256Hex(bytes);
@@ -83,7 +43,7 @@ export async function getAttachment(ref: Pick<AttachmentRef, 'key' | 'sha256'>):
 /** 单个明确键的删除；不做前缀批删。 */
 export async function removeAttachment(key: string): Promise<void> {
   if (!isAttachmentKey(key)) throw new AttachmentError('附件引用无效，拒绝删除');
-  await storageService.remove(key);
+  await attachmentBackend().remove(key);
 }
 
 export async function verifyAttachment(ref: Pick<AttachmentRef, 'key' | 'sha256'>): Promise<{ ok: boolean; reason?: string }> {

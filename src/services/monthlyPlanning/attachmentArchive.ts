@@ -1,5 +1,5 @@
 import { APP_VERSION } from '../../constants/version';
-import { storageService } from '../storage';
+import { attachmentBackend } from './attachmentStore';
 import type { MonthlyPlanningState } from '../../domain/portfolio/types';
 import {
   AttachmentError, base64ToBytes, bytesToBase64, getAttachment, isAttachmentKey, putAttachment, sha256Hex,
@@ -199,7 +199,7 @@ export async function importAttachmentArchive(archive: AttachmentArchive): Promi
   let skipped = 0;
   for (const { entry, bytes } of verified) {
     try {
-      const existing = await storageService.getRaw(entry.key);
+      const existing = await attachmentBackend().read(entry.key);
       if (existing !== null) {
         const existingBytes = base64ToBytes(existing);
         const existingHash = await sha256Hex(existingBytes);
@@ -222,9 +222,10 @@ export async function importAttachmentArchive(archive: AttachmentArchive): Promi
 
 /** 预览：统计归档里有多少附件已经存在（用于导入前告知用户会跳过什么）。 */
 export async function countExistingAttachments(archive: AttachmentArchive): Promise<{ existing: number; missing: number }> {
+  const backend = attachmentBackend();
   let existing = 0;
   for (const entry of archive.attachments) {
-    if ((await storageService.getRaw(entry.key)) !== null) existing += 1;
+    if (await backend.exists(entry.key)) existing += 1;
   }
   return { existing, missing: archive.attachments.length - existing };
 }

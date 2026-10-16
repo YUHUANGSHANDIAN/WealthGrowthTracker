@@ -52,6 +52,12 @@ class StorageService {
     return this.adapter.getItem(key);
   }
 
+  /** 枚举某前缀的键；适配器不支持时返回 null（调用方据此跳过可选的搬迁）。 */
+  async listRawKeys(prefix: string): Promise<string[] | null> {
+    if (!this.adapter.listKeys) return null;
+    return this.adapter.listKeys(prefix);
+  }
+
   async setRaw(key: string, value: string): Promise<void> {
     if (this.writesPaused) throw new Error('存储正在迁移，暂时不能写入');
     await this.adapter.setItem(key, value);

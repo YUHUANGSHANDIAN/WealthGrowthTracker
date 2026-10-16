@@ -11,4 +11,6 @@ export interface StorageAdapter {
   removeItem(key: string): Promise<void>;
   /** Commit a complete business write together when the platform supports it. */
   setItems?(entries: ReadonlyArray<{ key: string; value: string }>): Promise<void>;
+  /** 枚举以某前缀开头的键（桌面适配器支持；用于把历史内联附件搬出状态文件）。 */
+  listKeys?(prefix: string): Promise<string[]>;
 }

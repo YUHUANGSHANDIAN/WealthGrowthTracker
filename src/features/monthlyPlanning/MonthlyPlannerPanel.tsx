@@ -21,17 +21,13 @@ import {
 import { buildDraftInput } from './sessionDraft';
 import { validateMonthlySession, type SessionIssue } from '../../domain/portfolio/invariants';
 import { carryOverPlan, markCarryOverStale, summarizeCarryOver, checkPeriodContinuity, type CarriedItem } from '../../domain/portfolio/carryOver';
-import { putAttachment } from '../../services/monthlyPlanning/attachments';
 import { getAttachment } from '../../services/monthlyPlanning/attachments';
+import { importDocuments, rebuildCandidatesFromDocuments, type DocumentImportOutcome } from '../../services/monthlyPlanning/importDocuments';
 import { researchLookupAI, visionExtractAI, type ResearchSource } from '../../services/ai/client';
 import { useAIConnectionStore } from '../../store/aiConnectionStore';
 import { buildVisionRequest, existingResearchUrls, parseUrlLines, researchEvidenceFrom, visionMimeFor } from './aiEntry';
-import { extractDocxFromPackage } from '../../services/documents/ooxml';
-import { extractHoldingRows, type HoldingRowCandidate } from '../../services/documents/holdings';
-import { assertIntakeAllowed, intakeDocument, sha256Hex, type DocumentKind } from '../../services/documents/intake';
-import { detectScopeHints, planImageChunks } from '../../services/documents/image';
 import type {
-  CashFlowEvent, Holding, HoldingObservation, InvestmentPolicy, MonthlyReview, ProposedAction, ResearchEvidence, SourceDocument,
+  CashFlowEvent, InvestmentPolicy, MonthlyReview, ProposedAction, ResearchEvidence, SourceDocument,
 } from '../../domain/portfolio/types';
 
 const SECTIONS = [
@@ -120,6 +116,7 @@ export function MonthlyPlannerPanel() {
   const [researchUrls, setResearchUrls] = useState('');
   const [researchResults, setResearchResults] = useState<ResearchSource[] | null>(null);
   const [researchBusy, setResearchBusy] = useState(false);
+  const [outcomes, setOutcomes] = useState<DocumentImportOutcome[] | null>(null);
 
   const aiEnabled = useAIConnectionStore((state) => state.enabled);
   const aiProfiles = useAIConnectionStore((state) => state.profiles);
@@ -200,94 +197,23 @@ export function MonthlyPlannerPanel() {
     if (!started) return;
     setBusy(true); setError(null);
     try {
-      let next: MonthlyReview = { ...started };
-      const documents = [...next.documents];
-      const holdings = [...next.holdings];
-      const observations = [...next.observations];
-      const warnings: string[] = [];
-      for (const file of Array.from(files)) {
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        const kind: DocumentKind = assertIntakeAllowed(file.name, bytes.byteLength);
-        const hash = await sha256Hex(bytes);
-        const intake = intakeDocument({
-          id: `doc:${hash.slice(0, 12)}`, name: file.name, mime: file.type, byteLength: bytes.byteLength,
-          hash, importedAt: new Date().toISOString(),
-        }, documents);
-        if (intake.duplicateOf) { warnings.push(`${file.name}：内容与已有资料相同，已跳过`); continue; }
-        const attachment = await putAttachment({ name: file.name, mime: file.type || kind, bytes });
-        const document = { ...intake.document, relativePath: attachment.key, parseState: 'parsed' as const };
-        if (kind === 'docx') {
-          const extraction = await extractDocxFromPackage(bytes);
-          const { rows, duplicates, tableIssues } = extractHoldingRows(extraction.tables, {
-            sourceId: document.id, extractor: 'ooxml', extractorVersion: '1',
-          });
-          if (duplicates) warnings.push(`${file.name}：忽略 ${duplicates} 行重复内容（替代表示或重复行）`);
-          if (tableIssues.length) warnings.push(`${file.name}：${tableIssues.join('；')}`);
-          for (const candidate of rows) {
-            const holdingId = `holding:${document.id}:${candidate.tableIndex}:${candidate.rowIndex}`;
-            holdings.push(candidateToHolding(candidate, holdingId, importChannelId, document.platform));
-            observations.push(candidateToObservation(candidate, holdingId, session.key, document.id));
-          }
-          if (!rows.length) warnings.push(`${file.name}：未识别到持仓行，请手工补充`);
-        } else if (kind === 'image') {
-          let chunkNote = '';
-          try {
-            if (typeof createImageBitmap === 'function') {
-              const bitmap = await createImageBitmap(file);
-              const chunks = planImageChunks({ width: bitmap.width, height: bitmap.height });
-              chunkNote = `图片 ${bitmap.width}×${bitmap.height}，分 ${chunks.length} 块（含重叠，识别后去重）`;
-              bitmap.close?.();
-            }
-          } catch { chunkNote = '图片尺寸读取失败，请人工核对范围'; }
-          warnings.push(`${file.name}：已记录图片与范围声明（${chunkNote || '未分块'}）；图片识别需要先在「模型连接」配置视觉模型，未配置时请手工录入`);
-        } else if (kind === 'csv' || kind === 'markdown' || kind === 'text') {
-          const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-          const hints = detectScopeHints(text);
-          document.scopeNote = hints.notes.join('；') || undefined;
-        }
-        documents.push(document);
-      }
-      next = { ...next, documents, holdings, observations };
-      await save(advanceSession(next, 'reviewing', { now: new Date().toISOString() }), '正在保存导入资料');
-      if (warnings.length) pushToast(warnings.join('；'), 'info');
+      const result = await importDocuments({
+        session: started,
+        files: Array.from(files),
+        channelId: importChannelId || null,
+        now: new Date().toISOString(),
+      });
+      setOutcomes(result.outcomes);
+      await save(advanceSession(result.session, 'reviewing', { now: new Date().toISOString() }), '正在保存导入资料');
+      const imported = result.outcomes.filter((item) => item.status === 'imported').length;
+      const duplicate = result.outcomes.filter((item) => item.status === 'duplicate').length;
+      const failed = result.outcomes.filter((item) => item.status === 'failed').length;
+      pushToast(`导入完成：入库 ${imported}、内容重复 ${duplicate}、失败 ${failed}（详情见下方清单）`, failed ? 'error' : 'success');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '导入失败');
     } finally {
       setBusy(false);
     }
-  }
-
-  function candidateToHolding(candidate: HoldingRowCandidate, id: string, channelId: string, platform: Holding['platform']): Holding {
-    return {
-      id,
-      platform,
-      parentChannelId: channelId,
-      fundCode: candidate.fundCode ?? undefined,
-      originalName: candidate.name ?? candidate.fundCode ?? '未命名持仓',
-      currency: 'CNY',
-      productType: 'fund',
-      exposureTags: [],
-    };
-  }
-
-  function candidateToObservation(candidate: HoldingRowCandidate, holdingId: string, sessionKey: string, sourceId: string): HoldingObservation {
-    return {
-      id: `obs:${holdingId}`,
-      holdingId,
-      sessionKey,
-      shares: candidate.shares,
-      marketValue: candidate.marketValue,
-      nav: candidate.nav,
-      ...(candidate.navDate ? { navDate: candidate.navDate } : {}),
-      evidence: candidate.evidence.map((ref) => ({ ...ref, sourceId })),
-      quality: {
-        source: 'evidence',
-        attribution: importChannelId ? 'conditional' : 'unassigned',
-        valuation: candidate.marketValue === null ? 'missing' : 'observed',
-        time: 'observed',
-        review: 'pending',
-      },
-    };
   }
 
   async function savePolicy(patch: Partial<InvestmentPolicy>) {
@@ -368,6 +294,28 @@ export function MonthlyPlannerPanel() {
       pushToast(`已清空 ${result.removedHoldings} 条自动提取的持仓、${result.removedObservations} 条观察；资料与附件保留`, 'success');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '清空失败');
+    }
+  }
+
+  /** 用已入库的 DOCX 重新解析并补齐候选（importDocuments 的幂等补充路径）。 */
+  async function rebuildCandidates() {
+    if (!session) return;
+    if (!importChannelId) { setError('请先选择归属父渠道，再生成候选'); return; }
+    setBusy(true); setError(null);
+    try {
+      const result = await rebuildCandidatesFromDocuments({
+        session, channelId: importChannelId, now: new Date().toISOString(),
+      });
+      if (!result.scanned && !result.created) {
+        pushToast('没有需要重新解析的 DOCX：候选已存在，或资料里没有 DOCX', 'info');
+        return;
+      }
+      await save(result.session, '正在补生成候选');
+      pushToast(`已解析 ${result.scanned} 份 DOCX，补齐 ${result.created} 条候选${result.skipped.length ? `；跳过：${result.skipped.join('；')}` : ''}`, result.created ? 'success' : 'info');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '生成候选失败');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -553,17 +501,41 @@ export function MonthlyPlannerPanel() {
         <Card className="p-4 space-y-3">
           <h3 className="font-semibold">资料与对账</h3>
           <div className="flex flex-wrap items-end gap-3">
-            <SelectField label="默认归属父渠道（可行时再逐条调整）" value={importChannelId}
+            <SelectField label="默认归属父渠道（可留空）" value={importChannelId}
               onChange={(event) => setImportChannelId(event.target.value)}
-              options={channels.length ? channels.map((channel) => ({ value: channel.id, label: channel.name })) : [{ value: '', label: '（请先在资产页建立渠道）' }]} />
+              options={[
+                { value: '', label: '（不归属任何渠道／仅作为资料）' },
+                ...channels.map((channel) => ({ value: channel.id, label: channel.name })),
+              ]} />
             <label className="text-sm">
-              选择文件（DOCX / 图片 / CSV / Markdown）
+                选择文件（DOCX / 图片 / CSV / Markdown / TXT）
               <input type="file" multiple className="block mt-1 text-xs" disabled={!session || busy}
                 onChange={(event) => { void handleFiles(event.target.files); event.target.value = ''; }} />
             </label>
             <MoneyField label="来源声明总额（可选）" value={sourceTotal} onChange={setSourceTotal} />
           </div>
-          <p className="text-xs text-slate-500">导入到本地不等于同意外发；图片识别需要先在「模型连接」配置视觉模型，未配置时请手工录入。</p>
+          <p className="text-xs text-slate-500">
+            各类资料的作用：<strong>渠道 DOCX</strong> 会解析出持仓候选（需要选归属父渠道）；<strong>截图/长图</strong>
+            只作为证据留存，要用「视觉识别」需要先配置可读图的模型；<strong>md / txt / CSV</strong> 只作为范围声明与说明，
+            不产生任何持仓。留空父渠道时资料照样入库，只是不生成候选，之后可以用「从已入库资料生成候选」补上。
+            导入到本地不等于同意外发。
+          </p>
+          {outcomes && (
+            <div className="rounded-lg bg-slate-50 p-3 text-xs">
+              <div className="mb-1 font-medium text-slate-700">上次导入结果（每份文件都会列出）</div>
+              <ul className="space-y-0.5">
+                {outcomes.map((outcome, index) => (
+                  <li key={`${outcome.name}:${index}`} className={outcome.status === 'failed' ? 'text-red-600' : 'text-slate-600'}>
+                    [{outcome.status === 'imported' ? '已入库' : outcome.status === 'duplicate' ? '内容重复' : '失败'}]
+                    {' '}{outcome.name}
+                    {outcome.candidates !== undefined ? ` · 候选 ${outcome.candidates} 条${outcome.createdFacts ? '（已生成本地候选）' : ''}` : ''}
+                    {outcome.note ? ` · ${outcome.note}` : ''}
+                    {outcome.error ? ` · ${outcome.error}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {session?.documents.length ? (
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-slate-500"><th>文件</th><th>平台</th><th>完整性</th><th>解析</th><th>范围声明</th><th>AI</th></tr></thead>
@@ -603,10 +575,14 @@ export function MonthlyPlannerPanel() {
               <Button size="sm" variant="outline"
                 disabled={busy || ['planned', 'confirmed', 'archived'].includes(session.state)}
                 onClick={() => void clearAutoCandidates()}>清空自动提取的候选</Button>
+              <Button size="sm" variant="outline" disabled={busy || !importChannelId}
+                onClick={() => void rebuildCandidates()}>从已入库资料生成候选</Button>
               <span className="text-xs text-slate-500">
                 {['planned', 'confirmed', 'archived'].includes(session.state)
                   ? '已进入计划或已完成，如需重来请先删除会话。'
-                  : '删除由文档自动提取的持仓与观察（保留资料与附件），用于重新核对列含义或改用手工录入。'}
+                  : importChannelId
+                    ? '「清空」删除自动提取的持仓与观察（保留资料与附件）；「生成候选」用已入库的 DOCX 重新解析并补齐缺失的候选。'
+                    : '「清空」删除自动提取的持仓与观察；要生成候选请先在上面选择归属父渠道。'}
               </span>
             </div>
           )}

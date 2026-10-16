@@ -64,13 +64,21 @@ export class DesktopDataManager {
       await this.ensureDirs();
       const exists = await this.fs.exists(STATE_PATH);
       if (!exists) return null;
+      const current = await this.fs.readTextFile(STATE_PATH);
+      // 写入前备份会紧跟在上一次写入之后发生：若最新备份已经是**同字节**内容，
+      // 再复制一份只会在数据目录里堆出等大的重复文件（曾出现 30 份 9.4 MB 副本）。
+      const newest = await this.latestBackup();
+      if (newest) {
+        try {
+          if (await this.fs.readTextFile(`${BACKUPS_DIR}/${newest}`) === current) return newest;
+        } catch { /* 读不到就照常新建 */ }
+      }
       const prefix = manual ? 'wealth-backup_manual' : 'wealth-backup';
       const name = `${prefix}_${fileTimestamp()}_${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}.json`;
       await this.fs.copyFile(STATE_PATH, `${BACKUPS_DIR}/${name}`);
-      const original = await this.fs.readTextFile(STATE_PATH);
       const copied = await this.fs.readTextFile(`${BACKUPS_DIR}/${name}`);
       parseState(copied, '备份文件');
-      if (original !== copied) throw new Error('备份读回校验失败');
+      if (current !== copied) throw new Error('备份读回校验失败');
       return name;
     } catch (err) {
       console.warn('[desktop] 备份失败:', err);
@@ -284,6 +292,12 @@ export class DesktopFileStorageAdapter implements StorageAdapter {
     if (this.writePaused) throw new StorageWriteError('数据目录正在迁移，暂时不能写入');
     delete this.cache[key];
     this.scheduleFlush();
+  }
+
+  /** 枚举内存缓存里以某前缀开头的键（用于把历史内联附件搬出状态文件）。 */
+  async listKeys(prefix: string): Promise<string[]> {
+    await this.ensureInit();
+    return Object.keys(this.cache).filter((key) => key.startsWith(prefix));
   }
 
   private scheduleFlush(): void {

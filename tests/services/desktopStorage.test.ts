@@ -60,6 +60,27 @@ describe('桌面文件存储', () => {
     fs = new MemFS();
   });
 
+  it('状态字节未变化时不重复创建等大的备份，变化后才新建', async () => {
+    const adapter = new DesktopFileStorageAdapter(fs);
+    await adapter.setItem('foo', 'bar');
+    await adapter.flush();
+    const mgr = new DesktopDataManager(fs);
+    const before = (await mgr.listBackups()).length;
+    expect(before).toBeGreaterThan(0);
+
+    const first = await mgr.backupNow(true);
+    const second = await mgr.backupNow(true);
+    expect(second).toBe(first);
+    expect((await mgr.listBackups()).length).toBe(before);
+
+    await adapter.setItem('foo', 'baz');
+    await adapter.flush();
+    const mid = (await mgr.listBackups()).length;
+    const third = await mgr.backupNow(true);
+    expect(third).not.toBe(first);
+    expect((await mgr.listBackups()).length).toBe(mid + 1);
+  });
+
   it('首次启动：目录创建、无数据返回 null', async () => {
     const adapter = new DesktopFileStorageAdapter(fs);
     expect(await adapter.getItem('wealth_tracker_data')).toBeNull();
@@ -109,7 +130,7 @@ describe('桌面文件存储', () => {
     expect(JSON.parse((await a2.getItem('foo'))!)).toEqual({ ok: true });
   });
 
-  it('自动备份：每天首次落盘生成备份，保留全部旧备份供手动清理', async () => {
+  it('自动备份：同字节复用、内容变化才新建，且从不批量删除旧备份', async () => {
     const a = new DesktopFileStorageAdapter(fs);
     await a.setItem('foo', 'bar');
     await a.flush();
@@ -117,13 +138,26 @@ describe('桌面文件存储', () => {
     const backups = (await mgr.listBackups()).filter((f) => !f.includes('_manual_'));
     expect(backups.length).toBeGreaterThan(0);
 
-    // 制造 65 个自动备份，验证应用不批量删除旧备份
+    // 状态未变化：不再堆出等大的重复备份
+    const base = (await mgr.listBackups()).length;
+    await mgr.backupNow(true);
+    expect((await mgr.listBackups()).length).toBe(base);
+
+    // 内容变化：仍然会新建一份
+    await a.setItem('foo', 'changed');
+    await a.flush();
+    const mid = (await mgr.listBackups()).length;
+    const created = await mgr.backupNow(true);
+    expect(created).toBeTruthy();
+    expect((await mgr.listBackups()).length).toBe(mid + 1);
+
+    // 塞入 65 份历史自动备份，验证应用不批量删除旧备份
     for (let i = 0; i < 65; i++) {
       fs.files.set(`${BACKUPS_DIR}/wealth-backup_2026-01-01_${String(i).padStart(2, '0')}0000.json`, '{}');
     }
-    await mgr.backupNow(false);
-    const after = (await mgr.listBackups()).filter((f) => f.startsWith('wealth-backup_') && !f.includes('_manual_'));
-    expect(after.length).toBe(backups.length + 66);
+    const after = await mgr.listBackups();
+    expect(after.filter((f) => f.includes('2026-01-01')).length).toBe(65);
+    expect(after.length).toBe(mid + 1 + 65);
   });
 
   it('从备份恢复：覆盖主数据文件', async () => {
