@@ -16,6 +16,9 @@ const forbiddenContents = [
   /\bgithub_pat_[A-Za-z0-9_]{40,}\b/,
   /\bsk-(?:proj-|ant-api\d+-)?[A-Za-z0-9_-]{32,}\b/,
   /https?:\/\/[^\s"'<>]+[?&](?:access_token|refresh_token|id_token|code)=[^\s"'&<>]+/i,
+  // 本机个人工作区路径与已退役的仓库目录名：文档必须去标识化，规则很窄以免误报。
+  /Desktop[\\/]80 生活/,
+  /财富成长记AI主应用/,
 ];
 const textPath = /\.(ts|tsx|js|mjs|cjs|json|md|txt|html|css|yml|yaml|toml|rs|svg)$/i;
 

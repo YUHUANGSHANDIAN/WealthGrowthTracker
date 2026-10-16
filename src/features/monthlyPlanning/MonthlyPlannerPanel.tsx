@@ -16,6 +16,7 @@ import { evaluatePolicy } from '../../domain/portfolio/policy';
 import { generateProposal, type ProposalPosition } from '../../domain/portfolio/proposals';
 import { goalScenarios, impliedAnnualRate, requiredMonthlyContribution } from '../../domain/portfolio/goalScenarios';
 import { createDraftSession, monthlyPlanKey, transitionSession } from '../../domain/portfolio/session';
+import { buildDraftInput } from './sessionDraft';
 import { validateMonthlySession, type SessionIssue } from '../../domain/portfolio/invariants';
 import { carryOverPlan, markCarryOverStale, summarizeCarryOver, checkPeriodContinuity, type CarriedItem } from '../../domain/portfolio/carryOver';
 import { putAttachment } from '../../services/monthlyPlanning/attachments';
@@ -88,6 +89,7 @@ export function MonthlyPlannerPanel() {
   const navigate = useNavigationStore((s) => s.navigate);
 
   const [month, setMonth] = useState(currentMonth);
+  const [snapshotDate, setSnapshotDate] = useState('');
   const [section, setSection] = useState<SectionId>('overview');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -148,8 +150,12 @@ export function MonthlyPlannerPanel() {
 
   async function openOrCreate() {
     if (session) { pushToast('本月会话已存在，直接编辑', 'info'); return; }
-    const draft = createDraftSession({ planningMonth: month, timezone: planning.settings.timezone, today: todayString(), now: new Date().toISOString() });
-    await save(draft, '正在创建月度会话');
+    const built = buildDraftInput({
+      planningMonth: month, snapshotDate, previous, timezone: planning.settings.timezone, now: new Date().toISOString(),
+    });
+    if (!built.ok) { setError(built.message); return; }
+    if (built.notice) pushToast(built.notice, 'info');
+    await save(createDraftSession(built.input), '正在创建月度会话');
   }
 
   async function handleFiles(files: FileList | null) {
@@ -337,6 +343,10 @@ export function MonthlyPlannerPanel() {
       <Card className="p-4">
         <div className="flex flex-wrap items-end gap-3">
           <TextField label="规划月份" type="month" value={month} onChange={(event) => setMonth(event.target.value || currentMonth())} />
+          <TextField label="快照日（留空＝今天）" type="date" max={todayString()} value={snapshotDate}
+            disabled={Boolean(session) || busy}
+            hint={session ? '本月会话已存在；要改日期请先在「月度归档」删除该会话' : '补录历史月份时填写资料的真实日期，例如 2026-07-20'}
+            onChange={(event) => setSnapshotDate(event.target.value)} />
           <div className="text-sm text-slate-600">
             会话：{session ? <Badge tone={session.state === 'confirmed' || session.state === 'archived' ? 'emerald' : 'blue'}>{session.state}</Badge> : '未创建'}
             {session && <span className="ml-2 text-xs text-slate-500">revision {session.revision} · 快照 {session.snapshotAsOf}</span>}

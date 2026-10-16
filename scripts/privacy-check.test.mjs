@@ -63,3 +63,25 @@ test('CLI rejects an initialized repository with an empty index',()=>{
   assert.notEqual(result.status,0,'空索引必须返回非零退出码');
   assert.match(result.stderr,/为空|无法完成|已阻止通过/);
 });
+
+test('个人工作区路径与退役目录名都会被拦下',()=>{
+  // 字面量在此处拼接，避免测试文件自己触发规则。
+  const personalPath=['Desktop','\\','80 生活'].join('');
+  const retiredName=['财富成长记','AI主应用'].join('');
+  const {cwd,git}=repository();
+  const path='notes.md';
+  writeFileSync(join(cwd,path),`开发目录：D:\\${personalPath}\\repo`);
+  git('add','--',path);
+  assert.ok(checkPrivacy(cwd).some(v=>v.includes('index')&&v.includes(path)));
+  writeFileSync(join(cwd,path),`旧目录名：${retiredName}`);
+  git('add','--',path);
+  assert.ok(checkPrivacy(cwd).some(v=>v.includes('index')&&v.includes(path)));
+});
+
+test('去标识化表述不会误报',()=>{
+  const {cwd,git}=repository();
+  writeFileSync(join(cwd,'docs.md'),'开发工作区（路径写在被忽略的 .wgt-local.json 里）；规范目录名 WealthGrowthTracker。');
+  writeFileSync(join(cwd,'sample.ts'),"const root = 'C:\\\\work\\\\repo';");
+  git('add','--','docs.md');
+  assert.deepEqual(checkPrivacy(cwd),[]);
+});
