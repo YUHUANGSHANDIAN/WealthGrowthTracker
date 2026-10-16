@@ -168,7 +168,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-          sudo apt-get install -y libfuse2t64 || sudo apt-get install -y libfuse2 || true
+          # linuxdeploy 自身是 AppImage，要么能挂 FUSE 要么用 APPIMAGE_EXTRACT_AND_RUN 自解压执行。
+          # 这里显式安装并让失败可见：上一版带 `|| true` 把依赖缺失吞掉了，AppImage 静默消失。
+          if sudo apt-get install -y libfuse2t64; then
+            echo "libfuse2t64 installed"
+          elif sudo apt-get install -y libfuse2; then
+            echo "libfuse2 installed"
+          else
+            echo "::warning::libfuse2 未安装；AppImage 依赖自解压执行，失败也不会阻塞发布"
+          fi
       - run: npm ci
       - name: Install AI runtime dependencies
         run: npm ci --prefix ai-runtime
@@ -180,7 +188,11 @@ jobs:
         run: npx tauri build --ci --config src-tauri/tauri.desktop.conf.json --bundles deb,rpm
       - name: Build Tauri (AppImage, best effort)
         continue-on-error: true
-        run: npx tauri build --ci --config src-tauri/tauri.desktop.conf.json --bundles appimage
+        env:
+          # 让 linuxdeploy 自解压执行，绕开 FUSE；NO_STRIP 规避大二进制 strip 失败。
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          NO_STRIP: 'true'
+        run: npx tauri build --verbose --ci --config src-tauri/tauri.desktop.conf.json --bundles appimage
       - name: Upload bundles to the release
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         shell: bash
@@ -305,8 +317,11 @@ jobs:
             echo ""
             echo "### 本版主要变化"
             echo "- **月度理财工作台（WealthGrowthPlanner）**：新增 \`#/monthly\` 七区工作台与分步向导；文档在本地解析并按 SHA256 幂等入库；每月一份正式会话，跨月结转携带来源会话与 revision，来源变更即标记过期且不自动改写。"
+            echo "- **月度理财状态链路与导入纠正**：导入→extracting→reviewing、生成候选→ready（绑定策略版本）、确认→planned→confirmed 全部打通（此前确认按钮必然报「不允许的状态流转」）；提取器改为按表头定位列，不再把序号当市值；新增「清空自动提取的候选」与补录快照日。"
             echo "- **品牌统一为 WealthGrowthTracker**：窗口标题、PWA 名称、关于页与导出元数据一致；\`identifier\`、存储键、IndexedDB 库名与 Service Worker 缓存前缀保持不变，旧安装与旧数据可原地升级。"
             echo "- **AI 新增两条只读能力**：图片视觉提取（只有你显式声明可读图的连接才会收到图片）与网页研究检索（只抓取你给出的公网 HTTPS 链接，仅桌面可用）。"
+            echo "- **含附件的单文件归档**：数据中心新增「导出含附件完整备份 / 导入含附件备份」；导出逐项校验哈希、缺失即整体失败，导入先全量校验再写入（任一项哈希不符整批拒绝），上限 64 MiB，只恢复附件内容而不创建会话。"
+            echo "- **视觉与检索已接入界面**：「资料与对账」的图片行有「视觉识别」（结果只读、不写入会话），「情报与目标」可粘贴公网 HTTPS 链接做「联网检索」，需显式点「保存为研究记录」才落库。"
             echo "- **AI 默认关闭**，关闭时不启动运行时、不联网、不读取凭据。"
             echo ""
             echo "### 本次构建实际包含的附件"
@@ -329,13 +344,14 @@ jobs:
             echo "- 应用不读取 Codex / Claude / GitHub CLI 等其它程序的登录令牌，也不嵌入 OAuth 客户端密钥。"
             echo "- 图片视觉提取：仅当连接被显式声明为可读图时才发送图片（最多 4 张 PNG/JPEG/WebP，超限即失败关闭）；识别质量取决于你选的视觉模型，应用不做本地 OCR，本轮**未用真实账号验收**。"
             echo "- 网页研究检索：只抓取你显式给出的公网 HTTPS 链接，**仅桌面端可用**；Web/移动端如实提示不可用，模型不能自行生成 URL。本轮**未用真实来源验收**。"
+            echo "- Windows 打包运行时冒烟**已通过**（status 帧返回 runtime=enabled / tools=[] / credentials=private-broker-memory-only；未配置连接时 infer 与 vision-extract 均返回 PROFILE_UNAVAILABLE；不带开关时退出码 2）。macOS/Linux/Android **未执行**，命令见 docs/PLATFORM_SUPPORT.md。"
             echo "- 桌面包内置官方 Node 24.21.0 sidecar 运行时（按官方 SHA256 校验）；若某平台未包含运行时，AI 会明确报 AI_RUNTIME_MISSING。"
             echo ""
             echo "### 未完成事项（本版不宣称已具备）"
             echo "- 两类合法订阅路径的真实认证 / 推理 / 撤销验收：**未完成**（因此本版只能作为 prerelease 发布）。"
             echo "- Windows 未代码签名，macOS 未签名未公证；Android 若出现在上方附件中即为 **debug 签名预览版**，若未出现则表示本次未构建（缺 Android SDK/NDK 或构建失败）。"
-            echo "- 含附件的单文件归档导入/导出尚未实现；附件当前以内容寻址单独存放，读取时逐次校验哈希。"
-            echo "- 各平台安装后的 AI 冒烟仍需在对应系统人工确认。"
+            echo "- 视觉提取与网页检索的**真实账号验收未执行**：界面入口与验收清单（docs/AI_ACCEPTANCE.md）已就绪，需用户用自己的 API Key 跑一次并回填结果。"
+            echo "- macOS / Linux / Android 安装后的 AI 冒烟仍需在对应系统人工确认（命令见 docs/PLATFORM_SUPPORT.md）。"
             echo ""
             echo "### 数据与隐私"
             echo "- 本 Release **不包含任何用户数据**、报告、备份或迁移脚本；附件仅为程序与校验文件。"

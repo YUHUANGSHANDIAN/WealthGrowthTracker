@@ -9,6 +9,10 @@ import { validateDataRootMigration } from '../../services/storage/migrate';
 import { StorageRootSwitchError, switchStorageRootConfig } from '../../services/storage/rootSwitch';
 import { restoreWithReadback } from '../../services/storage/restore';
 import { parseBackup } from '../../services/export';
+import {
+  MAX_ARCHIVE_BYTES, buildAttachmentArchive, countExistingAttachments, importAttachmentArchive, parseAttachmentArchive,
+  type AttachmentArchive,
+} from '../../services/monthlyPlanning/attachmentArchive';
 import { downloadCSV } from '../../components/charts/export';
 import { buildChannelsCsv, buildHistoryCsv } from '../../utils/dataCsv';
 import { checkDataHealth, checkReportHealth, checkGoalHealth, checkAchievementHealth, checkLotteryHealth, domainLabel, type DataIssue, type HealthDomain } from '../../utils/dataHealth';
@@ -39,6 +43,10 @@ export function DataPanel() {
   const [preview, setPreview] = useState<{ text: string; channels: number; history: number; reports: number; merge: ReturnType<typeof previewMerge> } | null>(null);
   const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const archiveFileRef = useRef<HTMLInputElement>(null);
+  const [archivePreview, setArchivePreview] = useState<
+    { archive: AttachmentArchive; existing: number; missing: number; bytes: number } | null
+  >(null);
 
   const adapterName = storageService.getAdapterName();
   const isDesktop = adapterName === 'desktop';
@@ -98,6 +106,66 @@ export function DataPanel() {
 
   async function handleExport() {
     try { await exportData(); } catch { pushToast('导出失败，请检查目标位置与权限', 'error'); }
+  }
+
+  /** 含附件的单文件归档：把月度会话引用的附件内容与索引清单一起导出。 */
+  async function handleExportAttachments() {
+    let release: (() => void) | undefined;
+    setBusy(true);
+    try {
+      release = beginLedgerMaintenance('正在导出含附件备份');
+      const { monthlyPlanning } = useAppStore.getState();
+      const result = await buildAttachmentArchive(monthlyPlanning, new Date().toISOString());
+      if (!result.attachmentCount) {
+        pushToast('没有需要导出的附件：月度会话尚未引用任何资料文件', 'error');
+        return;
+      }
+      await saveTextFile(backupFilename('wealth_tracker_attachments'), result.text);
+      pushToast(`已导出 ${result.attachmentCount} 个附件（${(result.totalBytes / 1024 / 1024).toFixed(1)} MiB）`, 'success');
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : '导出含附件备份失败', 'error');
+    } finally {
+      release?.();
+      setBusy(false);
+    }
+  }
+
+  async function onArchiveChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      if (file.size > MAX_ARCHIVE_BYTES) throw new Error(`含附件备份超过 ${(MAX_ARCHIVE_BYTES / 1024 / 1024).toFixed(0)} MiB 上限`);
+      const text = await file.text();
+      const parsed = parseAttachmentArchive(text);
+      if (!parsed.ok) { pushToast(parsed.error, 'error'); return; }
+      const { existing, missing } = await countExistingAttachments(parsed.archive);
+      setArchivePreview({
+        archive: parsed.archive, existing, missing,
+        bytes: parsed.archive.attachments.reduce((sum, entry) => sum + entry.bytes, 0),
+      });
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : '无法读取含附件备份', 'error');
+    } finally {
+      e.target.value = '';
+    }
+  }
+
+  async function doImportAttachments() {
+    if (!archivePreview) return;
+    let release: (() => void) | undefined;
+    setImporting(true);
+    try {
+      release = beginLedgerMaintenance('正在导入附件备份');
+      const result = await importAttachmentArchive(archivePreview.archive);
+      const detail = result.failures.length ? `；失败 ${result.failures.length} 项：${result.failures.map((item) => item.reason).join('；')}` : '';
+      pushToast(`附件导入完成：新增 ${result.imported}、跳过 ${result.skipped}${detail}`, result.failed ? 'error' : 'success');
+      if (!result.failed) setArchivePreview(null);
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : '导入附件失败', 'error');
+    } finally {
+      release?.();
+      setImporting(false);
+    }
   }
 
   async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
@@ -310,9 +378,10 @@ export function DataPanel() {
 
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-2">导出数据</h2>
-        <p className="text-sm text-slate-500 mb-3">导出 JSON 全量备份，或导出 CSV 用于 Excel / OriginPro / Python 分析。</p>
+        <p className="text-sm text-slate-500 mb-3">导出 JSON 全量备份，或导出 CSV 用于 Excel / OriginPro / Python 分析。含附件备份会把月度会话引用的资料文件一起打进单个 JSON。</p>
         <div className="flex flex-wrap gap-2">
           <Button onClick={handleExport}>⬇ 导出 JSON 备份</Button>
+          <Button variant="outline" onClick={() => void handleExportAttachments()} disabled={busy}>🗂 导出含附件完整备份</Button>
           <Button variant="outline" onClick={() => exportCsv('channels')}>📊 渠道资产 CSV</Button>
           <Button variant="outline" onClick={() => exportCsv('history')}>📈 历史记录 CSV</Button>
         </div>
@@ -320,9 +389,13 @@ export function DataPanel() {
 
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-2">导入数据</h2>
-        <p className="text-sm text-slate-500 mb-3">从 JSON 备份恢复，支持覆盖或合并（ID/日期优先，冲突保留当前）。</p>
-        <Button variant="outline" onClick={() => fileRef.current?.click()}>⬆ 选择 JSON 文件导入</Button>
+        <p className="text-sm text-slate-500 mb-3">从 JSON 备份恢复，支持覆盖或合并（ID/日期优先，冲突保留当前）。含附件备份只恢复附件内容，不创建会话——结构化数据请另用 JSON 备份恢复。</p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => fileRef.current?.click()}>⬆ 选择 JSON 文件导入</Button>
+          <Button variant="outline" onClick={() => archiveFileRef.current?.click()} disabled={importing}>🗂 导入含附件备份</Button>
+        </div>
         <input ref={fileRef} type="file" accept=".json,application/json" onChange={onFileChosen} className="hidden" aria-label="选择导入文件" />
+        <input ref={archiveFileRef} type="file" accept=".json,application/json" onChange={onArchiveChosen} className="hidden" aria-label="选择含附件备份文件" />
       </Card>
 
       {canOpenFolder && (
@@ -395,6 +468,45 @@ export function DataPanel() {
       </Modal>
 
       {/* 从备份恢复 */}
+      <Modal
+        open={archivePreview !== null}
+        onClose={() => setArchivePreview(null)}
+        title="确认导入含附件备份"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setArchivePreview(null)} disabled={importing}>取消</Button>
+            <Button onClick={() => void doImportAttachments()} disabled={importing}>{importing ? '导入中…' : '导入附件'}</Button>
+          </>
+        }
+      >
+        {archivePreview && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2 text-center text-sm">
+              <div className="bg-slate-50 rounded-lg p-2">
+                <div className="text-slate-400 text-xs">附件</div>
+                <div className="font-semibold tabular">{archivePreview.archive.attachments.length} 个</div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-2">
+                <div className="text-slate-400 text-xs">总大小</div>
+                <div className="font-semibold tabular">{(archivePreview.bytes / 1024 / 1024).toFixed(1)} MiB</div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-2">
+                <div className="text-slate-400 text-xs">已存在 / 待写入</div>
+                <div className="font-semibold tabular">{archivePreview.existing} / {archivePreview.missing}</div>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">
+              导出时间：{archivePreview.archive.exportedAt} · 导出应用版本：{archivePreview.archive.appVersion}
+            </p>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
+              导入前会逐项校验哈希，任何一项不符就整批拒绝写入；已存在且内容一致的附件会跳过，不会覆盖既有附件。
+              归档只恢复附件内容，不创建月度会话——结构化数据请用 JSON 备份恢复。
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <Modal open={restoreOpen} onClose={() => setRestoreOpen(false)} title="从备份恢复" size="md">
         <div className="space-y-2 max-h-80 overflow-y-auto">
           {backups.length === 0 ? <p className="text-sm text-slate-400">暂无备份文件。</p> : backups.map((b) => (

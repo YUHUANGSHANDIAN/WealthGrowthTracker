@@ -53,6 +53,29 @@ AI 默认关闭，每次启动重置；关闭时不启动运行时、不联网�
 | 图片视觉提取 `vision-extract` | 复用已配置连接的权益 | 桌面（Broker）；Web/移动需自建网关或本地端点 | 只有用户显式勾选“此连接可接收图片”的连接才会收到图片；最多 4 张 PNG/JPEG/WebP，单张与总量均有上限，超出即失败关闭；Copilot 订阅会话在登记阶段拒绝读图声明 | 未执行（取决于用户所选视觉模型；应用不做本地 OCR） |
 | 网页研究检索 `research-lookup` | 不消耗订阅额度，仅抓取用户给出的公网链接 | **仅桌面**（经 Node 私有运行时） | 只接受公网 HTTPS、禁止重定向、不带凭据与 Cookie、限制体积与超时；结果字段走白名单，模型不能自行生成 URL。Web/移动端如实返回“不可用” | 未执行 |
 
+两条能力已在界面上接入：「月度理财 → 资料与对账」的每张图片有「视觉识别」，
+「情报与目标」有「联网检索（需授权）」并由你显式点「保存为研究记录」才落库。
+逐步验收清单见 [AI_ACCEPTANCE.md](AI_ACCEPTANCE.md)。
+
+## 打包运行时的冒烟命令（各平台可复制）
+
+桌面包把官方 Node 24.21.0 作为 sidecar 与 `ai-runtime/` 一起随包。想确认某个平台上的
+运行时确实可用、且 AI 默认关闭，可在安装目录里执行：
+
+```bash
+# 1) 默认关闭：不带开关必须拒绝启动（退出码 2）
+./node ai-runtime/main.mjs
+
+# 2) 显式启用后问一次状态（Windows 用 node.exe）
+printf '{"protocolVersion":1,"requestId":"smoke-1","operation":"status"}\n' \
+  | ./node ai-runtime/main.mjs --stdio --enable-ai-runtime
+# 期望：result.runtime = "enabled"、result.tools = []、
+#       result.credentials = "private-broker-memory-only"
+# macOS / Linux 的可执行文件名可能是 node，请按安装目录实际文件调整。
+```
+
+Windows 本地已完成该冒烟（见下方“签名与发布状态”）；macOS / Linux / Android 仍需在对应系统人工确认。
+
 发布门（未满足即只能发布 preview）：至少两类厂商许可的订阅路径完成真实认证、真实推理与撤销验收；API Key、本地模型与 mock 均不计入。
 
 ## 签名与发布状态（如实说明）
@@ -61,5 +84,9 @@ AI 默认关闭，每次启动重置；关闭时不启动运行时、不联网�
 - **macOS**：当前为 ad-hoc 未签名、未公证构建，首次启动需系统安全确认。
 - **Android**：由 CI 构建 debug 签名的预览包，**不是正式签名**，请勿用于分发；若某次 Release 未列出 APK，说明该次构建未产出（本机不具备 Android SDK/NDK 与 JDK 17，无法本地复现）。
 - 桌面打包已集成 AI 运行时：官方 **Node 24.21.0** 以 Tauri sidecar 随包（下载时按官方 `SHASUMS256.txt` 校验），`ai-runtime/`（含依赖，符号链接已解引用）作为资源随包；打包版优先使用内置 Node，开发版回退 `WEALTH_AI_NODE`/PATH。
-- Windows 便携包已在本机构建（109 MB，含 node.exe 与 ai-runtime/）；NSIS/MSI 安装包、macOS 未签名 Universal DMG 与 Linux AppImage/DEB/RPM 由 CI 构建（本机无 macOS/Linux 工具链）。各平台安装后的 AI 冒烟仍需在对应系统人工确认。
+- **Windows 打包运行时冒烟：已通过（2026-10-16）**。对安装版的 sidecar 直接跑协议帧：`status`
+  返回 `runtime=enabled`、`tools=[]`、`credentials=private-broker-memory-only`、各 provider 如实报
+  `unsupported`；未配置连接时 `infer` 与 `vision-extract` 都返回 `PROFILE_UNAVAILABLE`（失败关闭，
+  不泄漏内部信息）；不带 `--enable-ai-runtime` 时进程以退出码 2 拒绝启动（AI 默认关闭在进程级成立）。
+- macOS / Linux / Android：本机无对应系统，AI 冒烟**未执行**，请用上面的可复制命令在对应系统确认。
 - 上述签名相关，仅在获得对应证书/密钥后在 CI 通过 GitHub Secrets 配置。

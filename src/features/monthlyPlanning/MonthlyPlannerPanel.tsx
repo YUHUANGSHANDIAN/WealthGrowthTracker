@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState } from '../../components/ui/primitives';
 import { Modal } from '../../components/ui/Modal';
-import { MoneyField, SelectField, TextField } from '../../components/ui/form';
+import { MoneyField, SelectField, TextArea, TextField } from '../../components/ui/form';
 import { useAppStore } from '../../store/appStore';
 import { useNavigationStore } from '../../store/navigationStore';
 import { AIActionButton } from '../ai/AIActionButton';
@@ -22,12 +22,16 @@ import { buildDraftInput } from './sessionDraft';
 import { validateMonthlySession, type SessionIssue } from '../../domain/portfolio/invariants';
 import { carryOverPlan, markCarryOverStale, summarizeCarryOver, checkPeriodContinuity, type CarriedItem } from '../../domain/portfolio/carryOver';
 import { putAttachment } from '../../services/monthlyPlanning/attachments';
+import { getAttachment } from '../../services/monthlyPlanning/attachments';
+import { researchLookupAI, visionExtractAI, type ResearchSource } from '../../services/ai/client';
+import { useAIConnectionStore } from '../../store/aiConnectionStore';
+import { buildVisionRequest, existingResearchUrls, parseUrlLines, researchEvidenceFrom, visionMimeFor } from './aiEntry';
 import { extractDocxFromPackage } from '../../services/documents/ooxml';
 import { extractHoldingRows, type HoldingRowCandidate } from '../../services/documents/holdings';
 import { assertIntakeAllowed, intakeDocument, sha256Hex, type DocumentKind } from '../../services/documents/intake';
 import { detectScopeHints, planImageChunks } from '../../services/documents/image';
 import type {
-  CashFlowEvent, Holding, HoldingObservation, InvestmentPolicy, MonthlyReview, ProposedAction,
+  CashFlowEvent, Holding, HoldingObservation, InvestmentPolicy, MonthlyReview, ProposedAction, ResearchEvidence, SourceDocument,
 } from '../../domain/portfolio/types';
 
 const SECTIONS = [
@@ -111,6 +115,18 @@ export function MonthlyPlannerPanel() {
   const [carry, setCarry] = useState<CarriedItem[]>([]);
   const [executionTarget, setExecutionTarget] = useState<ProposedAction | null>(null);
   const [flowForm, setFlowForm] = useState<{ kind: CashFlowEvent['kind']; amount: number | '' }>({ kind: 'external-income', amount: '' });
+  const [visionResult, setVisionResult] = useState<{ name: string; text: string; modelId: string } | null>(null);
+  const [visionBusy, setVisionBusy] = useState(false);
+  const [researchUrls, setResearchUrls] = useState('');
+  const [researchResults, setResearchResults] = useState<ResearchSource[] | null>(null);
+  const [researchBusy, setResearchBusy] = useState(false);
+
+  const aiEnabled = useAIConnectionStore((state) => state.enabled);
+  const aiProfiles = useAIConnectionStore((state) => state.profiles);
+  const aiActiveProfileId = useAIConnectionStore((state) => state.activeProfileId);
+  const activeConnection = aiEnabled
+    ? aiProfiles.find((profile) => profile.profileId === aiActiveProfileId) ?? null
+    : null;
 
   const session = planning.sessions.find((item) => item.key === monthlyPlanKeySafe(month)) ?? null;
   const previous = planning.sessions.find((item) => item.key === monthlyPlanKeySafe(previousMonth(month)) && (item.state === 'confirmed' || item.state === 'archived')) ?? null;
@@ -355,6 +371,66 @@ export function MonthlyPlannerPanel() {
     }
   }
 
+  /** 视觉提取：只把图片交给被声明为可读图的连接，结果只读展示，绝不写回事实。 */
+  async function runVision(document: SourceDocument) {
+    if (!activeConnection) { pushToast('请先在 AI 连接中心启用 AI 并选中一个连接', 'error'); return; }
+    setVisionBusy(true);
+    try {
+      const bytes = await getAttachment({ key: document.relativePath, sha256: document.sha256 });
+      const request = buildVisionRequest({
+        document, bytes, profileId: activeConnection.profileId, providerId: activeConnection.providerId,
+        requestId: crypto.randomUUID(),
+      });
+      const result = await visionExtractAI(request);
+      setVisionResult({ name: document.originalName, text: result.text, modelId: result.modelId });
+    } catch (cause) {
+      pushToast(cause instanceof Error ? cause.message : '视觉识别失败', 'error');
+    } finally {
+      setVisionBusy(false);
+    }
+  }
+
+  /** 网页检索：只抓用户给出的公网 HTTPS 链接，结果需显式保存才成为研究记录。 */
+  async function runResearch() {
+    if (!session) return;
+    if (!activeConnection) { pushToast('请先在 AI 连接中心启用 AI 并选中一个连接', 'error'); return; }
+    const parsed = parseUrlLines(researchUrls);
+    if (!parsed.urls.length) { setError('请至少填写一个公网 HTTPS 链接'); return; }
+    if (parsed.dropped) pushToast(`最多检索 ${parseUrlLines(researchUrls, Number.MAX_SAFE_INTEGER).urls.length} 个链接，已忽略多余的 ${parsed.dropped} 个`, 'info');
+    setResearchBusy(true);
+    try {
+      const result = await researchLookupAI({
+        requestId: crypto.randomUUID(), profileId: activeConnection.profileId,
+        providerId: activeConnection.providerId, urls: parsed.urls,
+      });
+      setResearchResults(result.results);
+    } catch (cause) {
+      pushToast(cause instanceof Error ? cause.message : '检索失败', 'error');
+    } finally {
+      setResearchBusy(false);
+    }
+  }
+
+  /** 把检索到的来源存成研究记录：只有你点了这个按钮才会写入会话。 */
+  async function saveResearch() {
+    if (!session || !researchResults) return;
+    const now = new Date().toISOString();
+    const known = existingResearchUrls(session.research);
+    const added: ResearchEvidence[] = [];
+    let skipped = 0;
+    for (const [index, source] of researchResults.entries()) {
+      if (known.has(source.url)) { skipped += 1; continue; }
+      const evidence = researchEvidenceFrom(source, now, index);
+      if (!evidence) { skipped += 1; continue; }
+      added.push(evidence);
+    }
+    if (!added.length) { pushToast('没有可保存的来源：已存在或没有可用内容', 'error'); return; }
+    await save({ ...session, research: [...session.research, ...added] }, '正在保存研究记录');
+    pushToast(`已保存 ${added.length} 条研究记录${skipped ? `，跳过 ${skipped} 条（已存在或无可用内容）` : ''}`, 'success');
+    setResearchResults(null);
+    setResearchUrls('');
+  }
+
   function totalsOf(current: MonthlyReview) {
     const assets = sumMoney(current.observations.map((observation) => observation.marketValue ?? 0));
     const liabilities = liabilityTotal === '' ? null : Number(liabilityTotal);
@@ -490,7 +566,7 @@ export function MonthlyPlannerPanel() {
           <p className="text-xs text-slate-500">导入到本地不等于同意外发；图片识别需要先在「模型连接」配置视觉模型，未配置时请手工录入。</p>
           {session?.documents.length ? (
             <table className="w-full text-sm">
-              <thead><tr className="text-left text-xs text-slate-500"><th>文件</th><th>平台</th><th>完整性</th><th>解析</th><th>范围声明</th></tr></thead>
+              <thead><tr className="text-left text-xs text-slate-500"><th>文件</th><th>平台</th><th>完整性</th><th>解析</th><th>范围声明</th><th>AI</th></tr></thead>
               <tbody>
                 {session.documents.map((document) => (
                   <tr key={document.id} className="border-t border-slate-100">
@@ -499,6 +575,12 @@ export function MonthlyPlannerPanel() {
                     <td>{document.integrity === 'ok' ? '正常' : '异常'}</td>
                     <td>{document.parseState}</td>
                     <td className="text-xs">{document.scopeNote ?? '—'}</td>
+                    <td>
+                      {visionMimeFor(document) ? (
+                        <Button size="sm" variant="outline" disabled={busy || visionBusy}
+                          onClick={() => void runVision(document)}>视觉识别</Button>
+                      ) : <span className="text-xs text-slate-400">—</span>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -719,6 +801,33 @@ export function MonthlyPlannerPanel() {
         <div className="space-y-4">
           <Card className="p-4">
             <h3 className="font-semibold mb-2">市场情报（需有来源与日期）</h3>
+            <div className="mb-3 space-y-2">
+              <TextArea label="公网 HTTPS 来源（每行一个，最多 5 个）" value={researchUrls}
+                onChange={(event) => setResearchUrls(event.target.value)}
+                placeholder={'https://example.com/article'} rows={2} />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="outline" disabled={busy || researchBusy} onClick={() => void runResearch()}>联网检索（需授权）</Button>
+                {researchResults && (
+                  <Button disabled={busy} onClick={() => void saveResearch()}>保存为研究记录</Button>
+                )}
+                <span className="text-xs text-slate-500">只抓取你给出的链接；桌面端可用，Web/移动端会如实提示不可用。结果只有点「保存为研究记录」才会写入会话。</span>
+              </div>
+              {researchResults && (
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-slate-500"><th>来源</th><th>标题</th><th>大小</th><th>结果</th></tr></thead>
+                  <tbody>
+                    {researchResults.map((source) => (
+                      <tr key={source.url} className="border-t border-slate-100">
+                        <td className="py-1 break-all">{source.url}</td>
+                        <td className="break-all">{source.title ?? '—'}</td>
+                        <td className="tabular">{source.bytes === undefined ? '—' : `${Math.round(source.bytes / 1024)} KB${source.truncated ? '（截断）' : ''}`}</td>
+                        <td>{source.ok ? '已获取' : source.error ?? '失败'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
             {session.research.length === 0 ? <p className="text-sm text-slate-500">尚无研究记录；联网检索仅桌面可用，且必须记录来源、发布日期与检索日期。</p> : (
               <ul className="space-y-2 text-sm">
                 {session.research.map((item) => (
@@ -792,6 +901,18 @@ export function MonthlyPlannerPanel() {
           )}
           <p className="mt-3 text-xs text-slate-500">导出与完整含附件备份在「数据中心」；删除会话不会删除已归档的原始证据文件。</p>
         </Card>
+      )}
+
+      {visionResult && (
+        <Modal open onClose={() => setVisionResult(null)} title={`视觉识别结果 · ${visionResult.name}`} size="md"
+          footer={<Button onClick={() => setVisionResult(null)}>关闭</Button>}>
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">
+              模型 {visionResult.modelId} 的输出**未写入会话**：它不是事实层内容，请核对后手工录入，看不清的字段保持未知。
+            </p>
+            <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-xs text-slate-700">{visionResult.text}</pre>
+          </div>
+        </Modal>
       )}
 
       {executionTarget && session && (
