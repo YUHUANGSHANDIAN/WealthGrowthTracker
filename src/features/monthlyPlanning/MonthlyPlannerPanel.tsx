@@ -22,7 +22,8 @@ import { buildDraftInput } from './sessionDraft';
 import { validateMonthlySession, type SessionIssue } from '../../domain/portfolio/invariants';
 import { carryOverPlan, markCarryOverStale, summarizeCarryOver, checkPeriodContinuity, type CarriedItem } from '../../domain/portfolio/carryOver';
 import { getAttachment } from '../../services/monthlyPlanning/attachments';
-import { importDocuments, rebuildCandidatesFromDocuments, type DocumentImportOutcome } from '../../services/monthlyPlanning/importDocuments';
+import { importDocuments, rebuildCandidatesFromDocuments, type DocumentImportOutcome, type FileLike } from '../../services/monthlyPlanning/importDocuments';
+import { scopeSummary } from './scope';
 import { researchLookupAI, visionExtractAI, type ResearchSource } from '../../services/ai/client';
 import { useAIConnectionStore } from '../../store/aiConnectionStore';
 import { buildVisionRequest, existingResearchUrls, parseUrlLines, researchEvidenceFrom, visionMimeFor } from './aiEntry';
@@ -185,8 +186,8 @@ export function MonthlyPlannerPanel() {
     await save(createDraftSession(built.input), '正在创建月度会话');
   }
 
-  async function handleFiles(files: FileList | null) {
-    if (!files?.length || !session) return;
+  async function handleFiles(picked: readonly FileLike[]) {
+    if (!picked.length || !session) return;
     if (session.state === 'planned' || session.state === 'confirmed' || session.state === 'archived') {
       setError('会话已进入计划或已完成，如需重新导入请先删除会话，或先清空自动候选再重来');
       return;
@@ -199,7 +200,7 @@ export function MonthlyPlannerPanel() {
     try {
       const result = await importDocuments({
         session: started,
-        files: Array.from(files),
+        files: picked,
         channelId: importChannelId || null,
         now: new Date().toISOString(),
       });
@@ -250,7 +251,7 @@ export function MonthlyPlannerPanel() {
         await saveMonthlyPolicy(active);
       }
       const positions = buildPositions(session);
-      const investable = investableTotalOf(session, channelsTotal(channels), restrictedTotal);
+      const investable = investableTotalOf(session, restrictedTotal);
       const unknownCount = session.observations.filter((observation) => observation.marketValue === null).length;
       const proposal = generateProposal(active, {
         investableTotal: investable,
@@ -410,7 +411,8 @@ export function MonthlyPlannerPanel() {
     return map;
   }, [session]);
 
-  const investable = session ? investableTotalOf(session, channelsTotal(channels), restrictedTotal) : null;
+  const investable = session ? investableTotalOf(session, restrictedTotal) : null;
+  const scope = session ? scopeSummary(session, channelsTotal(channels), todayString()) : null;
   const breaches = policy ? evaluatePolicy(policy, { exposures, exposureBase: investable }).breaches : [];
   const carrySummary = summarizeCarryOver(carry);
   const continuity = checkPeriodContinuity({ previous, nextReviewPeriodStart: session?.reviewPeriodStart ?? null });
@@ -509,8 +511,13 @@ export function MonthlyPlannerPanel() {
               ]} />
             <label className="text-sm">
                 选择文件（DOCX / 图片 / CSV / Markdown / TXT）
-              <input type="file" multiple className="block mt-1 text-xs" disabled={!session || busy}
-                onChange={(event) => { void handleFiles(event.target.files); event.target.value = ''; }} />
+                <input type="file" multiple className="block mt-1 text-xs" disabled={!session || busy}
+                  onChange={(event) => {
+                    // FileList 会在把 value 置空时被清空，所以先同步快照成数组，再清空输入框。
+                    const picked = Array.from(event.target.files ?? []);
+                    event.target.value = '';
+                    void handleFiles(picked);
+                  }} />
             </label>
             <MoneyField label="来源声明总额（可选）" value={sourceTotal} onChange={setSourceTotal} />
           </div>
@@ -538,12 +545,25 @@ export function MonthlyPlannerPanel() {
           )}
           {session?.documents.length ? (
             <table className="w-full text-sm">
-              <thead><tr className="text-left text-xs text-slate-500"><th>文件</th><th>平台</th><th>完整性</th><th>解析</th><th>范围声明</th><th>AI</th></tr></thead>
+              <thead><tr className="text-left text-xs text-slate-500"><th>文件</th><th>平台</th><th>导出日 / 值日</th><th>完整性</th><th>解析</th><th>范围声明</th><th>AI</th></tr></thead>
               <tbody>
                 {session.documents.map((document) => (
                   <tr key={document.id} className="border-t border-slate-100">
                     <td className="py-1.5 break-all">{document.originalName}<div className="text-[11px] text-slate-400">{document.relativePath}</div></td>
                     <td>{document.platform}</td>
+                      <td className="text-xs tabular">
+                        {document.declaredDate ?? '未注明'}
+                        <div className="text-[11px] text-slate-400">
+                          值日 {(() => {
+                            const dates = session.observations
+                              .filter((observation) => observation.evidence.some((ref) => ref.sourceId === document.id))
+                              .map((observation) => observation.navDate)
+                              .filter((value): value is string => Boolean(value))
+                              .sort();
+                            return dates.length ? `${dates[0]}${dates.length > 1 ? ` ~ ${dates[dates.length - 1]}` : ''}` : '未注明';
+                          })()}
+                        </div>
+                      </td>
                     <td>{document.integrity === 'ok' ? '正常' : '异常'}</td>
                     <td>{document.parseState}</td>
                     <td className="text-xs">{document.scopeNote ?? '—'}</td>
@@ -589,7 +609,7 @@ export function MonthlyPlannerPanel() {
           {!session?.holdings.length ? <EmptyState icon="📊" title="还没有持仓" description="先导入资料，或在下方手工补充。" /> : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead><tr className="text-left text-xs text-slate-500"><th>代码/名称</th><th>市值</th><th>份额</th><th>状态</th><th>暴露标签</th></tr></thead>
+                  <thead><tr className="text-left text-xs text-slate-500"><th>代码/名称</th><th>市值</th><th>份额</th><th>值日</th><th>状态</th><th>暴露标签</th></tr></thead>
                 <tbody>
                   {session.holdings.map((holding) => {
                     const observation = session.observations.find((item) => item.holdingId === holding.id);
@@ -598,6 +618,11 @@ export function MonthlyPlannerPanel() {
                         <td className="py-1.5">{holding.fundCode ?? '—'} · {holding.originalName}</td>
                         <td className="tabular">{observation?.marketValue === null || observation?.marketValue === undefined ? '未知' : formatCNY(observation.marketValue)}</td>
                         <td className="tabular">{observation?.shares ?? '未知'}</td>
+                          <td className="text-xs tabular">
+                            {observation
+                              ? observation.navDate ?? <span className="text-slate-400">{session.snapshotAsOf}（快照）</span>
+                              : '—'}
+                          </td>
                         <td className="text-xs">
                           {observation ? qualityBadges(observation.quality).map((label) => <Badge key={label} tone="slate" className="mr-1">{label}</Badge>) : '无观察'}
                         </td>
@@ -624,6 +649,36 @@ export function MonthlyPlannerPanel() {
 
       {section === 'funds' && session && (
         <div className="space-y-4">
+          {scope && (
+            <Card className="p-4">
+              <h3 className="font-semibold mb-2">口径对照：本期证据 ≠ 当前渠道资产</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg bg-slate-50 p-3">
+                  <div className="text-xs text-slate-500">本期证据口径（来自文档观察值）</div>
+                  <div className="text-lg font-semibold tabular">{formatCNY(scope.evidence.total)}</div>
+                  <div className="text-[11px] text-slate-500">
+                    {scope.evidence.count} 条观察{scope.evidence.unknownCount ? `，其中 ${scope.evidence.unknownCount} 条金额未知` : ''}
+                    {scope.evidence.from
+                      ? ` · 值日 ${scope.evidence.from}${scope.evidence.to && scope.evidence.to !== scope.evidence.from ? ` ~ ${scope.evidence.to}` : ''}`
+                      : ' · 尚无观察值'}
+                  </div>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-3">
+                  <div className="text-xs text-slate-500">主应用渠道资产（资产页维护）</div>
+                  <div className="text-lg font-semibold tabular">{formatCNY(scope.channels.total)}</div>
+                  <div className="text-[11px] text-slate-500">截至 {scope.channels.asOf} · 仅作参照，不参与本会话计算</div>
+                </div>
+              </div>
+              <p className="mt-3 text-sm text-slate-600">
+                差额：
+                <span className="tabular">{scope.difference === null ? '不可判定（尚无观察值）' : formatCNY(scope.difference)}</span>
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                平台导出的资产证明是某日冻结的快照，申购确认、净值更新与在途资金都有延迟；导出日与表内净值日也可能不同。
+                两者不相等是正常的，**不要把渠道资产回写进本期观察值**，也不要把文档金额当成当前渠道余额。
+              </p>
+            </Card>
+          )}
           <Card className="p-4">
             <h3 className="font-semibold mb-2">四种口径（公式与范围）</h3>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -938,12 +993,12 @@ function channelsTotal(channels: ReturnType<typeof useAppStore.getState>['channe
   return totalAssets(channels);
 }
 
-function investableTotalOf(session: MonthlyReview, fallbackTotal: number, restricted: number | ''): number | null {
+/** 会话内的可投资分母只用本期观察值；没有观测就返回 null，绝不拿渠道资产顶替。 */
+function investableTotalOf(session: MonthlyReview, restricted: number | ''): number | null {
   const observed = sumMoney(session.observations.filter((observation) => observation.marketValue !== null).map((observation) => observation.marketValue as number));
-  const base = observed > 0 ? observed : fallbackTotal;
-  if (!Number.isFinite(base)) return null;
+  if (!session.observations.length || !(observed > 0) || !Number.isFinite(observed)) return null;
   const restrictedValue = restricted === '' ? 0 : Number(restricted);
-  const value = moneyDiff(base, restrictedValue);
+  const value = moneyDiff(observed, restrictedValue);
   return value > 0 ? value : null;
 }
 

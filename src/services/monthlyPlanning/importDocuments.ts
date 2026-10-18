@@ -33,7 +33,17 @@ export interface DocumentImportResult {
   outcomes: DocumentImportOutcome[];
 }
 
-type FileLike = { name: string; type?: string; arrayBuffer(): Promise<ArrayBuffer> };
+/** 文件的最小接口：输入框的 FileList 会在 `input.value = ''` 时被清空，所以调用方必须先同步快照成数组。 */
+export interface FileLike { name: string; type?: string; arrayBuffer(): Promise<ArrayBuffer> }
+
+/** 从文件名里的 YYYYMMDD 解析导出日（20260720 → 2026-07-20）；不可信就返回 undefined。 */
+export function declaredDateFromName(name: string): string | undefined {
+  const match = /(20\d{2})(\d{2})(\d{2})/.exec(name);
+  if (!match) return undefined;
+  const value = `${match[1]}-${match[2]}-${match[3]}`;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value ? value : undefined;
+}
 
 export function extractedHoldingId(documentId: string, tableIndex: number, rowIndex: number): string {
   return `${EXTRACTED_HOLDING_PREFIX}${documentId}:${tableIndex}:${rowIndex}`;
@@ -163,7 +173,7 @@ export async function importDocuments(input: {
 
       const intake = intakeDocument({
         id: `doc:${hash.slice(0, 12)}`, name: file.name, mime: file.type ?? '', byteLength: bytes.byteLength,
-        hash, importedAt: now,
+        hash, importedAt: now, ...(declaredDateFromName(file.name) ? { declaredDate: declaredDateFromName(file.name) as string } : {}),
       }, documents);
       const attachment = await putAttachment({ name: file.name, mime: file.type || kind, bytes });
       const document: SourceDocument = { ...intake.document, relativePath: attachment.key, parseState: 'parsed' };
