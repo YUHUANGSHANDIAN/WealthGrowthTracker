@@ -114,6 +114,106 @@ fn ok_result(result: Value) -> Value {
     json!({ "ok": true, "result": result })
 }
 
+/// 无界面自检：用与 Broker 完全相同的启动参数（env_clear、工作目录、stdin/stdout 管道）
+/// 拉起随包运行时，依次发 status / configure / infer 三帧并收集响应与 stderr。
+/// 只用于 `--ai-selftest`，便于在没有 GUI 的情况下验证运行时链路。
+pub fn run_selftest() -> Value {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let dir = exe.parent().map(PathBuf::from).unwrap_or_default();
+    let entry = dir.join("ai-runtime").join("main.mjs");
+    let node = dir.join("node.exe");
+    if !entry.is_file() || !node.is_file() {
+        return json!({ "ok": false, "error": "AI_RUNTIME_MISSING", "entry": entry.to_string_lossy(), "node": node.to_string_lossy() });
+    }
+    let working_dir = std::env::temp_dir().join("wealth-ai-runtime");
+    let _ = std::fs::create_dir_all(&working_dir);
+    let mut command = Command::new(&node);
+    command
+        .arg(&entry)
+        .arg("--stdio")
+        .arg("--enable-ai-runtime")
+        .current_dir(&working_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command.env_clear();
+    #[cfg(windows)]
+    {
+        if let Ok(system_root) = std::env::var("SystemRoot") {
+            command.env("SystemRoot", system_root);
+        }
+        if let Ok(temp) = std::env::var("TEMP") {
+            command.env("TEMP", temp);
+        }
+    }
+    command.env("PATH", dir.to_string_lossy().to_string());
+    let Ok(mut child) = command.spawn() else {
+        return json!({ "ok": false, "error": "SPAWN_FAILED" });
+    };
+    let stderr_tail = Arc::new(Mutex::new(String::new()));
+    if let Some(stderr) = child.stderr.take() {
+        let sink = Arc::clone(&stderr_tail);
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                let mut sink = sink.lock().unwrap();
+                sink.push_str(&line);
+                sink.push('\n');
+            }
+        });
+    }
+    let mut stdin = match child.stdin.take() {
+        Some(stdin) => stdin,
+        None => return json!({ "ok": false, "error": "STDIN_UNAVAILABLE" }),
+    };
+    let stdout = child.stdout.take();
+    let (sender, receiver) = channel::<String>();
+    if let Some(stdout) = stdout {
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    let frames = [
+        json!({ "protocolVersion": 1, "requestId": "selftest-status", "operation": "status" })
+            .to_string(),
+        json!({
+            "protocolVersion": 1, "requestId": "selftest-configure", "operation": "configure",
+            "profile": { "profileId": "selftest", "providerId": "openai", "authKind": "api-key",
+                         "modelId": "gpt-4o-mini", "credential": "sk-synthetic-selftest" }
+        })
+        .to_string(),
+        json!({
+            "protocolVersion": 1, "requestId": "selftest-infer", "operation": "infer",
+            "profileId": "selftest", "providerId": "openai", "task": "analysis-question",
+            "input": { "text": "synthetic", "facts": [] }
+        })
+        .to_string(),
+    ];
+    let mut responses = Vec::new();
+    for frame in frames {
+        if writeln!(stdin, "{frame}").is_err() {
+            break;
+        }
+        let _ = stdin.flush();
+        match receiver.recv_timeout(Duration::from_secs(45)) {
+            Ok(line) => responses
+                .push(serde_json::from_str::<Value>(&line).unwrap_or(json!({ "raw": line }))),
+            Err(_) => responses.push(json!({ "error": "NO_RESPONSE_IN_TIME" })),
+        }
+    }
+    drop(stdin);
+    let status = child.wait().ok().map(|status| status.to_string());
+    json!({
+        "ok": true,
+        "responses": responses,
+        "runtimeStatus": status,
+        "stderr": stderr_tail.lock().unwrap().clone(),
+    })
+}
+
 /// 运行时意外退出时，命令层可以重建一次并重试同一个帧。
 fn is_runtime_exited(response: &Value) -> bool {
     response

@@ -985,6 +985,12 @@ fn open_path(app: tauri::AppHandle, rel_path: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 无界面自检：`wealth-growth-tracker.exe --ai-selftest` 会用与 Broker 相同的环境
+    // 拉起随包运行时并打印三帧结果，便于在没有 GUI 的情况下定位 AI 运行时问题。
+    if std::env::args().any(|arg| arg == "--ai-selftest") {
+        println!("{}", ai::run_selftest());
+        return;
+    }
     tauri::Builder::default()
         .manage(ai::AiBroker::default())
         .invoke_handler(tauri::generate_handler![
