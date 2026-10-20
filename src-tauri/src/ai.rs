@@ -519,9 +519,16 @@ impl InnerState {
                 .write_all(line.as_bytes())
                 .and_then(|_| process.stdin.flush());
             if written.is_err() {
-                append_runtime_log(
-                    "stdin write failed; dropping runtime (request will fail RUNTIME_EXITED)",
-                );
+                let status = process
+                    .child
+                    .try_wait()
+                    .ok()
+                    .flatten()
+                    .map(|status| status.to_string())
+                    .unwrap_or_else(|| "still-running-or-unknown".to_string());
+                append_runtime_log(&format!(
+                    "stdin write failed; runtime status={status}; dropping runtime (request will fail RUNTIME_EXITED)"
+                ));
                 process.pending.lock().unwrap().remove(&id);
                 *runtime = None;
                 return Ok(error_result("RUNTIME_EXITED"));
@@ -901,7 +908,14 @@ impl InnerState {
             if let Some(mut process) = self.runtime.lock().unwrap().take() {
                 drop(process.stdin);
                 let _ = process.child.kill();
-                let _ = process.child.wait();
+                let status = process
+                    .child
+                    .wait()
+                    .map(|status| status.to_string())
+                    .unwrap_or_else(|error| format!("wait failed: {error}"));
+                append_runtime_log(&format!(
+                    "runtime killed after user disabled AI; status={status}"
+                ));
             }
             self.configured.lock().unwrap().clear();
             for entry in self.profiles.lock().unwrap().values_mut() {
