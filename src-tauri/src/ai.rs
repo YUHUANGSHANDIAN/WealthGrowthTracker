@@ -117,6 +117,49 @@ fn ok_result(result: Value) -> Value {
 /// 无界面自检：用与 Broker 完全相同的启动参数（env_clear、工作目录、stdin/stdout 管道）
 /// 拉起随包运行时，依次发 status / configure / infer 三帧并收集响应与 stderr。
 /// 只用于 `--ai-selftest`，便于在没有 GUI 的情况下验证运行时链路。
+/// 走**真实 AiBroker**（含 pending/reader/重试层）的自检：不必打开窗口即可复现 GUI 路径。
+pub fn run_broker_selftest() -> Value {
+    let broker = AiBroker::default();
+    broker.inner.set_enabled(true);
+    let profile = ConnectionProfile {
+        profile_id: "selftest".into(),
+        provider_id: "openai".into(),
+        auth_kind: "api-key".into(),
+        model_id: "gpt-4o-mini".into(),
+        endpoint: None,
+        supports_vision: None,
+    };
+    let configure =
+        broker
+            .inner
+            .configure(None, profile, Some("sk-synthetic-selftest".into()), false);
+    let infer = broker.inner.infer(
+        None,
+        InferenceRequest {
+            request_id: "selftest-infer".into(),
+            profile_id: "selftest".into(),
+            provider_id: "openai".into(),
+            task: "analysis-question".into(),
+            input: json!({ "text": "synthetic", "facts": [] }),
+        },
+    );
+    let runtime_alive = broker
+        .inner
+        .runtime
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|process| !process.dead.load(Ordering::SeqCst));
+    let report = json!({
+        "ok": configure.is_ok() && infer.is_ok(),
+        "configure": configure.unwrap_or_else(|error| json!({ "brokerError": error })),
+        "infer": infer.unwrap_or_else(|error| json!({ "brokerError": error })),
+        "runtimeAliveBeforeShutdown": runtime_alive,
+    });
+    broker.inner.set_enabled(false);
+    report
+}
+
 pub fn run_selftest() -> Value {
     let exe = std::env::current_exe().unwrap_or_default();
     let dir = exe.parent().map(PathBuf::from).unwrap_or_default();
@@ -407,7 +450,7 @@ fn delete_credential(profile_id: &str) {
 }
 
 /// Locate the private stdio runtime. Never falls back to a shell or the data directory.
-fn runtime_entry(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn runtime_entry(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
     if let Ok(path) = std::env::var("WEALTH_AI_RUNTIME") {
         let candidate = PathBuf::from(path);
         if candidate.is_file() {
@@ -416,7 +459,7 @@ fn runtime_entry(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         return Err("AI_RUNTIME_MISSING".into());
     }
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(resources) = app.path().resource_dir() {
+    if let Some(resources) = app.and_then(|app| app.path().resource_dir().ok()) {
         candidates.push(resources.join("ai-runtime").join("main.mjs"));
         candidates.push(
             resources
@@ -444,7 +487,7 @@ fn runtime_entry(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .ok_or_else(|| "AI_RUNTIME_MISSING".to_string())
 }
 
-fn spawn_runtime(app: &tauri::AppHandle) -> Result<RuntimeProcess, String> {
+fn spawn_runtime(app: Option<&tauri::AppHandle>) -> Result<RuntimeProcess, String> {
     let entry = runtime_entry(app)?;
     let node = resolve_node();
     let working_dir = std::env::temp_dir().join("wealth-ai-runtime");
@@ -590,7 +633,7 @@ impl InnerState {
     /// that `ai_cancel` can run while an inference is still pending.
     fn request(
         &self,
-        app: &tauri::AppHandle,
+        app: Option<&tauri::AppHandle>,
         frame: Value,
         timeout: Duration,
     ) -> Result<Value, String> {
@@ -648,7 +691,7 @@ impl InnerState {
 
     fn configure(
         &self,
-        app: &tauri::AppHandle,
+        app: Option<&tauri::AppHandle>,
         profile: ConnectionProfile,
         credential: Option<String>,
         persist: bool,
@@ -688,16 +731,32 @@ impl InnerState {
             },
         );
         self.configured.lock().unwrap().remove(&profile.profile_id);
+        append_runtime_log(&format!(
+            "configure start: provider={} auth={} modelLen={} persist={} endpoint={} credentialLen={}",
+            profile.provider_id,
+            profile.auth_kind,
+            profile.model_id.len(),
+            persist,
+            profile.endpoint.is_some(),
+            effective.as_deref().map(str::len).unwrap_or(0)
+        ));
         let frame = json!({
             "protocolVersion": 1,
             "requestId": self.next_request_id(),
             "operation": "configure",
             "profile": profile_frame(&profile, effective.as_deref()),
         });
-        match self
+        let outcome = self
             .request(app, frame, CONFIGURE_TIMEOUT)
-            .and_then(interpret)
-        {
+            .and_then(interpret);
+        append_runtime_log(&format!(
+            "configure result: {}",
+            match &outcome {
+                Ok(_) => "ok".to_string(),
+                Err(code) => code.clone(),
+            }
+        ));
+        match outcome {
             Ok(result) => {
                 self.configured
                     .lock()
@@ -714,7 +773,11 @@ impl InnerState {
     }
 
     /// Re-configure the runtime after a restart without touching the keyring.
-    fn ensure_configured(&self, app: &tauri::AppHandle, profile_id: &str) -> Result<(), String> {
+    fn ensure_configured(
+        &self,
+        app: Option<&tauri::AppHandle>,
+        profile_id: &str,
+    ) -> Result<(), String> {
         if self.configured.lock().unwrap().contains(profile_id) {
             let alive = self
                 .runtime
@@ -760,7 +823,7 @@ impl InnerState {
 
     fn models(
         &self,
-        app: &tauri::AppHandle,
+        app: Option<&tauri::AppHandle>,
         profile_id: &str,
         provider_id: &str,
     ) -> Result<Value, String> {
@@ -807,7 +870,11 @@ impl InnerState {
         }
     }
 
-    fn infer(&self, app: &tauri::AppHandle, request: InferenceRequest) -> Result<Value, String> {
+    fn infer(
+        &self,
+        app: Option<&tauri::AppHandle>,
+        request: InferenceRequest,
+    ) -> Result<Value, String> {
         if !self.enabled.load(Ordering::SeqCst) {
             return Ok(error_result("AI_DISABLED"));
         }
@@ -857,7 +924,7 @@ impl InnerState {
     /// 图片视觉提取：只有被声明为可读图的连接才会收到图片，其余一律失败关闭。
     fn vision_extract(
         &self,
-        app: &tauri::AppHandle,
+        app: Option<&tauri::AppHandle>,
         request: InferenceRequest,
     ) -> Result<Value, String> {
         if !self.enabled.load(Ordering::SeqCst) {
@@ -913,7 +980,7 @@ impl InnerState {
     /// 研究检索：由 Node 运行时按白名单抓取用户给出的公网 HTTPS 链接。
     fn research_lookup(
         &self,
-        app: &tauri::AppHandle,
+        app: Option<&tauri::AppHandle>,
         profile_id: &str,
         provider_id: &str,
         urls: Vec<String>,
@@ -956,7 +1023,11 @@ impl InnerState {
         }
     }
 
-    fn cancel(&self, app: &tauri::AppHandle, target_request_id: &str) -> Result<Value, String> {
+    fn cancel(
+        &self,
+        app: Option<&tauri::AppHandle>,
+        target_request_id: &str,
+    ) -> Result<Value, String> {
         if !is_identifier(target_request_id) {
             return Ok(error_result("INVALID_REQUEST"));
         }
@@ -975,7 +1046,11 @@ impl InnerState {
         }
     }
 
-    fn remove_profile(&self, app: &tauri::AppHandle, profile_id: &str) -> Result<Value, String> {
+    fn remove_profile(
+        &self,
+        app: Option<&tauri::AppHandle>,
+        profile_id: &str,
+    ) -> Result<Value, String> {
         if !is_identifier(profile_id) {
             return Ok(error_result("INVALID_REQUEST"));
         }
@@ -1045,7 +1120,7 @@ pub async fn ai_configure_profile(
     let inner = Arc::clone(&broker.inner);
     tauri::async_runtime::spawn_blocking(move || {
         inner.configure(
-            &app,
+            Some(&app),
             profile,
             credential,
             persist_credential.unwrap_or(false),
@@ -1063,9 +1138,11 @@ pub async fn ai_models(
     provider_id: String,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
-    tauri::async_runtime::spawn_blocking(move || inner.models(&app, &profile_id, &provider_id))
-        .await
-        .map_err(|_| "BROKER_TASK_FAILED".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        inner.models(Some(&app), &profile_id, &provider_id)
+    })
+    .await
+    .map_err(|_| "BROKER_TASK_FAILED".to_string())?
 }
 
 #[tauri::command]
@@ -1075,7 +1152,7 @@ pub async fn ai_infer(
     request: InferenceRequest,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
-    tauri::async_runtime::spawn_blocking(move || inner.infer(&app, request))
+    tauri::async_runtime::spawn_blocking(move || inner.infer(Some(&app), request))
         .await
         .map_err(|_| "BROKER_TASK_FAILED".to_string())?
 }
@@ -1087,7 +1164,7 @@ pub async fn ai_vision_extract(
     request: InferenceRequest,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
-    tauri::async_runtime::spawn_blocking(move || inner.vision_extract(&app, request))
+    tauri::async_runtime::spawn_blocking(move || inner.vision_extract(Some(&app), request))
         .await
         .map_err(|_| "BROKER_TASK_FAILED".to_string())?
 }
@@ -1102,7 +1179,7 @@ pub async fn ai_research_lookup(
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
     tauri::async_runtime::spawn_blocking(move || {
-        inner.research_lookup(&app, &profile_id, &provider_id, urls)
+        inner.research_lookup(Some(&app), &profile_id, &provider_id, urls)
     })
     .await
     .map_err(|_| "BROKER_TASK_FAILED".to_string())?
@@ -1115,7 +1192,7 @@ pub async fn ai_cancel(
     target_request_id: String,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
-    tauri::async_runtime::spawn_blocking(move || inner.cancel(&app, &target_request_id))
+    tauri::async_runtime::spawn_blocking(move || inner.cancel(Some(&app), &target_request_id))
         .await
         .map_err(|_| "BROKER_TASK_FAILED".to_string())?
 }
@@ -1127,7 +1204,7 @@ pub async fn ai_remove_profile(
     profile_id: String,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
-    tauri::async_runtime::spawn_blocking(move || inner.remove_profile(&app, &profile_id))
+    tauri::async_runtime::spawn_blocking(move || inner.remove_profile(Some(&app), &profile_id))
         .await
         .map_err(|_| "BROKER_TASK_FAILED".to_string())?
 }
