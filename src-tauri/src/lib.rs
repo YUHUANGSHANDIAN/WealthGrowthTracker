@@ -987,12 +987,22 @@ fn open_path(app: tauri::AppHandle, rel_path: String) -> Result<(), String> {
 pub fn run() {
     // 无界面自检：`wealth-growth-tracker.exe --ai-selftest` 会用与 Broker 相同的环境
     // 拉起随包运行时并打印三帧结果，便于在没有 GUI 的情况下定位 AI 运行时问题。
+    if std::env::args().any(|arg| arg == "--ai-selftest-persist") {
+        println!("{}", ai::run_broker_selftest_persist());
+        return;
+    }
     if std::env::args().any(|arg| arg == "--ai-selftest") {
         println!("{}", ai::run_broker_selftest());
         return;
     }
     tauri::Builder::default()
         .manage(ai::AiBroker::default())
+        .setup(|_app| {
+            // 在 GUI 自身进程里做一次不写凭据的运行时自检并记录结果，
+            // 用于判断子进程在图形界面父进程下是否会被终止。
+            ai::log_gui_selftest();
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             fs_read_text,
             fs_write_text,

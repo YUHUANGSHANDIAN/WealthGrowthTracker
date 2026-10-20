@@ -119,6 +119,24 @@ fn ok_result(result: Value) -> Value {
 /// 只用于 `--ai-selftest`，便于在没有 GUI 的情况下验证运行时链路。
 /// 走**真实 AiBroker**（含 pending/reader/重试层）的自检：不必打开窗口即可复现 GUI 路径。
 pub fn run_broker_selftest() -> Value {
+    run_broker_selftest_with(false)
+}
+
+/// 应用启动时在**自身 GUI 进程**里跑一次自检并写日志（不阻塞界面、不写凭据）。
+/// 这样能回答一个关键问题：子进程在 GUI 父进程下是否也会被杀。
+pub fn log_gui_selftest() {
+    std::thread::spawn(|| {
+        let report = run_broker_selftest_with(false);
+        append_runtime_log(&format!("gui selftest: {report}"));
+    });
+}
+
+/// 与 GUI 默认一致的「持久化凭据」自检：真实写一次系统安全存储，结束时删除该测试项。
+pub fn run_broker_selftest_persist() -> Value {
+    run_broker_selftest_with(true)
+}
+
+fn run_broker_selftest_with(persist: bool) -> Value {
     let broker = AiBroker::default();
     broker.inner.set_enabled(true);
     let profile = ConnectionProfile {
@@ -132,7 +150,7 @@ pub fn run_broker_selftest() -> Value {
     let configure =
         broker
             .inner
-            .configure(None, profile, Some("sk-synthetic-selftest".into()), false);
+            .configure(None, profile, Some("sk-synthetic-selftest".into()), persist);
     let infer = broker.inner.infer(
         None,
         InferenceRequest {
@@ -152,10 +170,15 @@ pub fn run_broker_selftest() -> Value {
         .is_some_and(|process| !process.dead.load(Ordering::SeqCst));
     let report = json!({
         "ok": configure.is_ok() && infer.is_ok(),
+        "persist": persist,
         "configure": configure.unwrap_or_else(|error| json!({ "brokerError": error })),
         "infer": infer.unwrap_or_else(|error| json!({ "brokerError": error })),
         "runtimeAliveBeforeShutdown": runtime_alive,
     });
+    if persist {
+        // 清掉测试期间写进系统安全存储的条目。
+        let _ = broker.inner.remove_profile(None, "selftest");
+    }
     broker.inner.set_enabled(false);
     report
 }
