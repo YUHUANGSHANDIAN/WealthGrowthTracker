@@ -97,6 +97,19 @@ pub struct AiBroker {
     inner: Arc<InnerState>,
 }
 
+/// Broker 侧事件与运行时 stderr 共用同一个日志文件，便于区分「运行时自己崩」与「被 Broker 杀掉」。
+fn append_runtime_log(line: &str) {
+    let dir = std::env::temp_dir().join("wealth-ai-runtime");
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("stderr.log"))
+    {
+        let _ = writeln!(file, "[broker] {line}");
+    }
+}
+
 fn ok_result(result: Value) -> Value {
     json!({ "ok": true, "result": result })
 }
@@ -495,6 +508,9 @@ impl InnerState {
                 .write_all(line.as_bytes())
                 .and_then(|_| process.stdin.flush());
             if written.is_err() {
+                append_runtime_log(
+                    "stdin write failed; dropping runtime (request will fail RUNTIME_EXITED)",
+                );
                 process.pending.lock().unwrap().remove(&id);
                 *runtime = None;
                 return Ok(error_result("RUNTIME_EXITED"));
@@ -853,6 +869,7 @@ impl InnerState {
     fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::SeqCst);
         if !enabled {
+            append_runtime_log("AI disabled by user: killing runtime on purpose");
             if let Some(mut process) = self.runtime.lock().unwrap().take() {
                 drop(process.stdin);
                 let _ = process.child.kill();
