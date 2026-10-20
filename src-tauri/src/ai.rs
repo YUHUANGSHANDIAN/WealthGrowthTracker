@@ -336,7 +336,9 @@ fn spawn_runtime(app: &tauri::AppHandle) -> Result<RuntimeProcess, String> {
         .current_dir(&working_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        // 子进程崩溃时唯一线索就是 stderr；以前直接丢弃，界面只能看到 RUNTIME_EXITED。
+        // 现在落到临时目录的日志里（含凭据特征的行整行打码），便于定位。
+        .stderr(Stdio::piped());
     // Minimal environment only: no HOME/USERPROFILE, so provider CLIs and ambient
     // credential files are not discoverable from the runtime process.
     command.env_clear();
@@ -368,6 +370,31 @@ fn spawn_runtime(app: &tauri::AppHandle) -> Result<RuntimeProcess, String> {
         .stdout
         .take()
         .ok_or_else(|| "AI_RUNTIME_MISSING".to_string())?;
+    if let Some(stderr) = child.stderr.take() {
+        let log_path = working_dir.join("stderr.log");
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            let mut log = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+                .ok();
+            for line in reader.lines().map_while(Result::ok) {
+                let lower = line.to_ascii_lowercase();
+                let safe = if lower.contains("sk-")
+                    || lower.contains("bearer")
+                    || lower.contains("api_key")
+                {
+                    "[redacted line containing credential-like text]".to_string()
+                } else {
+                    line.chars().take(500).collect::<String>()
+                };
+                if let Some(file) = log.as_mut() {
+                    let _ = writeln!(file, "{safe}");
+                }
+            }
+        });
+    }
     let pending: Arc<Mutex<HashMap<String, Sender<Value>>>> = Arc::new(Mutex::new(HashMap::new()));
     let dead = Arc::new(AtomicBool::new(false));
     let reader_pending = Arc::clone(&pending);
