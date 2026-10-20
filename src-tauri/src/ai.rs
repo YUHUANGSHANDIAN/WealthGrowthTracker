@@ -114,6 +114,15 @@ fn ok_result(result: Value) -> Value {
     json!({ "ok": true, "result": result })
 }
 
+/// 运行时意外退出时，命令层可以重建一次并重试同一个帧。
+fn is_runtime_exited(response: &Value) -> bool {
+    response
+        .get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        == Some("RUNTIME_EXITED")
+}
+
 fn error_result(code: &str) -> Value {
     json!({ "ok": false, "error": { "code": code } })
 }
@@ -671,10 +680,17 @@ impl InnerState {
             "profileId": profile_id,
             "providerId": provider_id,
         });
-        match self
-            .request(app, frame, CONFIGURE_TIMEOUT)
-            .and_then(interpret)
-        {
+        let mut response = self.request(app, frame.clone(), CONFIGURE_TIMEOUT)?;
+        if is_runtime_exited(&response) {
+            append_runtime_log(
+                "models hit RUNTIME_EXITED; rebuilding the runtime and retrying once",
+            );
+            self.configured.lock().unwrap().remove(profile_id);
+            if self.ensure_configured(app, profile_id).is_ok() {
+                response = self.request(app, frame, CONFIGURE_TIMEOUT)?;
+            }
+        }
+        match interpret(response) {
             Ok(result) => Ok(ok_result(
                 json!({ "models": result.get("models").cloned().unwrap_or(json!([])) }),
             )),
@@ -713,7 +729,17 @@ impl InnerState {
             "task": request.task,
             "input": request.input,
         });
-        match self.request(app, frame, INFER_TIMEOUT).and_then(interpret) {
+        let mut response = self.request(app, frame.clone(), INFER_TIMEOUT)?;
+        if is_runtime_exited(&response) {
+            append_runtime_log(
+                "infer hit RUNTIME_EXITED; rebuilding the runtime and retrying once",
+            );
+            self.configured.lock().unwrap().remove(&request.profile_id);
+            if self.ensure_configured(app, &request.profile_id).is_ok() {
+                response = self.request(app, frame, INFER_TIMEOUT)?;
+            }
+        }
+        match interpret(response) {
             Ok(result) => Ok(ok_result(result)),
             Err(code) => Ok(error_result(&code)),
         }
@@ -1081,6 +1107,17 @@ mod tests {
         assert!(broker.inner.runtime.lock().unwrap().is_none());
         broker.inner.set_enabled(false);
         assert!(!broker.inner.enabled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn runtime_exit_detection_only_matches_that_code() {
+        assert!(is_runtime_exited(
+            &json!({ "ok": false, "error": { "code": "RUNTIME_EXITED" } })
+        ));
+        assert!(!is_runtime_exited(
+            &json!({ "ok": false, "error": { "code": "TIMEOUT" } })
+        ));
+        assert!(!is_runtime_exited(&json!({ "ok": true, "result": {} })));
     }
 
     fn vision_input() -> Value {
