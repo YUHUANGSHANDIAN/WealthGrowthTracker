@@ -381,9 +381,11 @@ fn spawn_runtime(app: &tauri::AppHandle) -> Result<RuntimeProcess, String> {
     }
     command.env("PATH", node_path_hint(&node));
 
-    let mut child = command
-        .spawn()
-        .map_err(|_| "AI_RUNTIME_MISSING".to_string())?;
+    let mut child = command.spawn().map_err(|error| {
+        append_runtime_log(&format!("runtime spawn failed: {error}"));
+        "AI_RUNTIME_MISSING".to_string()
+    })?;
+    append_runtime_log(&format!("runtime spawned (pid {})", child.id()));
     let stdin = child
         .stdin
         .take()
