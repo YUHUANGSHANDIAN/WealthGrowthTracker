@@ -75,7 +75,7 @@ const messages: Record<string, string> = {
   CANCELLED: '已取消，未保存 AI 结果。', TIMEOUT: '请求超时，请检查连接后重试。',
   PROVIDER_FAILED: '模型请求失败，请检查认证、模型、服务额度或网络。',
   AI_RUNTIME_MISSING: '桌面 AI 运行时未安装或未打包；请安装包含运行时的桌面构建。',
-  RUNTIME_EXITED: 'AI 运行时已退出，请重试或重新启用 AI。',
+  RUNTIME_EXITED: 'AI 运行时已退出，请重试或重新启用 AI。诊断日志：%TEMP%\\wealth-ai-runtime\\stderr.log',
   KEYRING_UNAVAILABLE: '系统安全存储不可用；可改用当前会话临时凭据（不会落盘）。',
   PROFILE_UNAVAILABLE: '连接尚未注册到运行时，请重新连接。',
   INVALID_REQUEST: '请求不符合 AI 协议限制，已在上游拒绝。',
