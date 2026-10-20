@@ -991,6 +991,10 @@ pub fn run() {
         println!("{}", ai::run_broker_selftest_persist());
         return;
     }
+    if std::env::args().any(|arg| arg == "--ai-selftest-deepseek") {
+        println!("{}", ai::run_broker_selftest_deepseek());
+        return;
+    }
     if std::env::args().any(|arg| arg == "--ai-selftest") {
         println!("{}", ai::run_broker_selftest());
         return;

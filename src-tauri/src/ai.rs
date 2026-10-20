@@ -119,7 +119,12 @@ fn ok_result(result: Value) -> Value {
 /// 只用于 `--ai-selftest`，便于在没有 GUI 的情况下验证运行时链路。
 /// 走**真实 AiBroker**（含 pending/reader/重试层）的自检：不必打开窗口即可复现 GUI 路径。
 pub fn run_broker_selftest() -> Value {
-    run_broker_selftest_with(false)
+    run_broker_selftest_variant("openai", "gpt-4o-mini", false)
+}
+
+/// 用 Broker 路径跑一次 deepseek 配置（复现 GUI 里的真实参数差异）。
+pub fn run_broker_selftest_deepseek() -> Value {
+    run_broker_selftest_variant("deepseek", "deepseek-coder", true)
 }
 
 /// 应用启动时在**自身 GUI 进程**里跑一次自检并写日志（不阻塞界面、不写凭据）。
@@ -137,13 +142,17 @@ pub fn run_broker_selftest_persist() -> Value {
 }
 
 fn run_broker_selftest_with(persist: bool) -> Value {
+    run_broker_selftest_variant("openai", "gpt-4o-mini", persist)
+}
+
+fn run_broker_selftest_variant(provider_id: &str, model_id: &str, persist: bool) -> Value {
     let broker = AiBroker::default();
     broker.inner.set_enabled(true);
     let profile = ConnectionProfile {
         profile_id: "selftest".into(),
-        provider_id: "openai".into(),
+        provider_id: provider_id.into(),
         auth_kind: "api-key".into(),
-        model_id: "gpt-4o-mini".into(),
+        model_id: model_id.into(),
         endpoint: None,
         supports_vision: None,
     };
@@ -156,7 +165,7 @@ fn run_broker_selftest_with(persist: bool) -> Value {
         InferenceRequest {
             request_id: "selftest-infer".into(),
             profile_id: "selftest".into(),
-            provider_id: "openai".into(),
+            provider_id: provider_id.into(),
             task: "analysis-question".into(),
             input: json!({ "text": "synthetic", "facts": [] }),
         },
@@ -755,13 +764,27 @@ impl InnerState {
         );
         self.configured.lock().unwrap().remove(&profile.profile_id);
         append_runtime_log(&format!(
-            "configure start: provider={} auth={} modelLen={} persist={} endpoint={} credentialLen={}",
+            "configure start: provider={} auth={} model={} persist={} endpoint={} credentialLen={} credentialClasses={}",
             profile.provider_id,
             profile.auth_kind,
-            profile.model_id.len(),
+            profile.model_id.chars().take(64).collect::<String>(),
             persist,
             profile.endpoint.is_some(),
-            effective.as_deref().map(str::len).unwrap_or(0)
+            effective.as_deref().map(str::len).unwrap_or(0),
+            effective
+                .as_deref()
+                .map(|value| {
+                    let mut classes = Vec::new();
+                    if value.chars().all(|c| c.is_ascii_alphanumeric()) { classes.push("alnum"); }
+                    if value.chars().all(|c| c.is_ascii_graphic()) { classes.push("ascii-graphic"); }
+                    if value.chars().any(|c| c == '+') { classes.push("plus"); }
+                    if value.chars().any(|c| c == '/') { classes.push("slash"); }
+                    if value.chars().any(|c| c == '=') { classes.push("equals"); }
+                    if value.chars().any(|c| c.is_whitespace()) { classes.push("whitespace"); }
+                    if value.chars().any(|c| !c.is_ascii()) { classes.push("non-ascii"); }
+                    classes.join(",")
+                })
+                .unwrap_or_default()
         ));
         let frame = json!({
             "protocolVersion": 1,
