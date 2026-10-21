@@ -562,6 +562,7 @@ fn spawn_runtime(app: Option<&tauri::AppHandle>) -> Result<RuntimeProcess, Strin
         }
     }
     command.env("PATH", node_path_hint(&node));
+    command.env("WGT_AI_DIAGNOSTICS", "1");
 
     // GUI 进程没有可用的控制台。以隐藏窗口 + 独立进程组启动，避免 node.exe
     // 在部分 Windows 会话里因控制台句柄初始化竞争而提前结束。
