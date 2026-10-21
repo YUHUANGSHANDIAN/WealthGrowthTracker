@@ -999,8 +999,17 @@ pub fn run() {
         println!("{}", ai::run_broker_selftest());
         return;
     }
+    let plugin_selftest = std::env::args().any(|arg| arg == "--ai-plugin-selftest");
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .manage(ai::AiBroker::default())
+        .setup(move |app| {
+            if plugin_selftest {
+                ai::run_plugin_configure_selftest(app.handle());
+                app.handle().exit(0);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             fs_read_text,
             fs_write_text,

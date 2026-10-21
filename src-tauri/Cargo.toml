@@ -21,6 +21,7 @@ dirs = "5"
 fs2 = "=0.4.3"
 sha2 = "=0.10.9"
 keyring = "=4.2.0"
+tauri-plugin-shell = "=2.3.3"
 
 [profile.release]
 panic = "abort"

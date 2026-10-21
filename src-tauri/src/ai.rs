@@ -12,6 +12,8 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Manager;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::ShellExt;
 
 const KEYRING_SERVICE: &str = "wealth-growth-tracker";
 const PROVIDERS: [&str; 7] = [
@@ -75,9 +77,64 @@ struct StoredProfile {
     persisted: bool,
 }
 
+enum RuntimeTransport {
+    Standard { child: Child, stdin: ChildStdin },
+    Sidecar { child: CommandChild },
+}
+
+impl RuntimeTransport {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), String> {
+        match self {
+            Self::Standard { stdin, .. } => stdin
+                .write_all(bytes)
+                .and_then(|_| stdin.flush())
+                .map_err(|error| error.to_string()),
+            Self::Sidecar { child } => child.write(bytes).map_err(|error| error.to_string()),
+        }
+    }
+
+    fn status(&mut self) -> String {
+        match self {
+            Self::Standard { child, .. } => child
+                .try_wait()
+                .ok()
+                .flatten()
+                .map(|status| status.to_string())
+                .unwrap_or_else(|| "still-running-or-unknown".to_string()),
+            Self::Sidecar { .. } => "plugin-managed-sidecar".to_string(),
+        }
+    }
+
+    fn pid(&self) -> u32 {
+        match self {
+            Self::Standard { child, .. } => child.id(),
+            Self::Sidecar { child } => child.pid(),
+        }
+    }
+
+    fn terminate(self) -> String {
+        match self {
+            Self::Standard { mut child, stdin } => {
+                drop(stdin);
+                let _ = child.kill();
+                child
+                    .wait()
+                    .map(|status| status.to_string())
+                    .unwrap_or_else(|error| format!("wait failed: {error}"))
+            }
+            Self::Sidecar { child } => {
+                let pid = child.pid();
+                match child.kill() {
+                    Ok(()) => format!("plugin-managed kill requested; pid={pid}"),
+                    Err(error) => format!("plugin-managed kill failed; pid={pid}: {error}"),
+                }
+            }
+        }
+    }
+}
+
 struct RuntimeProcess {
-    child: Child,
-    stdin: ChildStdin,
+    transport: RuntimeTransport,
     pending: Arc<Mutex<HashMap<String, Sender<Value>>>>,
     dead: Arc<AtomicBool>,
 }
@@ -126,6 +183,35 @@ pub fn run_broker_selftest() -> Value {
 pub fn run_broker_selftest_deepseek() -> Value {
     // 与用户实际参数一致：model=deepseek-flash、credential 35 位纯 ASCII。
     run_broker_selftest_variant("deepseek", "deepseek-flash", true)
+}
+
+/// 在真实 Tauri GUI 进程中验证官方 sidecar 传输能启动并配置 Runtime。
+/// 仅由 `--ai-plugin-selftest` 调用；不读取用户凭据、不访问供应商。
+pub fn run_plugin_configure_selftest(app: &tauri::AppHandle) -> Value {
+    let broker = AiBroker::default();
+    broker.inner.set_enabled(true);
+    let profile = ConnectionProfile {
+        profile_id: "selftest".into(),
+        provider_id: "deepseek".into(),
+        auth_kind: "api-key".into(),
+        model_id: "deepseek-flash".into(),
+        endpoint: None,
+        supports_vision: None,
+    };
+    let configure = broker.inner.configure(
+        Some(app),
+        profile,
+        Some(format!("sk-{}", "a".repeat(32))),
+        true,
+    );
+    let report = json!({
+        "ok": configure.is_ok(),
+        "configure": configure.unwrap_or_else(|error| json!({ "brokerError": error })),
+    });
+    let _ = broker.inner.remove_profile(Some(app), "selftest");
+    broker.inner.set_enabled(false);
+    append_runtime_log(&format!("plugin GUI selftest: {report}"));
+    report
 }
 
 /// 应用启动时在**自身 GUI 进程**里跑一次自检并写日志（不阻塞界面、不写凭据）。
@@ -526,25 +612,163 @@ fn runtime_entry(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
         .ok_or_else(|| "AI_RUNTIME_MISSING".to_string())
 }
 
-fn spawn_runtime(app: Option<&tauri::AppHandle>) -> Result<RuntimeProcess, String> {
-    let entry = runtime_entry(app)?;
-    let node = resolve_node();
-    let working_dir = std::env::temp_dir().join("wealth-ai-runtime");
-    let _ = std::fs::create_dir_all(&working_dir);
+fn sanitize_runtime_stderr(line: &str) -> String {
+    let lower = line.to_ascii_lowercase();
+    if lower.contains("sk-") || lower.contains("bearer") || lower.contains("api_key") {
+        "[redacted line containing credential-like text]".to_string()
+    } else {
+        line.chars().take(500).collect::<String>()
+    }
+}
 
-    let mut command = Command::new(&node);
+fn dispatch_runtime_response(line: &str, pending: &Arc<Mutex<HashMap<String, Sender<Value>>>>) {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
+    let Some(id) = value
+        .get("requestId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return;
+    };
+    if let Some(sender) = pending.lock().unwrap().remove(&id) {
+        let _ = sender.send(value);
+    }
+}
+
+fn finish_runtime_reader(
+    pending: &Arc<Mutex<HashMap<String, Sender<Value>>>>,
+    dead: &Arc<AtomicBool>,
+) {
+    dead.store(true, Ordering::SeqCst);
+    for (_, sender) in pending.lock().unwrap().drain() {
+        let _ = sender.send(error_result("RUNTIME_EXITED"));
+    }
+}
+
+/// Tauri resource lookup returns Windows verbatim paths (`\\?\D:\...`). Node's
+/// launcher can parse-check those paths but may exit before evaluating them when
+/// launched from a GUI process. Convert only the representation; the target stays
+/// the same file and is still validated above.
+fn node_compatible_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{unc}"));
+        }
+        if let Some(local) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(local);
+        }
+    }
+    path
+}
+
+fn spawn_runtime(app: Option<&tauri::AppHandle>) -> Result<RuntimeProcess, String> {
+    let entry = node_compatible_path(runtime_entry(app)?);
+    let node = resolve_node();
+    let working_dir = node_compatible_path(std::env::temp_dir().join("wealth-ai-runtime"));
+    let _ = std::fs::create_dir_all(&working_dir);
+    append_runtime_log(&format!(
+        "runtime launch preparing: node={node} entry={} cwd={}",
+        entry.to_string_lossy(),
+        working_dir.to_string_lossy()
+    ));
+
+    // On Windows the GUI process's direct std::process pipes can be closed before
+    // node evaluates main.mjs. Tauri's official shell transport uses explicit
+    // os_pipe handles and SharedChild, avoiding that GUI-only startup race.
+    #[cfg(windows)]
+    if let Some(app) = app {
+        return spawn_plugin_runtime(app, &node, &entry, working_dir);
+    }
+
+    spawn_standard_runtime(&node, &entry, working_dir)
+}
+
+fn spawn_plugin_runtime(
+    app: &tauri::AppHandle,
+    node: &str,
+    entry: &std::path::Path,
+    working_dir: PathBuf,
+) -> Result<RuntimeProcess, String> {
+    let mut command = app
+        .shell()
+        .command(node)
+        .arg(entry)
+        .arg("--stdio")
+        .arg("--enable-ai-runtime")
+        .current_dir(&working_dir)
+        .env_clear()
+        .env("PATH", node_path_hint(node))
+        .env("WGT_AI_DIAGNOSTICS", "1");
+    #[cfg(windows)]
+    {
+        if let Ok(system_root) = std::env::var("SystemRoot") {
+            command = command.env("SystemRoot", system_root);
+        }
+        if let Ok(temp) = std::env::var("TEMP") {
+            command = command.env("TEMP", temp);
+        }
+    }
+    let (mut events, child) = command.spawn().map_err(|error| {
+        append_runtime_log(&format!("plugin runtime spawn failed: {error}"));
+        "AI_RUNTIME_MISSING".to_string()
+    })?;
+    append_runtime_log(&format!("plugin runtime spawned (pid {})", child.pid()));
+    let pending: Arc<Mutex<HashMap<String, Sender<Value>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let dead = Arc::new(AtomicBool::new(false));
+    let reader_pending = Arc::clone(&pending);
+    let reader_dead = Arc::clone(&dead);
+    std::thread::spawn(move || {
+        while let Some(event) = tauri::async_runtime::block_on(events.recv()) {
+            match event {
+                CommandEvent::Stdout(bytes) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    dispatch_runtime_response(line.trim_end_matches(['\r', '\n']), &reader_pending);
+                }
+                CommandEvent::Stderr(bytes) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    append_runtime_log(&sanitize_runtime_stderr(line.trim_end()));
+                }
+                CommandEvent::Error(error) => {
+                    append_runtime_log(&format!("plugin runtime event error: {error}"));
+                    break;
+                }
+                CommandEvent::Terminated(payload) => {
+                    append_runtime_log(&format!(
+                        "plugin runtime terminated: code={:?} signal={:?}",
+                        payload.code, payload.signal
+                    ));
+                    break;
+                }
+                _ => {}
+            }
+        }
+        finish_runtime_reader(&reader_pending, &reader_dead);
+    });
+    Ok(RuntimeProcess {
+        transport: RuntimeTransport::Sidecar { child },
+        pending,
+        dead,
+    })
+}
+
+fn spawn_standard_runtime(
+    node: &str,
+    entry: &std::path::Path,
+    working_dir: PathBuf,
+) -> Result<RuntimeProcess, String> {
+    let mut command = Command::new(node);
     command
-        .arg(&entry)
+        .arg(entry)
         .arg("--stdio")
         .arg("--enable-ai-runtime")
         .current_dir(&working_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        // 子进程崩溃时唯一线索就是 stderr；以前直接丢弃，界面只能看到 RUNTIME_EXITED。
-        // 现在落到临时目录的日志里（含凭据特征的行整行打码），便于定位。
         .stderr(Stdio::piped());
-    // Minimal environment only: no HOME/USERPROFILE, so provider CLIs and ambient
-    // credential files are not discoverable from the runtime process.
     command.env_clear();
     #[cfg(windows)]
     {
@@ -561,11 +785,9 @@ fn spawn_runtime(app: Option<&tauri::AppHandle>) -> Result<RuntimeProcess, Strin
             command.env("TMPDIR", temp);
         }
     }
-    command.env("PATH", node_path_hint(&node));
+    command.env("PATH", node_path_hint(node));
     command.env("WGT_AI_DIAGNOSTICS", "1");
 
-    // GUI 进程没有可用的控制台。以隐藏窗口 + 独立进程组启动，避免 node.exe
-    // 在部分 Windows 会话里因控制台句柄初始化竞争而提前结束。
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -588,27 +810,9 @@ fn spawn_runtime(app: Option<&tauri::AppHandle>) -> Result<RuntimeProcess, Strin
         .take()
         .ok_or_else(|| "AI_RUNTIME_MISSING".to_string())?;
     if let Some(stderr) = child.stderr.take() {
-        let log_path = working_dir.join("stderr.log");
         std::thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            let mut log = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-                .ok();
-            for line in reader.lines().map_while(Result::ok) {
-                let lower = line.to_ascii_lowercase();
-                let safe = if lower.contains("sk-")
-                    || lower.contains("bearer")
-                    || lower.contains("api_key")
-                {
-                    "[redacted line containing credential-like text]".to_string()
-                } else {
-                    line.chars().take(500).collect::<String>()
-                };
-                if let Some(file) = log.as_mut() {
-                    let _ = writeln!(file, "{safe}");
-                }
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                append_runtime_log(&sanitize_runtime_stderr(&line));
             }
         });
     }
@@ -617,31 +821,13 @@ fn spawn_runtime(app: Option<&tauri::AppHandle>) -> Result<RuntimeProcess, Strin
     let reader_pending = Arc::clone(&pending);
     let reader_dead = Arc::clone(&dead);
     std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            let Ok(line) = line else { break };
-            let Ok(value) = serde_json::from_str::<Value>(&line) else {
-                continue;
-            };
-            let Some(id) = value
-                .get("requestId")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-            else {
-                continue;
-            };
-            if let Some(sender) = reader_pending.lock().unwrap().remove(&id) {
-                let _ = sender.send(value);
-            }
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            dispatch_runtime_response(&line, &reader_pending);
         }
-        reader_dead.store(true, Ordering::SeqCst);
-        for (_, sender) in reader_pending.lock().unwrap().drain() {
-            let _ = sender.send(error_result("RUNTIME_EXITED"));
-        }
+        finish_runtime_reader(&reader_pending, &reader_dead);
     });
     Ok(RuntimeProcess {
-        child,
-        stdin,
+        transport: RuntimeTransport::Standard { child, stdin },
         pending,
         dead,
     })
@@ -707,18 +893,9 @@ impl InnerState {
             let process = runtime.as_mut().expect("runtime just initialized");
             process.pending.lock().unwrap().insert(id.clone(), sender);
             let line = format!("{frame}\n");
-            let written = process
-                .stdin
-                .write_all(line.as_bytes())
-                .and_then(|_| process.stdin.flush());
+            let written = process.transport.write(line.as_bytes());
             if written.is_err() {
-                let status = process
-                    .child
-                    .try_wait()
-                    .ok()
-                    .flatten()
-                    .map(|status| status.to_string())
-                    .unwrap_or_else(|| "still-running-or-unknown".to_string());
+                let status = process.transport.status();
                 append_runtime_log(&format!(
                     "stdin write failed; runtime status={status}; dropping runtime (request will fail RUNTIME_EXITED)"
                 ));
@@ -742,8 +919,7 @@ impl InnerState {
                     .lock()
                     .unwrap()
                     .as_mut()
-                    .and_then(|process| process.child.try_wait().ok().flatten())
-                    .map(|status| status.to_string())
+                    .map(|process| process.transport.status())
                     .unwrap_or_else(|| "still-running-or-unknown".to_string());
                 append_runtime_log(&format!(
                     "request {id} got RUNTIME_EXITED; child status={status}"
@@ -765,23 +941,13 @@ impl InnerState {
     /// Drop a runtime whose stdout closed before the first response. `Child` does not
     /// terminate the process on drop, so explicitly clean up an orphan before retrying.
     fn discard_runtime(&self, reason: &str) {
-        let Some(mut process) = self.runtime.lock().unwrap().take() else {
+        let Some(process) = self.runtime.lock().unwrap().take() else {
             return;
         };
-        let initial = process.child.try_wait().ok().flatten();
-        if initial.is_none() {
-            let _ = process.child.kill();
-        }
-        let status = process
-            .child
-            .wait()
-            .ok()
-            .or(initial)
-            .map(|status| status.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
+        let pid = process.transport.pid();
+        let status = process.transport.terminate();
         append_runtime_log(&format!(
-            "discarded runtime ({reason}); pid={} status={status}",
-            process.child.id()
+            "discarded runtime ({reason}); pid={pid} status={status}"
         ));
     }
 
@@ -886,8 +1052,7 @@ impl InnerState {
                 .lock()
                 .unwrap()
                 .as_mut()
-                .and_then(|process| process.child.try_wait().ok().flatten())
-                .map(|status| status.to_string())
+                .map(|process| process.transport.status())
                 .unwrap_or_else(|| "still-running-or-unknown".to_string());
             append_runtime_log(&format!("configure RUNTIME_EXITED child status={status}"));
         }
@@ -1215,14 +1380,8 @@ impl InnerState {
         self.enabled.store(enabled, Ordering::SeqCst);
         if !enabled {
             append_runtime_log("AI disabled by user: killing runtime on purpose");
-            if let Some(mut process) = self.runtime.lock().unwrap().take() {
-                drop(process.stdin);
-                let _ = process.child.kill();
-                let status = process
-                    .child
-                    .wait()
-                    .map(|status| status.to_string())
-                    .unwrap_or_else(|error| format!("wait failed: {error}"));
+            if let Some(process) = self.runtime.lock().unwrap().take() {
+                let status = process.transport.terminate();
                 append_runtime_log(&format!(
                     "runtime killed after user disabled AI; status={status}"
                 ));
@@ -1446,6 +1605,19 @@ mod tests {
             &json!({ "ok": false, "error": { "code": "TIMEOUT" } })
         ));
         assert!(!is_runtime_exited(&json!({ "ok": true, "result": {} })));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn node_paths_do_not_use_windows_verbatim_prefix() {
+        assert_eq!(
+            node_compatible_path(PathBuf::from(r"\\?\D:\runtime\main.mjs")),
+            PathBuf::from(r"D:\runtime\main.mjs")
+        );
+        assert_eq!(
+            node_compatible_path(PathBuf::from(r"\\?\UNC\server\share\main.mjs")),
+            PathBuf::from(r"\\server\share\main.mjs")
+        );
     }
 
     fn vision_input() -> Value {
