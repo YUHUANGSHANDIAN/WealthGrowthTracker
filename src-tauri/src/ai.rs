@@ -563,6 +563,16 @@ fn spawn_runtime(app: Option<&tauri::AppHandle>) -> Result<RuntimeProcess, Strin
     }
     command.env("PATH", node_path_hint(&node));
 
+    // GUI 进程通过 Tauri 阻塞线程拉起 node 时，子进程会跟随父进程的控制台/作业对象，
+    // 实测会被立刻结束（stdout 关闭、stderr 为空）。改用独立进程组 + 脱离控制台启动。
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+
     let mut child = command.spawn().map_err(|error| {
         append_runtime_log(&format!("runtime spawn failed: {error}"));
         "AI_RUNTIME_MISSING".to_string()
@@ -823,6 +833,17 @@ impl InnerState {
                 Err(code) => code.clone(),
             }
         ));
+        if matches!(&outcome, Err(code) if code == "RUNTIME_EXITED") {
+            let status = self
+                .runtime
+                .lock()
+                .unwrap()
+                .as_mut()
+                .and_then(|process| process.child.try_wait().ok().flatten())
+                .map(|status| status.to_string())
+                .unwrap_or_else(|| "still-running-or-unknown".to_string());
+            append_runtime_log(&format!("configure RUNTIME_EXITED child status={status}"));
+        }
         match outcome {
             Ok(result) => {
                 self.configured
