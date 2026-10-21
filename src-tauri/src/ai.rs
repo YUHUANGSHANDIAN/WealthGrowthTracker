@@ -563,14 +563,14 @@ fn spawn_runtime(app: Option<&tauri::AppHandle>) -> Result<RuntimeProcess, Strin
     }
     command.env("PATH", node_path_hint(&node));
 
-    // GUI 进程通过 Tauri 阻塞线程拉起 node 时，子进程会跟随父进程的控制台/作业对象，
-    // 实测会被立刻结束（stdout 关闭、stderr 为空）。改用独立进程组 + 脱离控制台启动。
+    // GUI 进程没有可用的控制台。以隐藏窗口 + 独立进程组启动，避免 node.exe
+    // 在部分 Windows 会话里因控制台句柄初始化竞争而提前结束。
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
     }
 
     let mut child = command.spawn().map_err(|error| {
@@ -752,6 +752,38 @@ impl InnerState {
         }
     }
 
+    fn configure_frame(&self, profile: &ConnectionProfile, credential: Option<&str>) -> Value {
+        json!({
+            "protocolVersion": 1,
+            "requestId": self.next_request_id(),
+            "operation": "configure",
+            "profile": profile_frame(profile, credential),
+        })
+    }
+
+    /// Drop a runtime whose stdout closed before the first response. `Child` does not
+    /// terminate the process on drop, so explicitly clean up an orphan before retrying.
+    fn discard_runtime(&self, reason: &str) {
+        let Some(mut process) = self.runtime.lock().unwrap().take() else {
+            return;
+        };
+        let initial = process.child.try_wait().ok().flatten();
+        if initial.is_none() {
+            let _ = process.child.kill();
+        }
+        let status = process
+            .child
+            .wait()
+            .ok()
+            .or(initial)
+            .map(|status| status.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        append_runtime_log(&format!(
+            "discarded runtime ({reason}); pid={} status={status}",
+            process.child.id()
+        ));
+    }
+
     fn configure(
         &self,
         app: Option<&tauri::AppHandle>,
@@ -812,20 +844,34 @@ impl InnerState {
                     if value.chars().any(|c| c == '/') { classes.push("slash"); }
                     if value.chars().any(|c| c == '=') { classes.push("equals"); }
                     if value.chars().any(|c| c.is_whitespace()) { classes.push("whitespace"); }
-                    if value.chars().any(|c| !c.is_ascii()) { classes.push("non-ascii"); }
+                    if !value.is_ascii() {
+                        classes.push("non-ascii");
+                    }
                     classes.join(",")
                 })
                 .unwrap_or_default()
         ));
-        let frame = json!({
-            "protocolVersion": 1,
-            "requestId": self.next_request_id(),
-            "operation": "configure",
-            "profile": profile_frame(&profile, effective.as_deref()),
-        });
-        let outcome = self
+        let frame = self.configure_frame(&profile, effective.as_deref());
+        let mut outcome = self
             .request(app, frame, CONFIGURE_TIMEOUT)
             .and_then(interpret);
+        if matches!(&outcome, Err(code) if code == "RUNTIME_EXITED") {
+            // Node can occasionally lose its inherited stdio handles on the first
+            // launch in a Windows GUI session. The process itself is still healthy;
+            // rebuilding once avoids surfacing a transient startup race.
+            self.discard_runtime("configure received RUNTIME_EXITED");
+            let retry_frame = self.configure_frame(&profile, effective.as_deref());
+            outcome = self
+                .request(app, retry_frame, CONFIGURE_TIMEOUT)
+                .and_then(interpret);
+            append_runtime_log(&format!(
+                "configure retry after runtime rebuild: {}",
+                match &outcome {
+                    Ok(_) => "ok".to_string(),
+                    Err(code) => code.clone(),
+                }
+            ));
+        }
         append_runtime_log(&format!(
             "configure result: {}",
             match &outcome {
