@@ -124,7 +124,8 @@ pub fn run_broker_selftest() -> Value {
 
 /// 用 Broker 路径跑一次 deepseek 配置（复现 GUI 里的真实参数差异）。
 pub fn run_broker_selftest_deepseek() -> Value {
-    run_broker_selftest_variant("deepseek", "deepseek-coder", true)
+    // 与用户实际参数一致：model=deepseek-flash、credential 35 位纯 ASCII。
+    run_broker_selftest_variant("deepseek", "deepseek-flash", true)
 }
 
 /// 应用启动时在**自身 GUI 进程**里跑一次自检并写日志（不阻塞界面、不写凭据）。
@@ -156,10 +157,16 @@ fn run_broker_selftest_variant(provider_id: &str, model_id: &str, persist: bool)
         endpoint: None,
         supports_vision: None,
     };
-    let configure =
-        broker
-            .inner
-            .configure(None, profile, Some("sk-synthetic-selftest".into()), persist);
+    let configure = broker.inner.configure(
+        None,
+        profile,
+        Some(if provider_id == "deepseek" {
+            format!("sk-{}", "a".repeat(32))
+        } else {
+            "sk-synthetic-selftest".to_string()
+        }),
+        persist,
+    );
     let infer = broker.inner.infer(
         None,
         InferenceRequest {
@@ -717,7 +724,21 @@ impl InnerState {
                 }
                 Ok(error_result("TIMEOUT"))
             }
-            Err(RecvTimeoutError::Disconnected) => Ok(error_result("RUNTIME_EXITED")),
+            Err(RecvTimeoutError::Disconnected) => {
+                // 读线程结束说明子进程的 stdout 已关闭：把退出码一起记下来。
+                let status = self
+                    .runtime
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .and_then(|process| process.child.try_wait().ok().flatten())
+                    .map(|status| status.to_string())
+                    .unwrap_or_else(|| "still-running-or-unknown".to_string());
+                append_runtime_log(&format!(
+                    "request {id} got RUNTIME_EXITED; child status={status}"
+                ));
+                Ok(error_result("RUNTIME_EXITED"))
+            }
         }
     }
 

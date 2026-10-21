@@ -1001,12 +1001,6 @@ pub fn run() {
     }
     tauri::Builder::default()
         .manage(ai::AiBroker::default())
-        .setup(|_app| {
-            // 在 GUI 自身进程里做一次不写凭据的运行时自检并记录结果，
-            // 用于判断子进程在图形界面父进程下是否会被终止。
-            ai::log_gui_selftest();
-            Ok(())
-        })
         .invoke_handler(tauri::generate_handler![
             fs_read_text,
             fs_write_text,
