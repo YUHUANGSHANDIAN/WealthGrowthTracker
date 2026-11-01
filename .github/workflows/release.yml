@@ -101,8 +101,8 @@ jobs:
         run: node scripts/fetch-node-sidecar.mjs
       - name: Prepare AI runtime resources
         run: node scripts/prepare-ai-runtime-resources.mjs
-      - name: Build Tauri (NSIS + MSI)
-        run: npx tauri build --ci --config src-tauri/tauri.desktop.conf.json
+      - name: Build Tauri (NSIS)
+        run: npx tauri build --ci --config src-tauri/tauri.desktop.conf.json --bundles nsis
       - name: Upload bundles to the release
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         shell: bash
@@ -110,7 +110,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          files=(src-tauri/target/release/bundle/nsis/*.exe src-tauri/target/release/bundle/msi/*.msi)
+          files=(src-tauri/target/release/bundle/nsis/*.exe)
           if [ ${#files[@]} -eq 0 ]; then echo "::warning::本次未产出 Windows 安装包。"; exit 0; fi
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
 
@@ -316,16 +316,16 @@ jobs:
             echo "Local-First / Privacy-First 的个人财富管理工具。本版本为 **预发布（prerelease）**，不是正式版：功能可用，但订阅发布门与签名尚未满足，详见下方「未完成事项」。"
             echo ""
             echo "### 本版主要变化"
-            echo "- **月度理财工作台（WealthGrowthPlanner）**：新增 \`#/monthly\` 七区工作台与分步向导；文档在本地解析并按 SHA256 幂等入库；每月一份正式会话，跨月结转携带来源会话与 revision，来源变更即标记过期且不自动改写。"
-            echo "- **月度理财状态链路与导入纠正**：导入→extracting→reviewing、生成候选→ready（绑定策略版本）、确认→planned→confirmed 全部打通（此前确认按钮必然报「不允许的状态流转」）；提取器改为按表头定位列，不再把序号当市值；新增「清空自动提取的候选」与补录快照日。"
-            echo "- **品牌统一为 WealthGrowthTracker**：窗口标题、PWA 名称、关于页与导出元数据一致；\`identifier\`、存储键、IndexedDB 库名与 Service Worker 缓存前缀保持不变，旧安装与旧数据可原地升级。"
-            echo "- **AI 新增两条只读能力**：图片视觉提取（只有你显式声明可读图的连接才会收到图片）与网页研究检索（只抓取你给出的公网 HTTPS 链接，仅桌面可用）。"
-            echo "- **含附件的单文件归档**：数据中心新增「导出含附件完整备份 / 导入含附件备份」；导出逐项校验哈希、缺失即整体失败，导入先全量校验再写入（任一项哈希不符整批拒绝），上限 64 MiB，只恢复附件内容而不创建会话。"
-            echo "- **视觉与检索已接入界面**：「资料与对账」的图片行有「视觉识别」（结果只读、不写入会话），「情报与目标」可粘贴公网 HTTPS 链接做「联网检索」，需显式点「保存为研究记录」才落库。"
+            echo "- **统一理财工作台**：初始对账、月度复盘、临时调仓、基金分析、止盈审查、市场情报、专项研究七类任务；正式月记录与独立临时任务分离，confirm/review/archive 可追溯。"
+            echo "- **五主入口与深链兼容**：总览 / 资产 / 理财 / 复盘 / 规划，彩票和设置作为辅助入口；旧 hash 与实体链接继续可用。"
+            echo "- **AI 连接治理**：每条连接独立启停，当前连接持久化；切换不影响其他连接的在途任务，停用只取消目标连接，迟到结果不落库。"
+            echo "- **完整备份**：新增可独立恢复的 \`.wgtbackup.zip\`，包含主状态、任务、证据引用与原始附件；结构备份和附件导出保持独立。"
+            echo "- **二进制附件与逐项健康修复**：旧 Base64 附件在哈希验证后迁移；不再提供盲目的“一键修复全部”。"
+            echo "- **构建路径与身份**：本地使用新 DevCache，脚本拒绝退役根；关于页显示构建身份与短提交。"
             echo "- **AI 默认关闭**，关闭时不启动运行时、不联网、不读取凭据。"
             echo ""
             echo "### 本次构建实际包含的附件"
-            for check in "*.exe|Windows 安装包（NSIS）" "*.msi|Windows MSI" "*.dmg|macOS DMG" "*.AppImage|Linux AppImage" "*.deb|Linux DEB" "*.rpm|Linux RPM" "*android-preview.apk|Android APK（debug 签名预览）" "*_web.zip|Web/PWA 静态包"; do
+            for check in "*.exe|Windows 安装包（NSIS）" "*.dmg|macOS DMG" "*.AppImage|Linux AppImage" "*.deb|Linux DEB" "*.rpm|Linux RPM" "*android-preview.apk|Android APK（debug 签名预览）" "*_web.zip|Web/PWA 静态包"; do
               pattern="${check%%|*}"
               label="${check##*|}"
               if ls release-assets/$pattern >/dev/null 2>&1; then echo "- ✅ ${label}"; else echo "- ⚠️ 本次未包含：${label}（该平台构建失败或被跳过）"; fi
@@ -342,20 +342,20 @@ jobs:
             echo "- **两类合法订阅路径（OpenAI 开源应用订阅、GitHub Copilot 订阅）的真实认证 / 推理 / 撤销验收尚未完成**，界面保持“待资格验证”，不得视为已支持。"
             echo "- API Key、本地模型与 mock **不计入订阅发布门**；未配置连接时 AI 保持关闭。"
             echo "- 应用不读取 Codex / Claude / GitHub CLI 等其它程序的登录令牌，也不嵌入 OAuth 客户端密钥。"
-            echo "- 图片视觉提取：仅当连接被显式声明为可读图时才发送图片（最多 4 张 PNG/JPEG/WebP，超限即失败关闭）；识别质量取决于你选的视觉模型，应用不做本地 OCR，本轮**未用真实账号验收**。"
-            echo "- 网页研究检索：只抓取你显式给出的公网 HTTPS 链接，**仅桌面端可用**；Web/移动端如实提示不可用，模型不能自行生成 URL。本轮**未用真实来源验收**。"
-            echo "- Windows 打包运行时冒烟**已通过**（status 帧返回 runtime=enabled / tools=[] / credentials=private-broker-memory-only；未配置连接时 infer 与 vision-extract 均返回 PROFILE_UNAVAILABLE；不带开关时退出码 2）。macOS/Linux/Android **未执行**，命令见 docs/PLATFORM_SUPPORT.md。"
+            echo "- 图片视觉提取：仅当连接被显式声明为可读图时才发送图片（最多 4 张 PNG/JPEG/WebP，超限即失败关闭）；识别质量取决于你选的视觉模型，应用不做本地 OCR。"
+            echo "- 网页研究检索：只抓取你显式给出的公网 HTTPS 链接，**仅桌面端可用**；Web/移动端如实提示不可用，模型不能自行生成 URL。"
+            echo "- 是否完成真实认证、推理、视觉、研究和安装版热切换，以交付记录为准；configure/CLI/mock 成功不能替代真实 GUI 验收。"
             echo "- 桌面包内置官方 Node 24.21.0 sidecar 运行时（按官方 SHA256 校验）；若某平台未包含运行时，AI 会明确报 AI_RUNTIME_MISSING。"
             echo ""
             echo "### 未完成事项（本版不宣称已具备）"
             echo "- 两类合法订阅路径的真实认证 / 推理 / 撤销验收：**未完成**（因此本版只能作为 prerelease 发布）。"
             echo "- Windows 未代码签名，macOS 未签名未公证；Android 若出现在上方附件中即为 **debug 签名预览版**，若未出现则表示本次未构建（缺 Android SDK/NDK 或构建失败）。"
-            echo "- 视觉提取与网页检索的**真实账号验收未执行**：界面入口与验收清单（docs/AI_ACCEPTANCE.md）已就绪，需用户用自己的 API Key 跑一次并回填结果。"
+            echo "- 视觉提取、网页研究与安装版热切换若未取得真实授权连接，会保持“未验证”状态。"
             echo "- macOS / Linux / Android 安装后的 AI 冒烟仍需在对应系统人工确认（命令见 docs/PLATFORM_SUPPORT.md）。"
             echo ""
             echo "### 数据与隐私"
             echo "- 本 Release **不包含任何用户数据**、报告、备份或迁移脚本；附件仅为程序与校验文件。"
-            echo "- 桌面端数据位于 \`文档\\财富成长记\\\`（卸载不删除）；Web 端位于浏览器 IndexedDB；Android 为应用专属目录。"
+            echo "- 桌面端数据位于当前设置的数据根（卸载不删除）；Web 端位于浏览器 IndexedDB；Android 为应用专属目录。"
             echo "- 校验：见附件 \`SHA256SUMS.txt\`。"
             echo ""
             echo "> 预测/报告仅供个人参考，不构成投资建议。"
