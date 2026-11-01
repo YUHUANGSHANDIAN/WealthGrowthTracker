@@ -33,24 +33,24 @@ describe('月度理财持久化', () => {
     expect(() => parseMonthlyPlanningState({ schemaVersion: 1, sessions: [{ key: 'monthly-planning:2026-07' }, { key: 'monthly-planning:2026-07' }], policies: [], assignmentRules: [] })).toThrow('重复');
     expect(() => parseMonthlyPlanningState({ schemaVersion: 1, sessions: [{ key: 'monthly-planning:2026-7' }], policies: [], assignmentRules: [] })).toThrow('键无效');
   });
-  it('会话只能升版，同版本内容变化必须递增 revision', () => {
-    const state = upsertSession(emptyMonthlyPlanningState(), session());
+  it('会话只能升版，同版本内容变化必须递增 revision', async () => {
+    const state = await upsertSession(emptyMonthlyPlanningState(), session());
     expect(findSession(state, 'monthly-planning:2026-07')?.revision).toBe(2);
-    expect(() => upsertSession(state, session({ revision: 1 }))).toThrow('不能回退');
-    expect(() => upsertSession(state, session({ revision: 2, note: '改了' }))).toThrow('内容不一致');
-    const next = upsertSession(state, session({ revision: 3, note: '修订' }));
+    await expect(upsertSession(state, session({ revision: 1 }))).rejects.toThrow('不能回退');
+    await expect(upsertSession(state, session({ revision: 2, note: '改了' }))).rejects.toThrow('内容不一致');
+    const next = await upsertSession(state, session({ revision: 3, note: '修订' }));
     expect(findSession(next, 'monthly-planning:2026-07')?.revision).toBe(3);
   });
-  it('策略版本不能回退，执行回执必须引用已有动作且 ID 唯一', () => {
+  it('策略版本不能回退，执行回执必须引用已有动作且 ID 唯一', async () => {
     let state = upsertPolicy(emptyMonthlyPlanningState(), policy(3));
     expect(() => upsertPolicy(state, policy(2))).toThrow('版本不能回退');
-    state = upsertSession(state, session());
-    const executed = recordExecution(state, 'monthly-planning:2026-07', { id: 'e1', proposalId: 'p1', actionId: 'a1', status: 'executed', executedAt: 'now', evidence: [] });
+    state = await upsertSession(state, session());
+    const executed = await recordExecution(state, 'monthly-planning:2026-07', { id: 'e1', proposalId: 'p1', actionId: 'a1', status: 'executed', executedAt: 'now', evidence: [] });
     expect(findSession(executed, 'monthly-planning:2026-07')?.executions).toHaveLength(1);
     expect(findSession(executed, 'monthly-planning:2026-07')?.revision).toBe(3);
-    expect(() => recordExecution(executed, 'monthly-planning:2026-07', { id: 'e1', proposalId: 'p1', actionId: 'a1', status: 'executed', evidence: [] })).toThrow('重复');
-    expect(() => recordExecution(executed, 'monthly-planning:2026-07', { id: 'e2', proposalId: 'p1', actionId: 'missing', status: 'executed', evidence: [] })).toThrow('不存在');
-    expect(() => recordExecution(executed, 'monthly-planning:2026-08', { id: 'e3', proposalId: 'p1', actionId: 'a1', status: 'executed', evidence: [] })).toThrow('会话不存在');
+    await expect(recordExecution(executed, 'monthly-planning:2026-07', { id: 'e1', proposalId: 'p1', actionId: 'a1', status: 'executed', evidence: [] })).rejects.toThrow('重复');
+    await expect(recordExecution(executed, 'monthly-planning:2026-07', { id: 'e2', proposalId: 'p1', actionId: 'missing', status: 'executed', evidence: [] })).rejects.toThrow('不存在');
+    await expect(recordExecution(executed, 'monthly-planning:2026-08', { id: 'e3', proposalId: 'p1', actionId: 'a1', status: 'executed', evidence: [] })).rejects.toThrow('会话不存在');
   });
   it('同 id 的新策略版本按版本追加，旧版本仍可查，同版本原地更新', () => {
     let state = upsertPolicy(emptyMonthlyPlanningState(), policy(1));
@@ -63,16 +63,16 @@ describe('月度理财持久化', () => {
     expect(state.policies.find((item) => item.version === 2)?.cooldownDays).toBe(5);
     expect(() => upsertPolicy(state, policy(1))).toThrow('版本不能回退');
   });
-  it('删除会话按明确键，汇总统计可用', () => {
-    const state = upsertSession(emptyMonthlyPlanningState(), session({ state: 'confirmed' }));
+  it('删除会话按明确键，汇总统计可用', async () => {
+    const state = await upsertSession(emptyMonthlyPlanningState(), session({ state: 'confirmed' }));
     expect(summarizeMonthlyState(state).confirmed).toBe(1);
     expect(removeSession(state, 'monthly-planning:2026-07').sessions).toHaveLength(0);
     expect(removeSession(state, 'monthly-planning:2026-09').sessions).toHaveLength(1);
   });
-  it('确认流程与存储协作：确认后可登记回执并升版', () => {
+  it('确认流程与存储协作：确认后可登记回执并升版', async () => {
     const planned = session();
     const confirmed = transitionSession(planned, 'confirmed', { now: 'now', baseDataRevision: 7 });
-    const state = upsertSession(emptyMonthlyPlanningState(), confirmed);
+    const state = await upsertSession(emptyMonthlyPlanningState(), confirmed);
     expect(findSession(state, confirmed.key)?.baseDataRevision).toBe(7);
   });
 });

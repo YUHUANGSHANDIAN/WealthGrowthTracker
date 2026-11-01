@@ -92,7 +92,7 @@ export async function fetchResearchSource(url, { fetchImpl, signal, lookupImpl }
       signal: controller.signal,
       headers: {
         accept: "text/html,application/xhtml+xml,application/json;q=0.9,text/plain;q=0.8",
-        "user-agent": "WealthGrowthTracker/1.9.0-preview.2 research",
+        "user-agent": "WealthGrowthTracker/1.9.0-preview.3 research",
       },
     });
     const contentType = response.headers.get("content-type") ?? "";

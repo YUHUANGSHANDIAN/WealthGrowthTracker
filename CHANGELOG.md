@@ -2,11 +2,18 @@
 
 本文件记录「财富成长记 / 财富梦想实现家」各版本的变更。
 
+## [1.9.0-preview.3] - 2026-11-01
+
+### 数据完整性
+- 任务修订新增稳定 `revisionId` 和规范化快照 SHA-256；旧 v2 修订会在升级时补齐，已有哈希不符则失败关闭。
+- 月度状态物化跨任务 `evidenceIndex`：同一证据哈希只保留一个条目并记录全部任务引用。
+- 完整备份继续自动携带修订哈希和证据索引，不新增第二套账本。
+
 ## [1.9.0-preview.2] - 2026-11-01
 
 ### 构建修复
 - 将 Windows sidecar 传输类型、插件启动与相关匹配分支限定为 Windows 构建，修复 Linux CI 的 `unused` / `dead_code` Clippy 失败。
-- 版本源、Service Worker 缓存键和 AI Runtime 用户代理统一为 `1.9.0-preview.2`。
+- 版本源、Service Worker 缓存键和 AI Runtime 用户代理统一为 `1.9.0-preview.2`（后续补丁见 `1.9.0-preview.3`）。
 
 ## [1.9.0-preview.1] - 2026-11-01
 

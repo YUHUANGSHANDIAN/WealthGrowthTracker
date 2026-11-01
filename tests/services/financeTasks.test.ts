@@ -9,6 +9,7 @@ import {
 } from '../../src/domain/portfolio/session';
 import {
   emptyMonthlyPlanningState,
+  ensureTaskRevisionIntegrity,
   findSession,
   findTaskRevisions,
   parseMonthlyPlanningState,
@@ -45,12 +46,12 @@ describe('七类理财任务', () => {
     expect(task.linkedMonthlyTaskId).toBeNull();
   });
 
-  it('正式月记录仍按自然月唯一，临时任务可以关联它', () => {
+  it('正式月记录仍按自然月唯一，临时任务可以关联它', async () => {
     const monthly = createDraftSession(input);
     const linked = createFinanceDraftSession({
       ...input, taskKind: 'fund-analysis', taskId: 'fund-1', linkedMonthlyTaskId: monthly.key,
     });
-    const state = upsertSession(upsertSession(emptyMonthlyPlanningState(), monthly), linked);
+    const state = await upsertSession(await upsertSession(emptyMonthlyPlanningState(), monthly), linked);
     expect(findSession(state, monthly.key)?.taskKind).toBe('monthly-review');
     expect(findSession(state, linked.key)?.linkedMonthlyTaskId).toBe(monthly.key);
   });
@@ -71,18 +72,51 @@ describe('七类理财任务', () => {
     expect(() => advanceSession(ready, 'confirmed', { now: input.now })).toThrow('缺少主应用数据版本');
   });
 
-  it('归档重开必须递增 revision，并保留材料化修订快照', () => {
+  it('归档重开必须递增 revision，并保留带内容哈希的材料化修订快照', async () => {
     const draft = createFinanceDraftSession({ ...input, taskKind: 'fund-analysis', taskId: 'fund-2' });
-    let state = upsertSession(emptyMonthlyPlanningState(), draft);
+    let state = await upsertSession(emptyMonthlyPlanningState(), draft);
     const reviewed = { ...draft, revision: 2, state: 'reviewed' as const, result };
-    state = upsertSession(state, reviewed);
+    state = await upsertSession(state, reviewed);
     expect(findTaskRevisions(state, draft.key)).toHaveLength(1);
+    expect(findTaskRevisions(state, draft.key)[0]?.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(findTaskRevisions(state, draft.key)[0]?.revisionId).toContain(`${draft.key}@2:`);
     const archived = { ...transitionSession(reviewed, 'archived', { now: input.now }), revision: 3 };
-    state = upsertSession(state, archived);
+    state = await upsertSession(state, archived);
     expect(() => transitionSession(archived, 'reviewing', { now: input.now })).toThrow('递增 revision');
     const reopened = transitionSession(archived, 'reviewing', { now: input.now, bumpRevision: true });
     expect(reopened.revision).toBe(archived.revision + 1);
     expect(findTaskRevisions(state, draft.key)[0]?.snapshot.state).toBe('archived');
+  });
+
+  it('旧修订补齐内容哈希，篡改已有哈希时失败关闭', async () => {
+    const draft = createFinanceDraftSession({ ...input, taskKind: 'fund-analysis', taskId: 'fund-legacy' });
+    const reviewed = { ...draft, revision: 2, state: 'reviewed' as const, result };
+    const state = await upsertSession(emptyMonthlyPlanningState(), reviewed);
+    const legacyRevision = { ...state.taskRevisions[0]!, revisionId: '', contentHash: '' };
+    const repaired = await ensureTaskRevisionIntegrity({ ...state, taskRevisions: [legacyRevision] });
+    expect(repaired.changed).toBe(true);
+    expect(repaired.state.taskRevisions[0]?.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    await expect(ensureTaskRevisionIntegrity({
+      ...repaired.state,
+      taskRevisions: [{ ...repaired.state.taskRevisions[0]!, contentHash: '0'.repeat(64) }],
+    })).rejects.toThrow('内容哈希不符');
+  });
+
+  it('相同证据哈希跨任务只保留一个全局索引条目和全部引用', async () => {
+    const first = createFinanceDraftSession({ ...input, taskKind: 'fund-analysis', taskId: 'fund-a' });
+    const second = createFinanceDraftSession({ ...input, taskKind: 'special-research', taskId: 'research-b' });
+    const document = {
+      id: 'doc:same', relativePath: `monthly-attach:${'a'.repeat(64)}.docx`, sha256: 'a'.repeat(64),
+      originalName: '同一证据.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      platform: 'manual' as const, importedAt: input.now, integrity: 'ok' as const, parseState: 'parsed' as const,
+    };
+    let state = await upsertSession(emptyMonthlyPlanningState(), { ...first, documents: [document] });
+    state = await upsertSession(state, { ...second, documents: [{ ...document, id: 'doc:same-2' }] });
+    expect(state.evidenceIndex).toHaveLength(1);
+    expect(state.evidenceIndex[0]?.references).toEqual([
+      { taskId: first.key, documentId: 'doc:same' },
+      { taskId: second.key, documentId: 'doc:same-2' },
+    ]);
   });
 
   it('v1 状态只读迁移为 v2，旧月记录自动成为月度复盘', () => {

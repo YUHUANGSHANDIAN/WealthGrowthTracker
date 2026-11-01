@@ -1,6 +1,7 @@
 import { validateLedgerShape, validateFinancialExtensions } from '../services/storage/validateLedger';
 import {
-  emptyMonthlyPlanningState, parseMonthlyPlanningState, recordExecution, removeSession, upsertPolicy, upsertSession,
+  emptyMonthlyPlanningState, ensureTaskRevisionIntegrity, parseMonthlyPlanningState, recordExecution, removeSession,
+  upsertPolicy, upsertSession,
 } from '../services/monthlyPlanning/storage';
 import { migrateInlineAttachments, migrateLegacyBase64AttachmentFiles } from '../services/monthlyPlanning/attachmentStore';
 import type { ExecutionRecord, InvestmentPolicy, MonthlyPlanningState, MonthlyReview } from '../domain/portfolio/types';
@@ -517,7 +518,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         const manager = storageService.getDesktopManager();
         if (manager && !(await manager.backupNow(true))) throw new Error('操作前备份不可用');
         const current = get();
-        const next = upsertSession(current.monthlyPlanning, session);
+        const next = await upsertSession(current.monthlyPlanning, session);
         rawSet({ monthlyPlanning: next });
         persist();
         await storageService.flush();
@@ -545,7 +546,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         await storageService.flush();
         const manager = storageService.getDesktopManager();
         if (manager && !(await manager.backupNow(true))) throw new Error('操作前备份不可用');
-        const next = recordExecution(get().monthlyPlanning, sessionKey, record);
+        const next = await recordExecution(get().monthlyPlanning, sessionKey, record);
         rawSet({ monthlyPlanning: next });
         persist();
         await storageService.flush();
@@ -639,7 +640,9 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         storageService.getJSON<ReportProjectionQueue>(STORAGE_KEYS.reportProjectionQueue),
         storageService.getJSON<unknown>(STORAGE_KEYS.monthlyPlanning),
       ]);
-      const monthlyPlanning = parseMonthlyPlanningState(monthlyData);
+      const parsedMonthlyPlanning = parseMonthlyPlanningState(monthlyData);
+      const revisionIntegrity = await ensureTaskRevisionIntegrity(parsedMonthlyPlanning);
+      const monthlyPlanning = revisionIntegrity.state;
 
       validateLedgerShape(wtd, reports);
       validateFinancialExtensions({ countdown_data: countdown, goal_achievement_status: goal,
@@ -745,7 +748,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
 
       // The version and migrated ledger are one batch. A crash must never leave
       // a version-only "existing installation" with its canonical data missing.
-      if (isFirstRun || storedVersion !== APP_VERSION || reportMigration.changed > 0) {
+      if (isFirstRun || storedVersion !== APP_VERSION || reportMigration.changed > 0 || revisionIntegrity.changed) {
         const mgr = storageService.getDesktopManager();
         if (!isFirstRun && mgr && !(await mgr.backupNow(true))) throw new Error('升级前备份不可用');
         const state = get();

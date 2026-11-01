@@ -1,4 +1,5 @@
 import type {
+  EvidenceIndexEntry,
   ExecutionRecord,
   FinanceTaskKind,
   FinanceTaskRevision,
@@ -7,6 +8,7 @@ import type {
   MonthlyReview,
 } from '../../domain/portfolio/types';
 import { FINANCE_TASK_KIND_LABELS, isFinanceTaskKey, taskKindOf } from '../../domain/portfolio/session';
+import { sha256Hex } from './attachmentCodec';
 
 export const MONTHLY_STATE_SCHEMA_VERSION = 2;
 
@@ -15,6 +17,7 @@ export function emptyMonthlyPlanningState(): MonthlyPlanningState {
     schemaVersion: MONTHLY_STATE_SCHEMA_VERSION,
     sessions: [],
     taskRevisions: [],
+    evidenceIndex: [],
     policies: [],
     assignmentRules: [],
     settings: {
@@ -62,8 +65,26 @@ function normalizeTask(raw: MonthlyReview, sourceVersion: number): MonthlyReview
   };
 }
 
-function revisionFrom(task: MonthlyReview, capturedAt: string): FinanceTaskRevision {
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item ?? null)).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(',')}}`;
+}
+
+async function taskSnapshotHash(task: MonthlyReview): Promise<string> {
+  return sha256Hex(new TextEncoder().encode(canonicalJson(task)));
+}
+
+async function revisionFrom(task: MonthlyReview, capturedAt: string): Promise<FinanceTaskRevision> {
+  const contentHash = await taskSnapshotHash(task);
   return {
+    revisionId: `${task.key}@${task.revision}:${contentHash}`,
+    contentHash,
     taskId: task.key,
     revision: task.revision,
     state: task.state,
@@ -71,6 +92,60 @@ function revisionFrom(task: MonthlyReview, capturedAt: string): FinanceTaskRevis
     baseDataRevision: task.baseDataRevision,
     policyVersion: task.policyVersion,
     snapshot: task,
+  };
+}
+
+export function buildEvidenceIndex(sessions: readonly MonthlyReview[]): EvidenceIndexEntry[] {
+  const entries = new Map<string, EvidenceIndexEntry>();
+  for (const task of sessions) {
+    for (const document of task.documents) {
+      const existing = entries.get(document.sha256);
+      if (existing && existing.relativePath !== document.relativePath) {
+        throw new Error(`同一证据哈希对应了不同路径：${document.sha256}`);
+      }
+      const reference = { taskId: task.key, documentId: document.id };
+      if (existing) {
+        if (!existing.references.some((item) => item.taskId === reference.taskId && item.documentId === reference.documentId)) {
+          existing.references.push(reference);
+          existing.references.sort((a, b) => `${a.taskId}:${a.documentId}`.localeCompare(`${b.taskId}:${b.documentId}`));
+        }
+      } else {
+        entries.set(document.sha256, {
+          sha256: document.sha256,
+          relativePath: document.relativePath,
+          originalName: document.originalName,
+          mime: document.mime,
+          references: [reference],
+        });
+      }
+    }
+  }
+  return [...entries.values()].sort((a, b) => a.sha256.localeCompare(b.sha256));
+}
+
+/** 为旧 v2 修订补齐内容哈希，并验证已有哈希没有被静默改写。 */
+export async function ensureTaskRevisionIntegrity(
+  state: MonthlyPlanningState,
+): Promise<{ state: MonthlyPlanningState; changed: boolean }> {
+  let changed = false;
+  const revisions: FinanceTaskRevision[] = [];
+  for (const revision of state.taskRevisions) {
+    const contentHash = await taskSnapshotHash(revision.snapshot);
+    if (revision.contentHash && revision.contentHash !== contentHash) {
+      throw new Error(`任务修订内容哈希不符：${revision.taskId}@${revision.revision}`);
+    }
+    const revisionId = `${revision.taskId}@${revision.revision}:${contentHash}`;
+    if (revision.revisionId && revision.revisionId !== revisionId) {
+      throw new Error(`任务修订标识不符：${revision.taskId}@${revision.revision}`);
+    }
+    if (revision.contentHash !== contentHash || revision.revisionId !== revisionId) changed = true;
+    revisions.push({ ...revision, revisionId, contentHash });
+  }
+  const evidenceIndex = buildEvidenceIndex(state.sessions);
+  if (JSON.stringify(state.evidenceIndex) !== JSON.stringify(evidenceIndex)) changed = true;
+  return {
+    state: changed ? { ...state, taskRevisions: revisions, evidenceIndex } : state,
+    changed,
   };
 }
 
@@ -128,6 +203,7 @@ export function parseMonthlyPlanningState(value: unknown): MonthlyPlanningState 
     schemaVersion: MONTHLY_STATE_SCHEMA_VERSION,
     sessions: normalizedSessions,
     taskRevisions,
+    evidenceIndex: buildEvidenceIndex(normalizedSessions),
     policies: policies as InvestmentPolicy[],
     assignmentRules: assignmentRules as MonthlyPlanningState['assignmentRules'],
     settings: isRecord(settings) ? { ...fallbackSettings, ...(settings as MonthlyPlanningState['settings']) } : fallbackSettings,
@@ -139,7 +215,7 @@ export function findSession(state: MonthlyPlanningState, key: string): MonthlyRe
 }
 
 /** 写入任务：同键只能升版，不允许用更旧 revision 覆盖。 */
-export function upsertSession(state: MonthlyPlanningState, session: MonthlyReview): MonthlyPlanningState {
+export async function upsertSession(state: MonthlyPlanningState, session: MonthlyReview): Promise<MonthlyPlanningState> {
   const normalized = normalizeTask(session, MONTHLY_STATE_SCHEMA_VERSION);
   const existing = findSession(state, session.key);
   if (existing && session.revision < existing.revision) {
@@ -154,9 +230,9 @@ export function upsertSession(state: MonthlyPlanningState, session: MonthlyRevie
   let taskRevisions = state.taskRevisions;
   if (MATERIAL_REVISION_STATES.has(normalized.state)
     && !taskRevisions.some((item) => item.taskId === normalized.key && item.revision === normalized.revision)) {
-    taskRevisions = [...taskRevisions, revisionFrom(normalized, new Date().toISOString())];
+    taskRevisions = [...taskRevisions, await revisionFrom(normalized, new Date().toISOString())];
   }
-  return { ...state, sessions, taskRevisions };
+  return { ...state, sessions, taskRevisions, evidenceIndex: buildEvidenceIndex(sessions) };
 }
 
 /**
@@ -175,7 +251,7 @@ export function upsertPolicy(state: MonthlyPlanningState, policy: InvestmentPoli
   return { ...state, policies };
 }
 
-export function recordExecution(state: MonthlyPlanningState, sessionKey: string, record: ExecutionRecord): MonthlyPlanningState {
+export async function recordExecution(state: MonthlyPlanningState, sessionKey: string, record: ExecutionRecord): Promise<MonthlyPlanningState> {
   const session = findSession(state, sessionKey);
   if (!session) throw new Error(`会话不存在：${sessionKey}`);
   if (!session.proposal) throw new Error('会话没有候选方案，不能登记执行回执');
@@ -185,14 +261,16 @@ export function recordExecution(state: MonthlyPlanningState, sessionKey: string,
   if (session.executions.some((item) => item.id === record.id)) throw new Error('执行回执 ID 重复');
   const executions = [...session.executions, record];
   const next: MonthlyReview = { ...session, executions, revision: session.revision + 1 };
-  return upsertSession(state, next);
+  return await upsertSession(state, next);
 }
 
 export function removeSession(state: MonthlyPlanningState, key: string): MonthlyPlanningState {
+  const sessions = state.sessions.filter((session) => session.key !== key);
   return {
     ...state,
-    sessions: state.sessions.filter((session) => session.key !== key),
+    sessions,
     taskRevisions: state.taskRevisions.filter((item) => item.taskId !== key),
+    evidenceIndex: buildEvidenceIndex(sessions),
   };
 }
 

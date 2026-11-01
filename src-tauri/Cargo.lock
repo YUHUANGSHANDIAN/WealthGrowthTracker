@@ -4574,7 +4574,7 @@ dependencies = [
 
 [[package]]
 name = "wealth-growth-tracker"
-version = "1.9.0-preview.2"
+version = "1.9.0-preview.3"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
