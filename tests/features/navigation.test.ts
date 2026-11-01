@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseHash, buildHash, useNavigationStore } from '../../src/store/navigationStore';
+import { MAIN_SECTION_IDS, parseHash, buildHash, useNavigationStore } from '../../src/store/navigationStore';
 import { SETTINGS_SECTIONS } from '../../src/constants/settings';
 
 describe('navigation', () => {
@@ -19,7 +19,19 @@ describe('navigation', () => {
   it('rejects unknown categories and categories on other pages', () => {
     expect(parseHash('#/settings?section=unknown').settingsSection).toBeUndefined();
     expect(parseHash('#/analysis?section=privacy').settingsSection).toBeUndefined();
-    expect(buildHash({ tab: 'analysis', settingsSection: 'privacy' })).toBe('#/analysis');
+    expect(buildHash({ tab: 'analysis', settingsSection: 'privacy' })).toBe('#/review/analysis');
+  });
+
+  it('maps the five main sections, auxiliary entries and old deep links', () => {
+    expect(parseHash('#/finance/initial-reconciliation')).toMatchObject({
+      tab: 'monthly', financeTaskKind: 'initial-reconciliation',
+    });
+    expect(parseHash('#/review/reports/report/r1')).toMatchObject({ tab: 'reports', reportId: 'r1' });
+    expect(parseHash('#/planning/prediction')).toMatchObject({ tab: 'prediction' });
+    expect(parseHash('#/settings/ai')).toMatchObject({ tab: 'ai', settingsSection: 'ai' });
+    expect(parseHash('#/settings/storage')).toMatchObject({ tab: 'data', settingsSection: 'storage' });
+    expect(parseHash('#/reports/report/legacy')).toMatchObject({ tab: 'reports', reportId: 'legacy' });
+    expect(new Set(MAIN_SECTION_IDS)).toEqual(new Set(['overview', 'assets', 'finance', 'review', 'planning', 'lottery', 'settings']));
   });
 
   it('replaces old entity and settings context when navigating', () => {

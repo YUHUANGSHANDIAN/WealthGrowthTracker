@@ -14,7 +14,7 @@ describe('local settings search', () => {
     const onClose = vi.fn();
     render(<CommandPalette open onClose={onClose} />);
     fireEvent.change(screen.getByLabelText('搜索本地内容'), { target: { value: '深色' } });
-    fireEvent.click(screen.getByRole('button', { name: /设置 · 显示与无障碍/ }));
+    fireEvent.click(screen.getByRole('button', { name: /设置 · 外观偏好/ }));
     expect(useNavigationStore.getState().settingsSection).toBe('appearance');
     expect(window.location.hash).toBe('#/settings?section=appearance');
     expect(onClose).toHaveBeenCalledOnce();

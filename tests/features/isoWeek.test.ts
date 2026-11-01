@@ -29,6 +29,8 @@ function weeklyReport(partial: Partial<FinancialReport>): FinancialReport {
 
 describe('ISO 8601 Week Domain', () => {
   it('日期 → ISO 周（含 W01/W53/跨年）', () => {
+    expect(isoWeekOfDate('2021-01-01')).toEqual({ isoWeekYear: 2020, isoWeek: 53 });
+    expect(isoWeekOfDate('2024-12-30')).toEqual({ isoWeekYear: 2025, isoWeek: 1 });
     expect(isoWeekOfDate('2026-01-01')).toEqual({ isoWeekYear: 2026, isoWeek: 1 });
     expect(isoWeekOfDate('2026-01-04')).toEqual({ isoWeekYear: 2026, isoWeek: 1 });
     expect(isoWeekOfDate('2026-01-05')).toEqual({ isoWeekYear: 2026, isoWeek: 2 });

@@ -89,6 +89,8 @@ function defaultPolicy(now: string): InvestmentPolicy {
 export function MonthlyPlannerPanel() {
   const planning = useAppStore((s) => s.monthlyPlanning);
   const channels = useAppStore((s) => s.channels);
+  const goals = useAppStore((s) => s.goals);
+  const primaryGoalId = useAppStore((s) => s.primaryGoalId);
   const dataRevision = useAppStore((s) => s.dataRevision);
   const upsertMonthlySession = useAppStore((s) => s.upsertMonthlySession);
   const saveMonthlyPolicy = useAppStore((s) => s.saveMonthlyPolicy);
@@ -109,6 +111,7 @@ export function MonthlyPlannerPanel() {
   const [restrictedTotal, setRestrictedTotal] = useState<number | ''>('');
   const [goalMonths, setGoalMonths] = useState<number | ''>(12);
   const [goalContribution, setGoalContribution] = useState<number | ''>(0);
+  const [goalAnnualRate, setGoalAnnualRate] = useState<number | ''>(0.05);
   const [carry, setCarry] = useState<CarriedItem[]>([]);
   const [executionTarget, setExecutionTarget] = useState<ProposedAction | null>(null);
   const [flowForm, setFlowForm] = useState<{ kind: CashFlowEvent['kind']; amount: number | '' }>({ kind: 'external-income', amount: '' });
@@ -125,10 +128,18 @@ export function MonthlyPlannerPanel() {
   const activeConnection = aiEnabled
     ? aiProfiles.find((profile) => profile.profileId === aiActiveProfileId) ?? null
     : null;
+  const primaryGoal = goals.find((goal) => goal.id === primaryGoalId) ?? goals.find((goal) => goal.status !== 'archived') ?? null;
 
   const session = planning.sessions.find((item) => item.key === monthlyPlanKeySafe(month)) ?? null;
   const previous = planning.sessions.find((item) => item.key === monthlyPlanKeySafe(previousMonth(month)) && (item.state === 'confirmed' || item.state === 'archived')) ?? null;
+  const monthlyTasks = planning.sessions.filter((item) => item.taskKind === undefined || item.taskKind === 'monthly-review');
   const policy = latestPolicy(planning.policies, session?.policyId);
+  const sessionKey = session?.key;
+  const [policyDraft, setPolicyDraft] = useState<InvestmentPolicy | null>(policy);
+
+  useEffect(() => {
+    setPolicyDraft(policy);
+  }, [policy, sessionKey]);
 
   useEffect(() => {
     if (!importChannelId && channels[0]) setImportChannelId(channels[0].id);
@@ -159,7 +170,10 @@ export function MonthlyPlannerPanel() {
 
   const hardErrors = issues.filter((issue) => issue.severity === 'error');
   const confirmationBlockers = confirmBlockers({ session, issues, currentPolicyVersion: policy?.version ?? null });
-  const dueToday = todayString().slice(8, 10) >= String(planning.settings.reminderDay).padStart(2, '0');
+  const currentMonthValue = todayString().slice(0, 7);
+  const dueToday = planning.settings.reminderEnabled
+    && todayString().slice(8, 10) >= String(planning.settings.reminderDay).padStart(2, '0')
+    && planning.settings.lastReminderMonth !== currentMonthValue;
 
   /** 保存会话；成功时返回落库后的对象（revision 已递增），失败返回 null。 */
   async function save(next: MonthlyReview, label?: string): Promise<MonthlyReview | null> {
@@ -217,9 +231,17 @@ export function MonthlyPlannerPanel() {
     }
   }
 
-  async function savePolicy(patch: Partial<InvestmentPolicy>) {
+  async function savePolicyDraft() {
+    if (!policyDraft) return;
     const base = policy ?? defaultPolicy(todayString());
-    const next: InvestmentPolicy = { ...base, ...patch, version: base.version + 1, approvedByUser: true, effectiveFrom: todayString() };
+    const next: InvestmentPolicy = {
+      ...base,
+      ...policyDraft,
+      id: base.id,
+      version: base.version + 1,
+      approvedByUser: true,
+      effectiveFrom: todayString(),
+    };
     setBusy(true); setError(null);
     try { await saveMonthlyPolicy(next); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '策略保存失败'); }
@@ -381,7 +403,8 @@ export function MonthlyPlannerPanel() {
   }
 
   function totalsOf(current: MonthlyReview) {
-    const assets = sumMoney(current.observations.map((observation) => observation.marketValue ?? 0));
+    const values = current.observations.map((observation) => observation.marketValue);
+    const assets = values.some((value) => value === null) ? null : sumMoney(values as number[]);
     const liabilities = liabilityTotal === '' ? null : Number(liabilityTotal);
     const restricted = restrictedTotal === '' ? null : Number(restrictedTotal);
     return portfolioTotals({ allAssets: assets, liabilities, liabilitiesUnknown: liabilities === null, restricted });
@@ -416,6 +439,7 @@ export function MonthlyPlannerPanel() {
   const breaches = policy ? evaluatePolicy(policy, { exposures, exposureBase: investable }).breaches : [];
   const carrySummary = summarizeCarryOver(carry);
   const continuity = checkPeriodContinuity({ previous, nextReviewPeriodStart: session?.reviewPeriodStart ?? null });
+  const editablePolicy = policyDraft ?? policy ?? defaultPolicy(todayString());
 
   return (
     <div className="space-y-4">
@@ -441,9 +465,12 @@ export function MonthlyPlannerPanel() {
           </div>
         </div>
         {dueToday && session?.state !== 'confirmed' && session?.state !== 'archived' && (
-          <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
-            已到本月提醒日：现在开始月度流程。提醒不等于工资到账、负债清零或基金净值已结算，请在「快照确认」逐项核对。
-          </p>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+            <span>已到本月提醒日：现在开始月度流程。提醒不等于工资到账、负债清零或基金净值已结算，请在「快照确认」逐项核对。</span>
+            <Button size="sm" variant="outline" onClick={() => void setMonthlySettings({ lastReminderMonth: currentMonthValue })}>
+              记住本月已提示
+            </Button>
+          </div>
         )}
         {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
         {!error && session && confirmationBlockers.length > 0 && (
@@ -768,18 +795,30 @@ export function MonthlyPlannerPanel() {
           <Card className="p-4">
             <h3 className="font-semibold mb-2">策略（用户政策，可版本化修改）</h3>
             <div className="flex flex-wrap items-end gap-3">
-              <MoneyField label="最小交易额" value={policy?.minTradeAmount ?? ''} onChange={(value) => void savePolicy({ minTradeAmount: value === '' ? null : Number(value) })} />
-              <TextField label="冷静期（天）" type="number" value={String(policy?.cooldownDays ?? 0)}
-                onChange={(event) => void savePolicy({ cooldownDays: Number(event.target.value) || 0 })} />
-              <TextField label="止盈台阶（累计比例，逗号分隔）" value={(policy?.takeProfit?.steps ?? []).map((step) => step.cumulativeTarget).join(',')}
+              <MoneyField label="最小交易额" value={editablePolicy.minTradeAmount ?? ''} onChange={(value) => setPolicyDraft({ ...editablePolicy, minTradeAmount: value === '' ? null : Number(value) })} />
+              <MoneyField label="流动性底线" value={editablePolicy.liquidityFloor ?? ''} onChange={(value) => setPolicyDraft({ ...editablePolicy, liquidityFloor: value === '' ? null : Number(value) })} />
+              <TextField label="冷静期（天）" type="number" value={String(editablePolicy.cooldownDays ?? 0)}
+                onChange={(event) => setPolicyDraft({ ...editablePolicy, cooldownDays: Number(event.target.value) || 0 })} />
+              <TextField label="费率（0–1）" type="number" min="0" max="1" step="0.001" value={String(editablePolicy.feeRate ?? '')}
+                onChange={(event) => setPolicyDraft({ ...editablePolicy, feeRate: event.target.value === '' ? null : Number(event.target.value) })} />
+              <TextField label="参考份额" value={editablePolicy.takeProfit?.referenceShares ?? ''}
+                onChange={(event) => setPolicyDraft({
+                  ...editablePolicy,
+                  takeProfit: {
+                    referenceShares: event.target.value.trim() || null,
+                    steps: editablePolicy.takeProfit?.steps ?? [],
+                    executedCumulative: editablePolicy.takeProfit?.executedCumulative ?? 0,
+                  },
+                })} />
+              <TextField label="止盈台阶（累计比例，逗号分隔）" value={(editablePolicy.takeProfit?.steps ?? []).map((step) => step.cumulativeTarget).join(',')}
                 onChange={(event) => {
                   const steps = event.target.value.split(',').map((part) => Number(part.trim())).filter((value) => Number.isFinite(value) && value > 0 && value <= 1)
                     .map((value, index) => ({ cumulativeTarget: value, label: `第${index + 1}阶` }));
-                  void savePolicy({ takeProfit: { referenceShares: policy?.takeProfit?.referenceShares ?? '100.0000', steps, executedCumulative: policy?.takeProfit?.executedCumulative ?? 0 } });
+                  setPolicyDraft({ ...editablePolicy, takeProfit: { referenceShares: editablePolicy.takeProfit?.referenceShares ?? null, steps, executedCumulative: editablePolicy.takeProfit?.executedCumulative ?? 0 } });
                 }} />
-              <TextField label="已执行累计比例" type="number" step="0.01" value={String(policy?.takeProfit?.executedCumulative ?? 0)}
-                onChange={(event) => void savePolicy({ takeProfit: { referenceShares: policy?.takeProfit?.referenceShares ?? '100.0000', steps: policy?.takeProfit?.steps ?? [], executedCumulative: Number(event.target.value) || 0 } })} />
-              <TextField label="目标配比（标签:比例，逗号分隔）" value={Object.entries(policy?.targetAllocation ?? {}).map(([key, value]) => `${key}:${value}`).join(',')}
+              <TextField label="已执行累计比例" type="number" step="0.01" value={String(editablePolicy.takeProfit?.executedCumulative ?? 0)}
+                onChange={(event) => setPolicyDraft({ ...editablePolicy, takeProfit: { referenceShares: editablePolicy.takeProfit?.referenceShares ?? null, steps: editablePolicy.takeProfit?.steps ?? [], executedCumulative: Number(event.target.value) || 0 } })} />
+              <TextField label="目标配比（标签:比例，逗号分隔）" value={Object.entries(editablePolicy.targetAllocation).map(([key, value]) => `${key}:${value}`).join(',')}
                 onChange={(event) => {
                   const allocation: Record<string, number> = {};
                   for (const part of event.target.value.split(',')) {
@@ -787,10 +826,28 @@ export function MonthlyPlannerPanel() {
                     const parsed = Number(value);
                     if (key && Number.isFinite(parsed) && parsed > 0 && parsed <= 1) allocation[key] = parsed;
                   }
-                  void savePolicy({ targetAllocation: allocation });
+                  setPolicyDraft({ ...editablePolicy, targetAllocation: allocation });
+                }} />
+              <TextField label="风险上限（标签:软:硬，逗号分隔）" value={editablePolicy.riskLimits.map((limit) => `${limit.key}:${limit.softLimit ?? ''}:${limit.hardLimit ?? ''}`).join(',')}
+                onChange={(event) => {
+                  const riskLimits = event.target.value.split(',').flatMap((part) => {
+                    const [key, soft, hard] = part.split(':').map((item) => item.trim());
+                    if (!key) return [];
+                    const softLimit = soft === '' ? null : Number(soft);
+                    const hardLimit = hard === '' ? null : Number(hard);
+                    return [{
+                      key,
+                      softLimit: Number.isFinite(softLimit) ? softLimit : null,
+                      hardLimit: Number.isFinite(hardLimit) ? hardLimit : null,
+                      buffer: null,
+                      consecutiveBreachesAllowed: null,
+                    }];
+                  });
+                  setPolicyDraft({ ...editablePolicy, riskLimits });
                 }} />
             </div>
-            <p className="mt-2 text-xs text-slate-500">策略是用户自己的政策（旧 v9 规则的版本化承接），不是通用投资建议；修改后生成新版本，旧结果仍可复现。</p>
+            <p className="mt-2 text-xs text-slate-500">策略是用户自己的政策（旧 v9 规则的版本化承接），不是通用投资建议；编辑不会自动写入，点击保存后才生成新版本。</p>
+            <Button className="mt-3" size="sm" variant="outline" disabled={busy} onClick={() => void savePolicyDraft()}>保存新策略版本</Button>
           </Card>
           <Card className="p-4">
             <div className="flex flex-wrap items-center gap-2">
@@ -872,7 +929,7 @@ export function MonthlyPlannerPanel() {
             )}
             <div className="mt-3 flex flex-wrap gap-2">
               <AIActionButton task="monthly-narrative" range={{ start: session.reviewPeriodStart, end: session.reviewPeriodEnd }}>AI 月度叙述（需授权）</AIActionButton>
-              <Button variant="outline" onClick={() => navigate({ tab: 'ai' })}>配置模型连接</Button>
+              <Button variant="outline" onClick={() => navigate({ tab: 'ai', settingsSection: 'ai' })}>配置模型连接</Button>
             </div>
           </Card>
           <Card className="p-4">
@@ -880,21 +937,29 @@ export function MonthlyPlannerPanel() {
             <div className="flex flex-wrap items-end gap-3">
               <TextField label="期限（月）" type="number" value={String(goalMonths)} onChange={(event) => setGoalMonths(Number(event.target.value) || 0)} />
               <MoneyField label="每月投入假设" value={goalContribution} onChange={setGoalContribution} />
+              <TextField label="年化假设（0–1）" type="number" min="0" max="1" step="0.01" value={String(goalAnnualRate)} onChange={(event) => setGoalAnnualRate(event.target.value === '' ? '' : Number(event.target.value))} />
             </div>
-            {(() => {
+            {!primaryGoal ? (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+                <span>当前没有可复用的正式目标；不会用示例目标替代。</span>
+                <Button size="sm" variant="outline" onClick={() => navigate({ tab: 'goals' })}>新建目标</Button>
+              </div>
+            ) : (() => {
               const basis = channelsTotal(channels);
               const months = Number(goalMonths) || 0;
               const contribution = Number(goalContribution) || 0;
+              const annualRate = goalAnnualRate === '' ? null : Number(goalAnnualRate);
               const scenarios = goalScenarios(
-                { goalId: null, targetAmount: 1_000_000, basis: 'all-assets', baselineDate: todayString(), monthlyContribution: contribution, scenarios: [{ id: 'legacy', label: '沿用旧假设（年化 5%）', annualRate: 0.05 }], quality: { source: 'computed', attribution: 'confirmed', valuation: 'observed', time: 'observed', review: 'pending' } },
+                { goalId: primaryGoal.id, targetAmount: primaryGoal.targetAmount, basis: 'all-assets', baselineDate: todayString(), monthlyContribution: contribution, targetDate: primaryGoal.targetDateTime, scenarios: [{ id: 'user-assumption', label: '当前用户假设', annualRate }], quality: { source: 'computed', attribution: 'confirmed', valuation: 'observed', time: 'observed', review: 'pending' } },
                 { months, baseAmount: basis },
               );
-              const required = requiredMonthlyContribution({ target: 1_000_000, baseAmount: basis, months, annualRate: 0.05 });
-              const implied = impliedAnnualRate({ target: 1_000_000, baseAmount: basis, monthlyContribution: contribution, months });
+              const required = requiredMonthlyContribution({ target: primaryGoal.targetAmount, baseAmount: basis, months, annualRate });
+              const implied = impliedAnnualRate({ target: primaryGoal.targetAmount, baseAmount: basis, monthlyContribution: contribution, months });
               return (
                 <div className="mt-3 space-y-1 text-sm">
+                  <p>目标：{primaryGoal.name} · {formatCNY(primaryGoal.targetAmount)}</p>
                   <p>当前基线（全部资产）：{formatCNY(basis)}</p>
-                  <p>按 5% 年化所需月投入：{required === null ? '期限无效或不可计算' : formatCNY(required)}；当前假设月投入 {formatCNY(contribution)}</p>
+                  <p>按当前假设所需月投入：{required === null ? '期限无效或不可计算' : formatCNY(required)}；当前假设月投入 {formatCNY(contribution)}</p>
                   <p>达到目标所需隐含年化：{implied === null ? '在可行范围内无解（不要包装成可实现计划）' : ratioText(implied, 2)}</p>
                   <ul className="text-xs text-slate-500">
                     {scenarios.map((scenario) => (
@@ -911,11 +976,11 @@ export function MonthlyPlannerPanel() {
       {section === 'archive' && (
         <Card className="p-4">
           <h3 className="font-semibold mb-2">月度归档</h3>
-          {planning.sessions.length === 0 ? <EmptyState icon="🗂️" title="还没有月度会话" description="创建本月会话后会出现在这里。" /> : (
+          {monthlyTasks.length === 0 ? <EmptyState icon="🗂️" title="还没有月度会话" description="创建本月会话后会出现在这里。" /> : (
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-slate-500"><th>会话</th><th>状态</th><th>快照</th><th>候选/回执</th><th>操作</th></tr></thead>
               <tbody>
-                {planning.sessions.map((item) => (
+                {monthlyTasks.map((item) => (
                   <tr key={item.key} className="border-t border-slate-100">
                     <td className="py-1.5">{item.key}<div className="text-[11px] text-slate-400">revision {item.revision}</div></td>
                     <td>{item.state}</td>
@@ -995,9 +1060,10 @@ function channelsTotal(channels: ReturnType<typeof useAppStore.getState>['channe
 
 /** 会话内的可投资分母只用本期观察值；没有观测就返回 null，绝不拿渠道资产顶替。 */
 function investableTotalOf(session: MonthlyReview, restricted: number | ''): number | null {
-  const observed = sumMoney(session.observations.filter((observation) => observation.marketValue !== null).map((observation) => observation.marketValue as number));
+  if (!session.observations.length || restricted === '' || session.observations.some((observation) => observation.marketValue === null)) return null;
+  const observed = sumMoney(session.observations.map((observation) => observation.marketValue as number));
   if (!session.observations.length || !(observed > 0) || !Number.isFinite(observed)) return null;
-  const restrictedValue = restricted === '' ? 0 : Number(restricted);
+  const restrictedValue = Number(restricted);
   const value = moneyDiff(observed, restrictedValue);
   return value > 0 ? value : null;
 }

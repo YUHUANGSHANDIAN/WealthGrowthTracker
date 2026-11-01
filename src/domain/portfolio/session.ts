@@ -1,18 +1,51 @@
 import type { SessionIssue } from './invariants';
-import type { MonthlyReview, MonthlyReviewState } from './types';
+import type { FinanceTaskKind, MonthlyReview, MonthlyReviewState } from './types';
 
 export const MONTHLY_TRANSITIONS: Readonly<Record<MonthlyReviewState, readonly MonthlyReviewState[]>> = {
-  draft: ['extracting', 'blocked'],
-  extracting: ['reviewing', 'blocked', 'draft'],
-  reviewing: ['ready', 'blocked', 'extracting'],
-  ready: ['planned', 'blocked', 'reviewing'],
+  draft: ['extracting', 'reviewing', 'blocked', 'cancelled'],
+  extracting: ['reviewing', 'blocked', 'draft', 'cancelled'],
+  reviewing: ['ready', 'blocked', 'extracting', 'cancelled'],
+  ready: ['planned', 'reviewed', 'blocked', 'reviewing', 'cancelled'],
   planned: ['confirmed', 'blocked', 'ready'],
-  confirmed: ['archived', 'planned'],
-  archived: [],
+  confirmed: ['archived', 'reviewed', 'planned'],
+  reviewed: ['archived', 'reviewing'],
+  archived: ['reviewing'],
   blocked: ['draft', 'extracting', 'reviewing', 'ready', 'planned'],
+  cancelled: [],
 };
 
 const MONTH_KEY = /^(\d{4})-(0[1-9]|1[0-2])$/;
+const FINANCE_TASK_KEY = /^finance-task:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
+export const FINANCE_TASK_KIND_LABELS: Readonly<Record<FinanceTaskKind, string>> = {
+  'initial-reconciliation': '初始对账',
+  'monthly-review': '月度复盘',
+  'ad-hoc-rebalance': '临时调仓',
+  'fund-analysis': '基金分析',
+  'take-profit-review': '止盈审查',
+  'market-intelligence': '市场情报',
+  'special-research': '专项研究',
+};
+
+export function taskKindOf(task: Pick<MonthlyReview, 'taskKind'>): FinanceTaskKind {
+  return task.taskKind ?? 'monthly-review';
+}
+
+export function isFormalMonthlyTask(task: Pick<MonthlyReview, 'key' | 'taskKind'>): boolean {
+  return taskKindOf(task) === 'monthly-review' && /^monthly-planning:\d{4}-(0[1-9]|1[0-2])$/.test(task.key);
+}
+
+export function financeTaskKey(id: string): string {
+  const normalized = id.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(normalized)) {
+    throw new Error('临时任务 ID 无效');
+  }
+  return `finance-task:${normalized}`;
+}
+
+export function isFinanceTaskKey(key: string): boolean {
+  return /^monthly-planning:\d{4}-(0[1-9]|1[0-2])$/.test(key) || FINANCE_TASK_KEY.test(key);
+}
 
 /** 会话唯一键：monthly-planning:YYYY-MM（与自然月报告 monthly:YYYY-MM 分离）。 */
 export function monthlyPlanKey(planningMonth: string): string {
@@ -39,10 +72,25 @@ export interface CreateDraftInput {
   periodStart?: string;
 }
 
-export function createDraftSession(input: CreateDraftInput): MonthlyReview {
-  const key = monthlyPlanKey(input.planningMonth);
+export interface CreateFinanceDraftInput extends CreateDraftInput {
+  taskKind: FinanceTaskKind;
+  taskId?: string;
+  title?: string;
+  linkedMonthlyTaskId?: string | null;
+}
+
+export function createFinanceDraftSession(input: CreateFinanceDraftInput): MonthlyReview {
+  if (!MONTH_KEY.test(input.planningMonth)) throw new Error('规划月份必须是 YYYY-MM');
+  const key = input.taskKind === 'monthly-review'
+    ? monthlyPlanKey(input.planningMonth)
+    : financeTaskKey(input.taskId ?? crypto.randomUUID());
   const periodStart = input.periodStart ?? `${input.planningMonth}-01`;
   return {
+    taskId: key,
+    ledgerId: 'primary',
+    taskKind: input.taskKind,
+    title: input.title?.trim() || FINANCE_TASK_KIND_LABELS[input.taskKind],
+    linkedMonthlyTaskId: input.linkedMonthlyTaskId ?? null,
     key,
     revision: 1,
     state: 'draft',
@@ -65,11 +113,33 @@ export function createDraftSession(input: CreateDraftInput): MonthlyReview {
     proposal: null,
     executions: [],
     goalBasis: null,
+    result: null,
   };
+}
+
+export function createDraftSession(input: CreateDraftInput): MonthlyReview {
+  return createFinanceDraftSession({ ...input, taskKind: 'monthly-review' });
 }
 
 export function canTransition(from: MonthlyReviewState, to: MonthlyReviewState): boolean {
   return MONTHLY_TRANSITIONS[from].includes(to);
+}
+
+function transitionsForKind(kind: FinanceTaskKind): Readonly<Record<MonthlyReviewState, readonly MonthlyReviewState[]>> {
+  if (kind === 'initial-reconciliation' || kind === 'monthly-review'
+    || kind === 'ad-hoc-rebalance' || kind === 'take-profit-review') {
+    return MONTHLY_TRANSITIONS;
+  }
+  return {
+    ...MONTHLY_TRANSITIONS,
+    ready: ['reviewed', 'blocked', 'reviewing', 'cancelled'],
+    planned: [],
+    confirmed: [],
+  };
+}
+
+export function canTransitionTask(kind: FinanceTaskKind, from: MonthlyReviewState, to: MonthlyReviewState): boolean {
+  return transitionsForKind(kind)[from].includes(to);
 }
 
 /** 自动提取产生的持仓 ID 前缀：holding:doc:<hash12>:<表>:<行>。 */
@@ -85,7 +155,13 @@ export function advanceSession(
   ctx: TransitionContext,
 ): MonthlyReview {
   if (session.state === target) return session;
-  const path = findTransitionPath(session.state, target);
+  if (session.state === 'archived' && target !== 'reviewing') {
+    throw new Error(`不允许的状态流转：${session.state} → ${target}`);
+  }
+  if (session.state === 'archived' && target === 'reviewing' && !ctx.bumpRevision) {
+    throw new Error('重开已归档任务必须递增 revision');
+  }
+  const path = findTransitionPath(session.state, target, taskKindOf(session));
   if (!path) throw new Error(`不允许的状态流转：${session.state} → ${target}`);
   let current = session;
   for (const [index, next] of path.entries()) {
@@ -95,13 +171,17 @@ export function advanceSession(
   return current;
 }
 
-function findTransitionPath(from: MonthlyReviewState, to: MonthlyReviewState): MonthlyReviewState[] | null {
+function findTransitionPath(
+  from: MonthlyReviewState,
+  to: MonthlyReviewState,
+  kind: FinanceTaskKind,
+): MonthlyReviewState[] | null {
   const queue: MonthlyReviewState[][] = [[from]];
   const visited = new Set<MonthlyReviewState>([from]);
   while (queue.length) {
     const path = queue.shift() as MonthlyReviewState[];
     const tail = path[path.length - 1] as MonthlyReviewState;
-    for (const next of MONTHLY_TRANSITIONS[tail]) {
+    for (const next of transitionsForKind(kind)[tail]) {
       if (next === 'blocked' && to !== 'blocked') continue;
       if (next === to) return [...path.slice(1), next];
       if (visited.has(next)) continue;
@@ -152,7 +232,8 @@ export interface ClearAutoFactsResult {
  * 只认 id 前缀，不依赖文档内容；已进入计划或已完成的会话拒绝清空。
  */
 export function clearAutoExtractedFacts(session: MonthlyReview, now: string): ClearAutoFactsResult {
-  if (session.state === 'planned' || session.state === 'confirmed' || session.state === 'archived') {
+  if (session.state === 'planned' || session.state === 'confirmed' || session.state === 'reviewed'
+    || session.state === 'archived' || session.state === 'cancelled') {
     throw new Error('会话已进入计划或已完成，如需重来请先删除会话');
   }
   const holdings = session.holdings.filter((holding) => !holding.id.startsWith(EXTRACTED_HOLDING_PREFIX));
@@ -176,16 +257,24 @@ export interface TransitionContext {
 
 /** 状态流转；确认前必须无错误级问题，且方案/策略/数据版本齐备。 */
 export function transitionSession(session: MonthlyReview, next: MonthlyReviewState, ctx: TransitionContext): MonthlyReview {
-  if (!canTransition(session.state, next)) {
+  const kind = taskKindOf(session);
+  if (!canTransitionTask(kind, session.state, next)) {
     throw new Error(`不允许的状态流转：${session.state} → ${next}`);
   }
   const issues = ctx.issues ?? [];
+  if (session.state === 'archived' && next === 'reviewing' && !ctx.bumpRevision) {
+    throw new Error('重开已归档任务必须递增 revision');
+  }
   if (next === 'confirmed') {
     const errors = issues.filter((issue) => issue.severity === 'error');
     if (errors.length) throw new Error(`存在 ${errors.length} 项错误级问题，禁止确认：${errors[0]?.message ?? ''}`);
-    if (!session.proposal) throw new Error('缺少候选方案，禁止确认');
-    if (session.policyVersion === null) throw new Error('缺少策略版本，禁止确认');
+    const requiresProposal = kind === 'monthly-review' || kind === 'ad-hoc-rebalance' || kind === 'take-profit-review';
+    if (requiresProposal && !session.proposal) throw new Error('缺少候选方案，禁止确认');
+    if (requiresProposal && session.policyVersion === null) throw new Error('缺少策略版本，禁止确认');
     if (ctx.baseDataRevision === undefined) throw new Error('缺少主应用数据版本，禁止确认');
+  }
+  if (next === 'reviewed' && !session.result) {
+    throw new Error('缺少任务结果，不能完成复核');
   }
   return {
     ...session,

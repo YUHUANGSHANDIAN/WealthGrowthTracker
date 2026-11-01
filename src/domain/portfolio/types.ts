@@ -260,7 +260,15 @@ export interface ExecutionRecord {
   id: string;
   proposalId: string;
   actionId: string;
-  status: 'accepted' | 'deferred' | 'rejected' | 'executed' | 'partially-executed';
+  status:
+    | 'submitted'
+    | 'accepted'
+    | 'deferred'
+    | 'rejected'
+    | 'executed'
+    | 'partially-executed'
+    | 'cancelled'
+    | 'not-needed';
   executedAt?: string;
   actualAmount?: number | null;
   actualShares?: string | null;
@@ -286,10 +294,52 @@ export type MonthlyReviewState =
   | 'ready'
   | 'planned'
   | 'confirmed'
+  | 'reviewed'
   | 'archived'
-  | 'blocked';
+  | 'blocked'
+  | 'cancelled';
+
+/** Public name for the shared financial-task state machine. */
+export type FinanceTaskStage = MonthlyReviewState;
+
+export type FinanceTaskKind =
+  | 'initial-reconciliation'
+  | 'monthly-review'
+  | 'ad-hoc-rebalance'
+  | 'fund-analysis'
+  | 'take-profit-review'
+  | 'market-intelligence'
+  | 'special-research';
+
+export interface FinanceTaskResult {
+  summary: string;
+  findings: string[];
+  noAction: boolean;
+  confirmedAt?: string;
+  approvedPolicyVersion?: number | null;
+}
+
+export interface FinanceTaskRevision {
+  taskId: string;
+  revision: number;
+  state: MonthlyReviewState;
+  capturedAt: string;
+  baseDataRevision: number | null;
+  policyVersion: number | null;
+  snapshot: MonthlyReview;
+}
 
 export interface MonthlyReview {
+  /** 稳定任务 ID；正式月任务沿用 monthly-planning:YYYY-MM 键。 */
+  taskId?: string;
+  /** 当前应用只有一个权威账本，保留稳定标识以便未来显式多账本迁移。 */
+  ledgerId?: string;
+  /** 旧数据迁移时缺省为月度复盘。 */
+  taskKind?: FinanceTaskKind;
+  /** 临时任务可以关联一份正式月记录，但不得覆盖它。 */
+  linkedMonthlyTaskId?: string | null;
+  /** 用户可编辑的任务名称。 */
+  title?: string;
   /** 唯一键：monthly-planning:YYYY-MM */
   key: string;
   revision: number;
@@ -298,6 +348,10 @@ export interface MonthlyReview {
   reviewPeriodStart: string;
   reviewPeriodEnd: string;
   snapshotAsOf: string;
+  /** 事实实际观察/估值时点；旧会话缺省时使用 snapshotAsOf。 */
+  valuationAsOf?: string;
+  /** 用户要求完成本任务的截止时点。 */
+  deadlineAt?: string;
   generatedAt: string;
   timezone: string;
   /** 会话固定使用的策略版本 */
@@ -315,12 +369,17 @@ export interface MonthlyReview {
   proposal: Proposal | null;
   executions: ExecutionRecord[];
   goalBasis: GoalBasis | null;
+  result?: FinanceTaskResult | null;
   note?: string;
 }
 
+/** 通用名称；旧代码可继续使用 MonthlyReview。 */
+export type FinanceTask = MonthlyReview;
+
 export interface MonthlyPlanningState {
-  schemaVersion: 1;
+  schemaVersion: 2;
   sessions: MonthlyReview[];
+  taskRevisions: FinanceTaskRevision[];
   policies: InvestmentPolicy[];
   assignmentRules: AssignmentRule[];
   settings: {
@@ -329,5 +388,7 @@ export interface MonthlyPlanningState {
     reminderTime: string;
     timezone: string;
     osTaskRegistered: boolean;
+    /** 最近一次已提示的 YYYY-MM；用于下次启动补提醒而不重复打扰。 */
+    lastReminderMonth?: string | null;
   };
 }
