@@ -12,7 +12,9 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Manager;
+#[cfg(windows)]
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+#[cfg(windows)]
 use tauri_plugin_shell::ShellExt;
 
 const KEYRING_SERVICE: &str = "wealth-growth-tracker";
@@ -78,8 +80,14 @@ struct StoredProfile {
 }
 
 enum RuntimeTransport {
-    Standard { child: Child, stdin: ChildStdin },
-    Sidecar { child: CommandChild },
+    Standard {
+        child: Child,
+        stdin: ChildStdin,
+    },
+    #[cfg(windows)]
+    Sidecar {
+        child: CommandChild,
+    },
 }
 
 impl RuntimeTransport {
@@ -89,6 +97,7 @@ impl RuntimeTransport {
                 .write_all(bytes)
                 .and_then(|_| stdin.flush())
                 .map_err(|error| error.to_string()),
+            #[cfg(windows)]
             Self::Sidecar { child } => child.write(bytes).map_err(|error| error.to_string()),
         }
     }
@@ -101,6 +110,7 @@ impl RuntimeTransport {
                 .flatten()
                 .map(|status| status.to_string())
                 .unwrap_or_else(|| "still-running-or-unknown".to_string()),
+            #[cfg(windows)]
             Self::Sidecar { .. } => "plugin-managed-sidecar".to_string(),
         }
     }
@@ -108,6 +118,7 @@ impl RuntimeTransport {
     fn pid(&self) -> u32 {
         match self {
             Self::Standard { child, .. } => child.id(),
+            #[cfg(windows)]
             Self::Sidecar { child } => child.pid(),
         }
     }
@@ -122,6 +133,7 @@ impl RuntimeTransport {
                     .map(|status| status.to_string())
                     .unwrap_or_else(|error| format!("wait failed: {error}"))
             }
+            #[cfg(windows)]
             Self::Sidecar { child } => {
                 let pid = child.pid();
                 match child.kill() {
@@ -687,6 +699,7 @@ fn spawn_runtime(app: Option<&tauri::AppHandle>) -> Result<RuntimeProcess, Strin
     spawn_standard_runtime(&node, &entry, working_dir)
 }
 
+#[cfg(windows)]
 fn spawn_plugin_runtime(
     app: &tauri::AppHandle,
     node: &str,
