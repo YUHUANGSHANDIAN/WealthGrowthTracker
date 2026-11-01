@@ -146,6 +146,222 @@ fn fs_write_text(app: tauri::AppHandle, rel_path: String, content: String) -> Re
 }
 
 #[tauri::command]
+fn fs_read_binary_base64(app: tauri::AppHandle, rel_path: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let bytes = fs::read(safe_path(&app, &rel_path)?).map_err(|e| e.to_string())?;
+    Ok(STANDARD.encode(bytes))
+}
+
+#[tauri::command]
+fn fs_write_binary_base64(
+    app: tauri::AppHandle,
+    rel_path: String,
+    content_base64: String,
+) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let bytes = STANDARD
+        .decode(content_base64)
+        .map_err(|_| "二进制内容不是合法 base64".to_string())?;
+    if bytes.len() > 256 * 1024 * 1024 {
+        return Err("单个附件超过 256 MiB 限制".into());
+    }
+    let p = safe_path(&app, &rel_path)?;
+    if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    durable::atomic_replace(&p, &bytes).map_err(|e| e.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FullRestoreFile {
+    relative_path: String,
+    sha256: String,
+    content_base64: String,
+}
+
+fn valid_restore_path(relative: &str) -> bool {
+    let path = Path::new(relative);
+    let normal = path
+        .components()
+        .all(|part| matches!(part, Component::Normal(_)));
+    normal
+        && (relative == "data/app-state.json"
+            || relative == "client-meta/ai-connections.json"
+            || (relative.starts_with("monthly-planning/attachments/") && !relative.contains("..")))
+}
+
+/// Materialize a validated complete backup in a brand-new data root.
+///
+/// The caller selects a non-existing absolute path. Files are written to a
+/// sibling staging directory, read back by size and SHA-256, and only then
+/// renamed into place. No existing directory is removed or overwritten.
+#[tauri::command]
+fn write_full_restore_root(
+    destination_root: String,
+    files: Vec<FullRestoreFile>,
+) -> Result<serde_json::Value, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use sha2::{Digest, Sha256};
+
+    if files.is_empty() || files.len() > 2_048 {
+        return Err("完整恢复文件数无效".into());
+    }
+    let destination = PathBuf::from(destination_root.trim());
+    if !destination.is_absolute()
+        || destination
+            .components()
+            .any(|part| matches!(part, Component::ParentDir))
+    {
+        return Err("恢复目标必须是规范的绝对路径".into());
+    }
+    if destination.exists() {
+        return Err("恢复目标必须尚不存在，避免覆盖现有数据".into());
+    }
+    let parent = destination.parent().ok_or("恢复目标缺少父目录")?;
+    let parent =
+        fs::canonicalize(parent).map_err(|error| format!("无法访问恢复目标父目录：{error}"))?;
+    let file_name = destination.file_name().ok_or("恢复目标缺少目录名")?;
+    let destination = parent.join(file_name);
+    reject_links(&destination)?;
+    let staging = parent.join(format!(
+        ".{}.restore-{}-{}",
+        file_name.to_string_lossy(),
+        std::process::id(),
+        NEXT_CONFIG_BACKUP.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    fs::create_dir(&staging).map_err(|error| format!("无法创建恢复暂存目录：{error}"))?;
+
+    let mut total = 0usize;
+    let mut has_state = false;
+    let file_count = files.len();
+    let result = (|| -> Result<(), String> {
+        for file in files {
+            if !valid_restore_path(&file.relative_path) {
+                return Err(format!("完整恢复包含不允许的路径：{}", file.relative_path));
+            }
+            if file.sha256.len() != 64 || !file.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(format!("文件哈希无效：{}", file.relative_path));
+            }
+            let bytes = STANDARD
+                .decode(file.content_base64)
+                .map_err(|_| format!("文件内容不是合法 base64：{}", file.relative_path))?;
+            total = total
+                .checked_add(bytes.len())
+                .ok_or_else(|| "完整恢复大小溢出".to_string())?;
+            if total > 512 * 1024 * 1024 {
+                return Err("完整恢复解压后超过 512 MiB 上限".into());
+            }
+            let actual = format!("{:x}", Sha256::digest(&bytes));
+            if actual != file.sha256.to_ascii_lowercase() {
+                return Err(format!("文件哈希校验失败：{}", file.relative_path));
+            }
+            let target = staging.join(Path::new(&file.relative_path));
+            let rel_parent = target.parent().ok_or("恢复文件缺少父目录")?;
+            fs::create_dir_all(rel_parent).map_err(|error| error.to_string())?;
+            durable::atomic_replace(&target, &bytes).map_err(|error| error.to_string())?;
+            let written = fs::read(&target).map_err(|error| error.to_string())?;
+            if written.len() != bytes.len() || format!("{:x}", Sha256::digest(&written)) != actual {
+                return Err(format!("恢复文件读回校验失败：{}", file.relative_path));
+            }
+            if file.relative_path == "data/app-state.json" {
+                has_state = true;
+            }
+        }
+        if !has_state {
+            return Err("完整恢复缺少 data/app-state.json".into());
+        }
+        fs::rename(&staging, &destination).map_err(|error| format!("恢复目录落位失败：{error}"))?;
+        durable::sync_parent(&destination).map_err(|error| error.to_string())?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        return Err(format!(
+            "{error}；已写入的暂存文件保留于 {}，未触碰现有数据",
+            staging.display()
+        ));
+    }
+    Ok(serde_json::json!({
+        "destinationRoot": destination.to_string_lossy(),
+        "fileCount": file_count,
+        "totalBytes": total
+    }))
+}
+
+#[tauri::command]
+fn save_full_backup_archive(
+    app: tauri::AppHandle,
+    filename: String,
+    content_base64: String,
+    sha256: String,
+) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use sha2::{Digest, Sha256};
+
+    if !filename.starts_with("wealth-full-backup_")
+        || !filename.ends_with(".wgtbackup.zip")
+        || filename.len() > 128
+        || !filename
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err("完整备份文件名无效".into());
+    }
+    if sha256.len() != 64 || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("完整备份哈希无效".into());
+    }
+    let bytes = STANDARD
+        .decode(content_base64)
+        .map_err(|_| "完整备份内容不是合法 base64".to_string())?;
+    if bytes.is_empty() || bytes.len() > 512 * 1024 * 1024 {
+        return Err("完整备份大小无效".into());
+    }
+    if format!("{:x}", Sha256::digest(&bytes)) != sha256.to_ascii_lowercase() {
+        return Err("完整备份内容哈希不符".into());
+    }
+    let rel = format!("exports/{filename}");
+    let target = safe_path(&app, &rel)?;
+    if target.exists() {
+        return Err("同名完整备份已存在，拒绝覆盖".into());
+    }
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    durable::atomic_replace(&target, &bytes).map_err(|error| error.to_string())?;
+    let readback = fs::read(&target).map_err(|error| error.to_string())?;
+    if readback.len() != bytes.len()
+        || format!("{:x}", Sha256::digest(&readback)) != sha256.to_ascii_lowercase()
+    {
+        return Err("完整备份读回大小或哈希不一致".into());
+    }
+    Ok(rel)
+}
+
+#[tauri::command]
+fn read_full_backup_archive(path: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    let candidate = PathBuf::from(path.trim());
+    if !candidate.is_absolute()
+        || !candidate
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".wgtbackup.zip"))
+    {
+        return Err("完整备份必须是绝对路径且以 .wgtbackup.zip 结尾".into());
+    }
+    reject_links(&candidate)?;
+    let canonical =
+        fs::canonicalize(&candidate).map_err(|error| format!("无法访问完整备份：{error}"))?;
+    let metadata = fs::metadata(&canonical).map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > 512 * 1024 * 1024 {
+        return Err("完整备份不是普通文件或大小超出限制".into());
+    }
+    Ok(STANDARD.encode(fs::read(canonical).map_err(|error| error.to_string())?))
+}
+
+#[tauri::command]
 fn fs_exists(app: tauri::AppHandle, rel_path: String) -> Result<bool, String> {
     safe_path(&app, &rel_path)?
         .try_exists()
@@ -1013,6 +1229,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             fs_read_text,
             fs_write_text,
+            fs_read_binary_base64,
+            fs_write_binary_base64,
+            write_full_restore_root,
+            save_full_backup_archive,
+            read_full_backup_archive,
             fs_exists,
             fs_mkdir,
             fs_read_dir,
@@ -1037,6 +1258,7 @@ pub fn run() {
             ai::ai_vision_extract,
             ai::ai_research_lookup,
             ai::ai_cancel,
+            ai::ai_disable_profile,
             ai::ai_remove_profile
         ])
         .run(tauri::generate_context!())
@@ -1129,6 +1351,54 @@ mod recovery_tests {
             state["financial_reports"] = json!([report]).to_string().into();
             assert!(validate_recovery_state(&state.to_string()).is_err());
         }
+    }
+
+    #[test]
+    fn full_restore_writes_only_to_a_new_root_and_verifies_hashes() {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        use sha2::{Digest, Sha256};
+
+        let root = std::env::temp_dir().join(format!(
+            "wealth-full-restore-test-{}-{}",
+            std::process::id(),
+            NEXT_CONFIG_BACKUP.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).unwrap();
+        let destination = root.join("restored-root");
+        let state = legacy_state();
+        let state_hash = format!("{:x}", Sha256::digest(state.as_bytes()));
+        let result = write_full_restore_root(
+            root_text(&destination),
+            vec![FullRestoreFile {
+                relative_path: "data/app-state.json".into(),
+                sha256: state_hash,
+                content_base64: STANDARD.encode(state.as_bytes()),
+            }],
+        )
+        .unwrap();
+        assert_eq!(result["fileCount"], 1);
+        assert_eq!(
+            fs::read_to_string(destination.join("data/app-state.json")).unwrap(),
+            state
+        );
+        assert!(write_full_restore_root(
+            root_text(&destination),
+            vec![FullRestoreFile {
+                relative_path: "data/app-state.json".into(),
+                sha256: "0".repeat(64),
+                content_base64: STANDARD.encode("{}"),
+            }],
+        )
+        .is_err());
+        assert!(write_full_restore_root(
+            root_text(&root.join("invalid")),
+            vec![FullRestoreFile {
+                relative_path: "../escape".into(),
+                sha256: "0".repeat(64),
+                content_base64: STANDARD.encode("{}"),
+            }],
+        )
+        .is_err());
     }
 
     #[test]

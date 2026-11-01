@@ -8,6 +8,8 @@
 export interface FileSystem {
   readTextFile(relPath: string): Promise<string>;
   writeTextFile(relPath: string, content: string): Promise<void>;
+  readBinaryFile?(relPath: string): Promise<Uint8Array>;
+  writeBinaryFile?(relPath: string, content: Uint8Array): Promise<void>;
   exists(relPath: string): Promise<boolean>;
   mkdir(relPath: string): Promise<void>;
   readDir(relPath: string): Promise<string[]>;
@@ -27,6 +29,18 @@ export async function createTauriFileSystem(): Promise<FileSystem> {
   return {
     readTextFile: (p) => invoke<string>('fs_read_text', { relPath: p }),
     writeTextFile: (p, c) => invoke<void>('fs_write_text', { relPath: p, content: c }),
+    readBinaryFile: async (p) => {
+      const encoded = await invoke<string>('fs_read_binary_base64', { relPath: p });
+      const binary = atob(encoded);
+      return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    },
+    writeBinaryFile: async (p, content) => {
+      let binary = '';
+      for (let index = 0; index < content.length; index += 0x8000) {
+        binary += String.fromCharCode(...content.subarray(index, index + 0x8000));
+      }
+      await invoke<void>('fs_write_binary_base64', { relPath: p, contentBase64: btoa(binary) });
+    },
     exists: (p) => invoke<boolean>('fs_exists', { relPath: p }),
     mkdir: (p) => invoke<void>('fs_mkdir', { relPath: p }),
     readDir: (p) => invoke<string[]>('fs_read_dir', { relPath: p }),
@@ -98,6 +112,18 @@ export interface ConfigRepairResult {
   durabilityWarning: string | null;
 }
 
+export interface RestoreRootFileInput {
+  relativePath: string;
+  sha256: string;
+  contentBase64: string;
+}
+
+export interface RestoreRootResult {
+  destinationRoot: string;
+  fileCount: number;
+  totalBytes: number;
+}
+
 export async function inspectStorageConfigRecovery(): Promise<ConfigRecoveryStatus | null> {
   if (!isTauri()) return null;
   const { invoke } = await import('@tauri-apps/api/core');
@@ -126,6 +152,28 @@ export async function repairStorageConfigFromCandidate(
 export async function migrateDataRoot(src: string, dst: string): Promise<number> {
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<number>('migrate_data_root', { src, dst });
+}
+
+export async function writeFullRestoreRoot(
+  destinationRoot: string,
+  files: RestoreRootFileInput[],
+): Promise<RestoreRootResult> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<RestoreRootResult>('write_full_restore_root', { destinationRoot, files });
+}
+
+export async function saveFullBackupArchive(
+  filename: string,
+  contentBase64: string,
+  sha256: string,
+): Promise<string> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('save_full_backup_archive', { filename, contentBase64, sha256 });
+}
+
+export async function readFullBackupArchive(path: string): Promise<string> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('read_full_backup_archive', { path });
 }
 
 /** 原生打开一个路径（目录用资源管理器，文件用默认程序）。 */

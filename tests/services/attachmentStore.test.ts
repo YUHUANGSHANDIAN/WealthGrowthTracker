@@ -20,6 +20,25 @@ class MemFS implements FileSystem {
   async rename(s: string, d: string): Promise<void> { const v = this.files.get(s); if (v !== undefined) { this.files.set(d, v); this.files.delete(s); } }
 }
 
+class BinaryMemFS extends MemFS {
+  binary = new Map<string, Uint8Array>();
+  async readBinaryFile(p: string): Promise<Uint8Array> {
+    const value = this.binary.get(p);
+    if (!value) throw new Error(`not found: ${p}`);
+    return value.slice();
+  }
+  async writeBinaryFile(p: string, content: Uint8Array): Promise<void> {
+    this.binary.set(p, content.slice());
+  }
+  override async exists(p: string): Promise<boolean> {
+    return this.binary.has(p) || super.exists(p);
+  }
+  override async removeFile(p: string): Promise<void> {
+    this.binary.delete(p);
+    await super.removeFile(p);
+  }
+}
+
 const HASH = 'a'.repeat(64);
 const KEY = attachmentKey(HASH, '微信渠道.jpg');
 const BASE64 = bytesToBase64(new TextEncoder().encode('合成附件'));
@@ -46,6 +65,16 @@ describe('附件文件后端', () => {
     const fs = new MemFS();
     await storageService.setRaw(KEY, BASE64);
     expect(await createFileAttachmentBackend(fs).read(KEY)).toBe(BASE64);
+  });
+
+  it('文件系统支持二进制时按原始字节落盘，不再扩成 Base64 文本', async () => {
+    const fs = new BinaryMemFS();
+    const backend = createFileAttachmentBackend(fs);
+    const bytes = new Uint8Array([0, 1, 2, 3, 254, 255]);
+    await backend.writeBytes?.(KEY, bytes);
+    expect(fs.binary.get(`${ATTACHMENT_DIR}/${HASH}.jpg`)).toEqual(bytes);
+    expect(fs.files.size).toBe(0);
+    expect(await backend.readBytes?.(KEY)).toEqual(bytes);
   });
 
   it('删除会同时清掉文件与内联值', async () => {

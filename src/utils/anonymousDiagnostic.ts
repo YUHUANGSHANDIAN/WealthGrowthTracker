@@ -1,5 +1,6 @@
 import type { Channel, FinancialReport, Goal, HistoryPoint, LevelAchievement, LotteryState } from '../types';
 import { APP_VERSION } from '../constants/version';
+import { BUILD_COMMIT, BUILD_ID } from '../constants/buildInfo';
 import { REPORT_SCHEMA_VERSION } from '../features/reports/normalize';
 
 /**
@@ -10,7 +11,9 @@ import { REPORT_SCHEMA_VERSION } from '../features/reports/normalize';
 export interface AnonymousDiagnostic {
   generatedAt: string;
   appVersion: string;
-  schemaVersions: { reportSchemaVersion: number };
+  buildId: string;
+  buildCommit: string;
+  schemaVersions: { storageSchemaVersion: number; monthlySchemaVersion: number; reportSchemaVersion: number };
   counts: {
     channels: number;
     subChannels: number;
@@ -36,6 +39,7 @@ export interface AnonymousDiagnosticInput {
   healthIssueTypes: string[];
   platform: string;
   storageBackend: string;
+  monthlySchemaVersion?: number;
 }
 
 export function buildAnonymousDiagnostic(input: AnonymousDiagnosticInput): AnonymousDiagnostic {
@@ -47,7 +51,13 @@ export function buildAnonymousDiagnostic(input: AnonymousDiagnosticInput): Anony
   return {
     generatedAt: new Date().toISOString(),
     appVersion: APP_VERSION,
-    schemaVersions: { reportSchemaVersion: REPORT_SCHEMA_VERSION },
+    buildId: BUILD_ID,
+    buildCommit: BUILD_COMMIT,
+    schemaVersions: {
+      storageSchemaVersion: 1,
+      monthlySchemaVersion: input.monthlySchemaVersion ?? 2,
+      reportSchemaVersion: REPORT_SCHEMA_VERSION,
+    },
     counts: {
       channels: input.channels.length,
       subChannels,

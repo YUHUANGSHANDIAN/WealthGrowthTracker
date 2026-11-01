@@ -135,8 +135,8 @@ describe('导出 / 导入（数据兼容核心）', () => {
 
   it('备份 Schema 独立于应用版本，拒绝未来 Schema', () => {
     const backup = buildBackup(makeSource());
-    expect(backup.backupSchemaVersion).toBe(1);
-    expect(parseBackup(JSON.stringify({ ...backup, backupSchemaVersion: 2 })).ok).toBe(false);
+    expect(backup.backupSchemaVersion).toBe(2);
+    expect(parseBackup(JSON.stringify({ ...backup, backupSchemaVersion: 3 })).ok).toBe(false);
     expect(parseBackup(JSON.stringify({ ...backup, backupSchemaVersion: undefined, version: '1.6.1' })).ok).toBe(true);
   });
 

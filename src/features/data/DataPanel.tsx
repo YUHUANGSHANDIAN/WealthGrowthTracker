@@ -3,7 +3,11 @@ import { beginLedgerMaintenance, useAppStore } from '../../store/appStore';
 import { Card, Button, Badge } from '../../components/ui/primitives';
 import { Modal, ConfirmDialog } from '../../components/ui/Modal';
 import { storageService, getDocumentsDir, getDefaultDataDir, openPathInSystem } from '../../services/storage';
-import { readStorageConfig, writeStorageConfig, migrateDataRoot, type DataRootConfig } from '../../services/storage/fs';
+import {
+  readStorageConfig, writeStorageConfig, migrateDataRoot, writeFullRestoreRoot, saveFullBackupArchive,
+  readFullBackupArchive,
+  type DataRootConfig,
+} from '../../services/storage/fs';
 import { TextField } from '../../components/ui/form';
 import { validateDataRootMigration } from '../../services/storage/migrate';
 import { StorageRootSwitchError, switchStorageRootConfig } from '../../services/storage/rootSwitch';
@@ -15,15 +19,23 @@ import {
 } from '../../services/monthlyPlanning/attachmentArchive';
 import { downloadCSV } from '../../components/charts/export';
 import { buildChannelsCsv, buildHistoryCsv } from '../../utils/dataCsv';
-import { checkDataHealth, checkReportHealth, checkGoalHealth, checkAchievementHealth, checkLotteryHealth, domainLabel, type DataIssue, type HealthDomain } from '../../utils/dataHealth';
+import { checkDataHealth, checkMonthlyHealth, checkReportHealth, checkGoalHealth, checkAchievementHealth, checkLotteryHealth, domainLabel, type DataIssue, type HealthDomain } from '../../utils/dataHealth';
 import { previewMerge } from '../../utils/mergeData';
 import { platformCapabilities } from '../../utils/platform';
 import { useNavigationStore } from '../../store/navigationStore';
 import { planBackfill, monthlyCoverageByYear } from '../reports/backfill';
 import { buildAnonymousDiagnostic } from '../../utils/anonymousDiagnostic';
 import { buildMaintenanceActions, type MaintenanceAction } from '../../utils/maintenance';
-import { saveTextFile, backupFilename } from '../../services/export/download';
+import { saveBinaryFile, saveTextFile, backupFilename } from '../../services/export/download';
 import { AIActionButton } from '../ai/AIActionButton';
+import {
+  FULL_BACKUP_MAX_BYTES,
+  buildFullBackup,
+  parseFullBackup,
+  type ParsedFullBackup,
+} from '../../services/export/fullBackup';
+import { restoreAIConnectionMetadata } from '../../store/aiConnectionStore';
+import { bytesToBase64, verifyAttachments } from '../../services/monthlyPlanning/attachments';
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -38,15 +50,25 @@ export function DataPanel() {
   const primaryGoalId = useAppStore((s) => s.primaryGoalId);
   const levelAchievements = useAppStore((s) => s.levelAchievements);
   const lottery = useAppStore((s) => s.lottery);
+  const monthlyPlanning = useAppStore((s) => s.monthlyPlanning);
   const navigate = useNavigationStore((s) => s.navigate);
 
   const [preview, setPreview] = useState<{ text: string; channels: number; history: number; reports: number; merge: ReturnType<typeof previewMerge> } | null>(null);
   const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const archiveFileRef = useRef<HTMLInputElement>(null);
+  const fullBackupFileRef = useRef<HTMLInputElement>(null);
   const [archivePreview, setArchivePreview] = useState<
     { archive: AttachmentArchive; existing: number; missing: number; bytes: number } | null
   >(null);
+  const [fullBackupPreview, setFullBackupPreview] = useState<{
+    parsed: ParsedFullBackup;
+    fileName: string;
+    restorePath: string;
+  } | null>(null);
+  const [fullBackupPathOpen, setFullBackupPathOpen] = useState(false);
+  const [fullBackupSourcePath, setFullBackupSourcePath] = useState('');
+  const [fullBackupLoading, setFullBackupLoading] = useState(false);
 
   const adapterName = storageService.getAdapterName();
   const isDesktop = adapterName === 'desktop';
@@ -61,6 +83,7 @@ export function DataPanel() {
   const [backfillBaseRevision, setBackfillBaseRevision] = useState<number | null>(null);
   const [dataRootMode, setDataRootMode] = useState<'default' | 'custom'>('default');
   const [storageModalOpen, setStorageModalOpen] = useState(false);
+  const [attachmentStatus, setAttachmentStatus] = useState<Array<{ key: string; ok: boolean; reason?: string }>>([]);
 
   const coverageByYear = useMemo(() => monthlyCoverageByYear(reports, history), [reports, history]);
   const backfillPlan = useMemo(() => planBackfill(reports, history), [reports, history]);
@@ -72,9 +95,10 @@ export function DataPanel() {
     const goal = checkGoalHealth(goals, primaryGoalId);
     const achievement = checkAchievementHealth(levelAchievements);
     const lotteryHealth = checkLotteryHealth(lottery);
-    const issues = [...base.issues, ...report, ...goal, ...achievement, ...lotteryHealth];
+    const monthly = checkMonthlyHealth(monthlyPlanning, { attachmentStatus });
+    const issues = [...base.issues, ...report, ...goal, ...achievement, ...lotteryHealth, ...monthly];
     return { ...base, issues, ok: issues.length === 0 };
-  }, [channels, history, reports, goals, primaryGoalId, levelAchievements, lottery]);
+  }, [channels, history, reports, goals, primaryGoalId, levelAchievements, lottery, monthlyPlanning, attachmentStatus]);
   const sortedHistory = useMemo(() => [...history].sort((a, b) => (a.date < b.date ? -1 : 1)), [history]);
 
   useEffect(() => {
@@ -93,6 +117,20 @@ export function DataPanel() {
     return () => { active = false; };
   }, [isDesktop, pushToast]);
 
+  useEffect(() => {
+    let active = true;
+    const refs = monthlyPlanning.sessions.flatMap((task) =>
+      task.documents.map((document) => ({ key: document.relativePath, sha256: document.sha256 })));
+    if (!refs.length) {
+      setAttachmentStatus([]);
+      return () => { active = false; };
+    }
+    void verifyAttachments(refs).then((status) => {
+      if (active) setAttachmentStatus(status);
+    });
+    return () => { active = false; };
+  }, [monthlyPlanning.sessions]);
+
   async function refreshBackups() {
     const mgr = storageService.getDesktopManager();
     try {
@@ -108,12 +146,132 @@ export function DataPanel() {
     try { await exportData(); } catch { pushToast('导出失败，请检查目标位置与权限', 'error'); }
   }
 
-  /** 含附件的单文件归档：把月度会话引用的附件内容与索引清单一起导出。 */
+  async function handleFullBackup() {
+    let release: (() => void) | undefined;
+    setBusy(true);
+    try {
+      release = beginLedgerMaintenance('正在生成完整备份');
+      await storageService.flush();
+      const state = useAppStore.getState();
+      const result = await buildFullBackup({
+        revision: state.dataRevision,
+        monthlyPlanning: state.monthlyPlanning,
+        aiMetadata: localStorage.getItem('wealth_ai_connections_v1'),
+      });
+      if (isDesktop) {
+        const relativePath = await saveFullBackupArchive(result.filename, bytesToBase64(result.archive), result.sha256);
+        pushToast(`完整备份已写入 ${relativePath} · SHA-256 ${result.sha256.slice(0, 12)}…`, 'success');
+      } else {
+        await saveBinaryFile(result.filename, result.archive);
+        pushToast(`完整备份已下载：${result.manifest.fileCount} 个文件 · SHA-256 ${result.sha256.slice(0, 12)}…`, 'success');
+      }
+    } catch (error) {
+      pushToast(errorMessage(error, '完整备份导出失败'), 'error');
+    } finally {
+      release?.();
+      setBusy(false);
+    }
+  }
+
+  async function onFullBackupChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      if (file.size > FULL_BACKUP_MAX_BYTES) throw new Error('完整备份超过 512 MiB 上限');
+      await previewFullBackupBytes(new Uint8Array(await file.arrayBuffer()), file.name);
+    } catch (error) {
+      pushToast(errorMessage(error, '完整备份无法读取'), 'error');
+    }
+  }
+
+  async function previewFullBackupBytes(bytes: Uint8Array, fileName: string) {
+    const parsed = await parseFullBackup(bytes);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+    setFullBackupPreview({
+      parsed,
+      fileName,
+      restorePath: dataPath ? `${dataPath}-restored-${stamp}` : '',
+    });
+  }
+
+  async function readFullBackupPath() {
+    if (!isDesktop || !fullBackupSourcePath.trim()) return;
+    setFullBackupLoading(true);
+    try {
+      const encoded = await readFullBackupArchive(fullBackupSourcePath.trim());
+      const binary = atob(encoded);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      await previewFullBackupBytes(bytes, fullBackupSourcePath.trim().split(/[\\/]/).pop() ?? '完整备份');
+      setFullBackupPathOpen(false);
+    } catch (error) {
+      pushToast(errorMessage(error, '完整备份无法读取'), 'error');
+    } finally {
+      setFullBackupLoading(false);
+    }
+  }
+
+  function chooseFullBackup() {
+    if (isDesktop) setFullBackupPathOpen(true);
+    else fullBackupFileRef.current?.click();
+  }
+
+  async function restoreFullBackup() {
+    if (!fullBackupPreview) return;
+    if (!isDesktop) {
+      pushToast('完整备份只能恢复到桌面端的新数据根', 'error');
+      return;
+    }
+    let release: (() => void) | undefined;
+    let restoreStarted = false;
+    setBusy(true);
+    try {
+      release = beginLedgerMaintenance('正在恢复完整备份');
+      await storageService.flush();
+      storageService.pauseWrites();
+      restoreStarted = true;
+      await writeFullRestoreRoot(fullBackupPreview.restorePath, fullBackupPreview.parsed.files);
+      const previous = await readStorageConfig();
+      if (!previous) throw new Error('无法读取当前存储配置');
+      const next: DataRootConfig = {
+        dataRootMode: 'custom',
+        customDataRoot: fullBackupPreview.restorePath,
+        updatedAt: new Date().toISOString(),
+      };
+      await switchStorageRootConfig(previous, next, {
+        writeConfig: writeStorageConfig,
+        verifyCurrentRoot: async () => {
+          await storageService.reload();
+          storageService.resumeWrites();
+          await hydrate();
+        },
+      });
+      if (fullBackupPreview.parsed.aiMetadataText) {
+        restoreAIConnectionMetadata(fullBackupPreview.parsed.aiMetadataText);
+      }
+      setDataPath(fullBackupPreview.restorePath);
+      setDataRootMode('custom');
+      setFullBackupPreview(null);
+      pushToast('完整备份已恢复到新数据根并完成读回；AI 凭据需重新授权', 'success');
+    } catch (error) {
+      if (!restoreStarted || error instanceof StorageRootSwitchError) {
+        pushToast(errorMessage(error, '完整备份恢复失败；原数据和恢复目标均保留'), 'error');
+      } else {
+        pushToast(errorMessage(error, '完整备份恢复失败；已有暂存文件保留，未覆盖现有数据'), 'error');
+      }
+    } finally {
+      if (!useAppStore.getState().recoveryError) storageService.resumeWrites();
+      release?.();
+      setBusy(false);
+    }
+  }
+
+  /** 附件索引包；不是可独立恢复业务的完整备份。 */
   async function handleExportAttachments() {
     let release: (() => void) | undefined;
     setBusy(true);
     try {
-      release = beginLedgerMaintenance('正在导出含附件备份');
+      release = beginLedgerMaintenance('正在导出附件');
       const { monthlyPlanning } = useAppStore.getState();
       const result = await buildAttachmentArchive(monthlyPlanning, new Date().toISOString());
       if (!result.attachmentCount) {
@@ -121,7 +279,7 @@ export function DataPanel() {
         return;
       }
       await saveTextFile(backupFilename('wealth_tracker_attachments'), result.text);
-      pushToast(`已导出 ${result.attachmentCount} 个附件（${(result.totalBytes / 1024 / 1024).toFixed(1)} MiB）`, 'success');
+      pushToast(`已导出 ${result.attachmentCount} 个附件（${(result.totalBytes / 1024 / 1024).toFixed(1)} MiB）；结构数据请另存结构备份`, 'success');
     } catch (error) {
       pushToast(error instanceof Error ? error.message : '导出含附件备份失败', 'error');
     } finally {
@@ -245,9 +403,15 @@ export function DataPanel() {
     }
   }
 
-  async function doFix() {
+  async function doFix(fix: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history') {
+    const labels = {
+      'sanitize-amounts': '只处理非法金额',
+      'remove-orphans': '只移除孤立子渠道',
+      'dedupe-history': '同日期只保留最新一条',
+    } as const;
+    if (!window.confirm(`确认执行“${labels[fix]}”？应用会先创建备份，并且只应用这一项修复。`)) return;
     try {
-      const res = await applyDataFixes();
+      const res = await applyDataFixes(useAppStore.getState().dataRevision, fix);
       pushToast(res.fixed > 0 ? `已修复 ${res.fixed} 类问题` : '无需修复', 'success');
     } catch (error) { pushToast(errorMessage(error, '修复失败，请检查保存状态'), 'error'); }
   }
@@ -273,6 +437,7 @@ export function DataPanel() {
       healthIssueTypes: health.issues.map((i) => i.domain),
       platform: platformCapabilities().platform,
       storageBackend: adapterName,
+      monthlySchemaVersion: monthlyPlanning.schemaVersion,
     });
     await saveTextFile(backupFilename('anonymous_diagnostic'), JSON.stringify(diag, null, 2));
     pushToast('已导出匿名诊断包（不含金额/名称/交易等敏感信息）', 'success');
@@ -344,7 +509,7 @@ export function DataPanel() {
 
       {/* 数据健康与维护中心（v1.6：动态 Maintenance Action + 问题详情） */}
       <MaintenanceActions actions={maintenanceActions} />
-      <DataHealthCenter issues={health.issues} onFixAll={doFix} busy={busy} />
+      <DataHealthCenter issues={health.issues} onFix={doFix} busy={busy} />
 
       {/* 活动日志 */}
       <ActivityLogCard />
@@ -378,10 +543,11 @@ export function DataPanel() {
 
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-2">导出数据</h2>
-        <p className="text-sm text-slate-500 mb-3">导出 JSON 全量备份，或导出 CSV 用于 Excel / OriginPro / Python 分析。含附件备份会把月度会话引用的资料文件一起打进单个 JSON。</p>
+        <p className="text-sm text-slate-500 mb-3">完整备份包含主状态、理财任务、证据引用和附件二进制，可恢复到新的空数据根。结构备份和附件导出是彼此独立的辅助格式。</p>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={handleExport}>⬇ 导出 JSON 备份</Button>
-          <Button variant="outline" onClick={() => void handleExportAttachments()} disabled={busy}>🗂 导出含附件完整备份</Button>
+          <Button onClick={() => void handleFullBackup()} disabled={busy}>完整备份</Button>
+          <Button variant="outline" onClick={handleExport}>结构备份</Button>
+          <Button variant="outline" onClick={() => void handleExportAttachments()} disabled={busy}>附件导出</Button>
           <Button variant="outline" onClick={() => exportCsv('channels')}>📊 渠道资产 CSV</Button>
           <Button variant="outline" onClick={() => exportCsv('history')}>📈 历史记录 CSV</Button>
         </div>
@@ -389,13 +555,15 @@ export function DataPanel() {
 
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-2">导入数据</h2>
-        <p className="text-sm text-slate-500 mb-3">从 JSON 备份恢复，支持覆盖或合并（ID/日期优先，冲突保留当前）。含附件备份只恢复附件内容，不创建会话——结构化数据请另用 JSON 备份恢复。</p>
+        <p className="text-sm text-slate-500 mb-3">完整备份恢复必须先选择尚不存在的新数据根，校验通过后才切换；结构备份支持覆盖或合并。</p>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => fileRef.current?.click()}>⬆ 选择 JSON 文件导入</Button>
-          <Button variant="outline" onClick={() => archiveFileRef.current?.click()} disabled={importing}>🗂 导入含附件备份</Button>
+          <Button variant="outline" onClick={chooseFullBackup} disabled={importing}>恢复完整备份</Button>
+          <Button variant="outline" onClick={() => fileRef.current?.click()}>导入结构备份</Button>
+          <Button variant="outline" onClick={() => archiveFileRef.current?.click()} disabled={importing}>导入附件导出</Button>
         </div>
+        <input ref={fullBackupFileRef} type="file" accept=".zip,.wgtbackup.zip,application/zip" onChange={(event) => void onFullBackupChosen(event)} className="hidden" aria-label="选择完整备份" />
         <input ref={fileRef} type="file" accept=".json,application/json" onChange={onFileChosen} className="hidden" aria-label="选择导入文件" />
-        <input ref={archiveFileRef} type="file" accept=".json,application/json" onChange={onArchiveChosen} className="hidden" aria-label="选择含附件备份文件" />
+        <input ref={archiveFileRef} type="file" accept=".json,application/json" onChange={onArchiveChosen} className="hidden" aria-label="选择附件导出文件" />
       </Card>
 
       {canOpenFolder && (
@@ -467,11 +635,78 @@ export function DataPanel() {
         )}
       </Modal>
 
+      <Modal
+        open={fullBackupPathOpen}
+        onClose={() => setFullBackupPathOpen(false)}
+        title="选择完整备份文件"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setFullBackupPathOpen(false)} disabled={fullBackupLoading}>取消</Button>
+            <Button onClick={() => void readFullBackupPath()} disabled={fullBackupLoading || !fullBackupSourcePath.trim()}>
+              {fullBackupLoading ? '读取校验中…' : '读取并校验'}
+            </Button>
+          </>
+        }
+      >
+        <TextField
+          label="完整备份绝对路径"
+          value={fullBackupSourcePath}
+          onChange={(event) => setFullBackupSourcePath(event.target.value)}
+          placeholder={`${dataPath}\\exports\\wealth-full-backup_YYYYMMDD_HHMMSS.wgtbackup.zip`}
+          hint="只接受 .wgtbackup.zip 普通文件，最大 512 MiB；读取时仍会校验 manifest、ZIP CRC 和 SHA-256。"
+        />
+      </Modal>
+
+      <Modal
+        open={fullBackupPreview !== null}
+        onClose={() => setFullBackupPreview(null)}
+        title="恢复完整备份到新数据根"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setFullBackupPreview(null)} disabled={busy}>取消</Button>
+            <Button onClick={() => void restoreFullBackup()} disabled={busy || !isDesktop || !fullBackupPreview?.restorePath.trim()}>
+              {busy ? '恢复中…' : '校验并切换'}
+            </Button>
+          </>
+        }
+      >
+        {fullBackupPreview && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2 text-center text-sm">
+              <div className="rounded-lg bg-slate-50 p-2">
+                <div className="text-xs text-slate-400">文件</div>
+                <div className="font-semibold tabular">{fullBackupPreview.parsed.manifest.fileCount}</div>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-2">
+                <div className="text-xs text-slate-400">原始大小</div>
+                <div className="font-semibold tabular">{(fullBackupPreview.parsed.manifest.totalBytes / 1024 / 1024).toFixed(1)} MiB</div>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-2">
+                <div className="text-xs text-slate-400">来源版本</div>
+                <div className="font-semibold">{fullBackupPreview.parsed.manifest.appVersion}</div>
+              </div>
+            </div>
+            <p className="break-all text-xs text-slate-500">文件：{fullBackupPreview.fileName} · 创建：{fullBackupPreview.parsed.manifest.createdAt}</p>
+            <TextField
+              label="新数据根绝对路径（必须尚不存在）"
+              value={fullBackupPreview.restorePath}
+              onChange={(event) => setFullBackupPreview((current) => current ? { ...current, restorePath: event.target.value } : current)}
+              hint="应用先写入同级暂存目录并逐文件校验 SHA-256，成功后才切换存储配置。原数据根不会被删除。"
+            />
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              完整备份不包含密钥。恢复后 AI 连接元数据可以保留，但凭据可能需要在系统安全存储中重新授权。
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* 从备份恢复 */}
       <Modal
         open={archivePreview !== null}
         onClose={() => setArchivePreview(null)}
-        title="确认导入含附件备份"
+        title="确认导入附件导出"
         size="md"
         footer={
           <>
@@ -707,11 +942,22 @@ function issueNavigateTarget(i: DataIssue): { tab: import('../../store/navigatio
     case 'goals': return { tab: 'goals' };
     case 'lottery': return { tab: 'lottery' };
     case 'levels': return { tab: 'assets' };
+    case 'monthly': return { tab: 'monthly' };
+    case 'storage': return { tab: 'data' };
+    case 'settings': return { tab: 'settings' };
     default: return null;
   }
 }
 
-function DataHealthCenter({ issues, onFixAll, busy }: { issues: DataIssue[]; onFixAll: () => void; busy: boolean }) {
+function DataHealthCenter({
+  issues,
+  onFix,
+  busy,
+}: {
+  issues: DataIssue[];
+  onFix: (fix: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history') => void;
+  busy: boolean;
+}) {
   const navigate = useNavigationStore((s) => s.navigate);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [ignored, setIgnored] = useState<Set<string>>(new Set());
@@ -740,8 +986,6 @@ function DataHealthCenter({ issues, onFixAll, busy }: { issues: DataIssue[]; onF
   }
 
   const errorCount = visible.filter((i) => i.severity === 'error').length;
-  const fixable = visible.some((i) => i.fixable);
-
   return (
     <Card className="p-4">
       <div className="flex items-center justify-between mb-2">
@@ -775,8 +1019,18 @@ function DataHealthCenter({ issues, onFixAll, busy }: { issues: DataIssue[]; onF
                     <div className="mt-1 pl-5 text-xs text-slate-500 space-y-1">
                       <p>{i.description}</p>
                       {i.evidence?.map((e, idx) => <p key={idx} className="text-slate-400">· {e}</p>)}
-                      {i.fixStrategies.map((s) => <p key={s.id} className="text-emerald-600">✓ {s.label}：{s.description}</p>)}
+                      {i.fixStrategies.map((strategy) => (
+                        <div key={strategy.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
+                          <span>{strategy.label}：{strategy.description}</span>
+                          {i.fix && (
+                            <Button size="sm" variant="outline" disabled={busy} onClick={() => onFix(i.fix!)}>
+                              仅修复此项
+                            </Button>
+                          )}
+                        </div>
+                      ))}
                       {i.possiblyDestructive && <p className="text-red-500">此操作可能改变数据，修复前自动备份。</p>}
+                      {!i.fixable && <p className="text-slate-500">此项没有通用自动修复，请先定位来源并人工核对。</p>}
                     </div>
                   )}
                 </div>
@@ -785,13 +1039,6 @@ function DataHealthCenter({ issues, onFixAll, busy }: { issues: DataIssue[]; onF
           </div>
         ))}
       </div>
-
-      {fixable && (
-        <div className="mt-3 flex items-center gap-2">
-          <Button size="sm" onClick={onFixAll} disabled={busy}>🔧 安全修复（自动备份）</Button>
-          <span className="text-xs text-slate-400">修复会先自动备份，成功后可撤销。</span>
-        </div>
-      )}
     </Card>
   );
 }

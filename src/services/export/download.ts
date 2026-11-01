@@ -17,6 +17,18 @@ function downloadInBrowser(filename: string, text: string, mime: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function downloadBytesInBrowser(filename: string, bytes: Uint8Array, mime: string): void {
+  const blob = new Blob([bytes], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export interface SaveResult {
   /** 是否由平台（灵光 saveFile）处理。 */
   handledByPlatform: boolean;
@@ -41,6 +53,10 @@ export async function saveTextFile(
   }
   downloadInBrowser(filename, text, mime);
   return { handledByPlatform: false, filename };
+}
+
+export async function saveBinaryFile(filename: string, bytes: Uint8Array, mime = 'application/zip'): Promise<void> {
+  downloadBytesInBrowser(filename, bytes, mime);
 }
 
 /** 生成带时间戳的备份文件名（与旧版格式一致）。 */

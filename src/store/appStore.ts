@@ -2,7 +2,7 @@ import { validateLedgerShape, validateFinancialExtensions } from '../services/st
 import {
   emptyMonthlyPlanningState, parseMonthlyPlanningState, recordExecution, removeSession, upsertPolicy, upsertSession,
 } from '../services/monthlyPlanning/storage';
-import { migrateInlineAttachments } from '../services/monthlyPlanning/attachmentStore';
+import { migrateInlineAttachments, migrateLegacyBase64AttachmentFiles } from '../services/monthlyPlanning/attachmentStore';
 import type { ExecutionRecord, InvestmentPolicy, MonthlyPlanningState, MonthlyReview } from '../domain/portfolio/types';
 import { create } from 'zustand';
 import type {
@@ -270,7 +270,7 @@ interface AppState {
   // ---- 导入导出 ----
   exportData: () => Promise<void>;
   importData: (jsonText: string, mode?: 'replace' | 'merge', baseRevision?: number) => Promise<{ ok: boolean; message: string }>;
-  applyDataFixes: (baseRevision?: number) => Promise<{ fixed: number }>;
+  applyDataFixes: (baseRevision?: number, fix?: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history') => Promise<{ fixed: number }>;
 }
 
 const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
@@ -763,6 +763,14 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         if (moved) {
           await storageService.flushAdapter();
           get().pushToast(`已把 ${moved} 个附件移出状态文件（改为独立文件存储）`, 'info');
+        }
+        const refs = get().monthlyPlanning.sessions.flatMap((task) =>
+          task.documents
+            .filter((document) => document.relativePath.startsWith('monthly-attach:'))
+            .map((document) => ({ key: document.relativePath, sha256: document.sha256 })));
+        const converted = await migrateLegacyBase64AttachmentFiles(refs);
+        if (converted) {
+          get().pushToast(`已把 ${converted} 个附件转换为原始二进制存储`, 'info');
         }
       } catch (error) {
         console.warn('[monthly] 附件外移失败，仍按内联值读取:', error);
@@ -1377,6 +1385,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         lottery: s.lottery,
         goals: { goals: s.goals, primaryGoalId: s.primaryGoalId },
         levelAchievements: s.levelAchievements,
+        monthlyPlanning: s.monthlyPlanning,
       };
       const backup = buildBackup(source);
       const text = JSON.stringify(backup, null, 2);
@@ -1440,12 +1449,13 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
       };
       } finally { release(); }
     },
-    async applyDataFixes(baseRevision = get().dataRevision) {
+    async applyDataFixes(baseRevision = get().dataRevision, fix) {
       const s = get();
       if (baseRevision !== s.dataRevision) throw new Error('数据已变化，请重新预览修复');
       const { issues } = checkDataHealth(s.channels, s.history);
-      if (issues.length === 0) return { fixed: 0 };
-      const { channels, history, fixed } = applyHealthFixes(s.channels, s.history, issues);
+      const scoped = fix ? issues.filter((issue) => issue.fix === fix) : issues;
+      if (scoped.length === 0) return { fixed: 0 };
+      const { channels, history, fixed } = applyHealthFixes(s.channels, s.history, scoped);
       if (!fixed) return { fixed: 0 };
       const release = beginLedgerMaintenance('正在修复数据');
       try {
