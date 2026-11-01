@@ -62,6 +62,13 @@
   - **网页研究检索**：只抓取你显式给出的公网 HTTPS 链接（禁止重定向、无凭据、限额限时），**仅桌面可用**，Web/移动端如实提示不可用；模型不能自行生成 URL
   - **品牌统一为 WealthGrowthTracker**：窗口标题、PWA 名称、关于页与导出元数据一致；`identifier`、存储键、IndexedDB 库名与 Service Worker 缓存前缀保持不变，旧安装与旧数据可原地升级
 
+- **统一理财与可靠交付（v1.9 preview）**
+  - **七类理财任务**：初始对账、月度复盘、临时调仓、基金分析、止盈审查、市场情报、专项研究；正式月记录与多个临时任务分离，任务修订可追溯
+  - **五主入口**：总览 / 资产 / 理财 / 复盘 / 规划，彩票与设置作为辅助入口；旧 hash 与实体深链继续兼容
+  - **AI 连接治理**：每条连接独立启停，当前连接持久化；切换不影响其他连接的在途任务，停用只取消目标连接请求
+  - **完整备份**：`.wgtbackup.zip` 同时包含主状态、任务、证据引用和原始附件，可在新的空数据根校验恢复；结构备份与附件导出明确分离
+  - **外部化本地构建**：源码、DevCache、安装目录和用户数据根互不混用，本地前端/Cargo 产物不再写回源码树
+
 ---
 
 ## 🛠 技术栈
@@ -91,7 +98,7 @@ npm run dev        # 启动开发服务器（默认 http://localhost:5173）
 ## 🏗 构建 & 测试
 
 ```bash
-npm run build         # 类型检查 + 生产构建，产物在 dist/
+npm run build         # 类型检查 + 生产构建（本机由 .wgt-local.json 指向外部缓存）
 npm run preview       # 本地预览生产构建
 npm run typecheck     # 仅类型检查
 npm run lint          # ESLint
@@ -100,6 +107,10 @@ npm run privacy:check # 发布前隐私检查（阻止用户数据/备份/Excel/
 npm run privacy:test  # 隐私检查脚本自身的回归测试
 cd ai-runtime && npm test # AI 运行时（Node 内置 test runner，无网络、无凭据）
 ```
+
+Windows 开发与桌面打包请优先使用 `scripts/dev-local.ps1` 和
+`scripts/build-local.ps1`；两者只在本进程设置缓存、临时目录和构建身份，
+并拒绝已退役的项目根。
 
 ---
 
