@@ -2,17 +2,22 @@ import { useState } from 'react';
 import { MOBILE_MORE_ITEMS, MOBILE_PRIMARY_ITEMS } from '../../constants/navigation';
 import { Modal } from '../../components/ui/Modal';
 import { NavIcon } from '../../components/ui/NavIcon';
-import { useNavigationStore } from '../../store/navigationStore';
+import { sectionForTab, useNavigationStore } from '../../store/navigationStore';
 
 export function MobileNavigation() {
   const tab = useNavigationStore((state) => state.tab);
   const navigate = useNavigationStore((state) => state.navigate);
   const [moreOpen, setMoreOpen] = useState(false);
-  const moreIsCurrent = MOBILE_MORE_ITEMS.some((item) => item.id === tab);
+  const section = sectionForTab(tab);
+  const moreIsCurrent = MOBILE_MORE_ITEMS.some((item) => item.id === section);
 
-  function openTab(nextTab: (typeof MOBILE_MORE_ITEMS)[number]['id']) {
-    navigate({ tab: nextTab });
+  function openSection(item: (typeof MOBILE_MORE_ITEMS)[number]) {
+    navigate({ tab: item.defaultTab, ...(item.id === 'finance' ? { financeTaskKind: 'monthly-review' as const } : {}) });
     setMoreOpen(false);
+  }
+
+  function go(item: (typeof MOBILE_PRIMARY_ITEMS)[number]) {
+    navigate({ tab: item.defaultTab, ...(item.id === 'finance' ? { financeTaskKind: 'monthly-review' as const } : {}) });
   }
 
   return (
@@ -22,10 +27,10 @@ export function MobileNavigation() {
           <button
             key={item.id}
             type="button"
-            onClick={() => navigate({ tab: item.id })}
-            aria-current={tab === item.id ? 'page' : undefined}
+            onClick={() => go(item)}
+            aria-current={section === item.id ? 'page' : undefined}
           >
-            <NavIcon id={item.id} />
+            <NavIcon id={item.defaultTab} />
             <span>{item.label}</span>
           </button>
         ))}
@@ -48,10 +53,10 @@ export function MobileNavigation() {
             <button
               key={item.id}
               type="button"
-              onClick={() => openTab(item.id)}
-              aria-current={tab === item.id ? 'page' : undefined}
+              onClick={() => openSection(item)}
+              aria-current={section === item.id ? 'page' : undefined}
             >
-              <NavIcon id={item.id} />
+              <NavIcon id={item.defaultTab} />
               <span>{item.label}</span>
             </button>
           ))}

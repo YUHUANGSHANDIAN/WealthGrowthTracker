@@ -51,15 +51,19 @@ describe('AI connection store', () => {
     expect(useAIConnectionStore.getState().profiles[0]?.state).toBe('tested');
   });
 
-  it('disabling AI disconnects every profile and clears the active selection', async () => {
+  it('disabling AI disconnects every profile while preserving enabled intent and current selection', async () => {
     await useAIConnectionStore.getState().setEnabled(true);
     await useAIConnectionStore.getState().connect(gateway, '我的网关', 'sk-secret', false);
     await useAIConnectionStore.getState().setEnabled(false);
     const state = useAIConnectionStore.getState();
     expect(state.enabled).toBe(false);
-    expect(state.activeProfileId).toBeNull();
+    expect(state.activeProfileId).toBe('gateway-1');
     expect(state.profiles[0]?.state).toBe('disconnected');
+    expect(state.profiles[0]?.enabled).toBe(true);
     expect(state.connectionRevision).toBeGreaterThan(0);
+    const stored = JSON.parse(localStorage.getItem('wealth_ai_connections_v1') ?? '{}');
+    expect(stored.activeProfileId).toBe('gateway-1');
+    expect(stored.profiles[0]).toMatchObject({ profileId: 'gateway-1', enabled: true });
   });
 
   it('removes a connection and its metadata together', async () => {
@@ -68,7 +72,20 @@ describe('AI connection store', () => {
     await useAIConnectionStore.getState().disconnect('gateway-1');
     expect(useAIConnectionStore.getState().profiles).toHaveLength(0);
     expect(useAIConnectionStore.getState().activeProfileId).toBeNull();
-    const stored = localStorage.getItem('wealth_ai_connections_v1') ?? '[]';
-    expect(JSON.parse(stored)).toEqual([]);
+    const stored = localStorage.getItem('wealth_ai_connections_v1') ?? '{}';
+    expect(JSON.parse(stored)).toEqual({ schemaVersion: 2, activeProfileId: null, profiles: [] });
+  });
+
+  it('disables one connection without deleting its metadata and clears only its current selection', async () => {
+    await useAIConnectionStore.getState().setEnabled(true);
+    await useAIConnectionStore.getState().connect(gateway, '我的网关', 'sk-secret', false);
+    await useAIConnectionStore.getState().toggleEnabled(gateway.profileId, false);
+    const state = useAIConnectionStore.getState();
+    expect(state.profiles).toHaveLength(1);
+    expect(state.profiles[0]).toMatchObject({ profileId: gateway.profileId, enabled: false, health: 'disabled' });
+    expect(state.activeProfileId).toBeNull();
+    const stored = JSON.parse(localStorage.getItem('wealth_ai_connections_v1') ?? '{}');
+    expect(stored.profiles[0]).toMatchObject({ credentialRef: `profile:${gateway.profileId}`, enabled: false });
+    expect(JSON.stringify(stored)).not.toContain('sk-secret');
   });
 });

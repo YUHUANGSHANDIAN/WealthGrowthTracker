@@ -1,6 +1,7 @@
 import { checkPlanPenetration, type PlanPenetrationCheck } from './totals';
 import { isDecimalText } from './decimal';
 import type { CashFlowEvent, Holding, MonthlyReview, SourceDocument } from './types';
+import { isFinanceTaskKey, taskKindOf } from './session';
 
 export type IssueSeverity = 'error' | 'warning' | 'info';
 
@@ -17,8 +18,6 @@ export interface ValidationContext {
   /** 父渠道 → 子渠道 ID */
   childIdsByParent: ReadonlyMap<string, ReadonlySet<string>>;
 }
-
-const MONTHLY_KEY = /^monthly-planning:\d{4}-(0[1-9]|1[0-2])$/;
 
 function duplicates<T>(items: readonly T[], id: (item: T) => string): string[] {
   const seen = new Set<string>();
@@ -44,17 +43,22 @@ export function validateMonthlySession(session: MonthlyReview, ctx: ValidationCo
   const push = (code: string, severity: IssueSeverity, message: string, entityId?: string) =>
     issues.push({ code, severity, message, ...(entityId ? { entityId } : {}) });
 
-  if (!MONTHLY_KEY.test(session.key)) push('key-format', 'error', '会话键必须是 monthly-planning:YYYY-MM');
-  if (session.planningMonth && session.key !== `monthly-planning:${session.planningMonth}`) {
+  const kind = taskKindOf(session);
+  if (!isFinanceTaskKey(session.key)) push('key-format', 'error', '任务键必须是正式月键或 finance-task:<id>');
+  if (kind === 'monthly-review' && session.planningMonth && session.key !== `monthly-planning:${session.planningMonth}`) {
     push('key-month-mismatch', 'error', '会话键与 planningMonth 不一致');
   }
   if (!Number.isInteger(session.revision) || session.revision < 1) push('revision', 'error', 'revision 必须是 >=1 的整数');
   if (session.reviewPeriodStart > session.reviewPeriodEnd) push('period-order', 'error', '复盘区间起点晚于终点');
   if (session.snapshotAsOf < session.reviewPeriodEnd) push('snapshot-before-period', 'warning', '快照时点早于复盘区间终点');
   if (session.state === 'confirmed' || session.state === 'archived') {
-    if (!session.proposal) push('confirmed-without-proposal', 'error', '已确认会话必须有关联方案');
-    if (session.policyVersion === null) push('confirmed-without-policy', 'error', '已确认会话必须记录策略版本');
+    const needsProposal = kind === 'monthly-review' || kind === 'ad-hoc-rebalance' || kind === 'take-profit-review';
+    if (needsProposal && !session.proposal) push('confirmed-without-proposal', 'error', '已确认交易类任务必须有关联方案');
+    if (needsProposal && session.policyVersion === null) push('confirmed-without-policy', 'error', '已确认交易类任务必须记录策略版本');
     if (session.baseDataRevision === null) push('confirmed-without-revision', 'error', '已确认会话必须记录主应用数据版本');
+  }
+  if ((session.state === 'reviewed' || session.state === 'archived') && !session.result) {
+    push('reviewed-without-result', 'error', '已复核或归档任务必须保存结构化结果');
   }
   for (const [label, dupes] of [
     ['文档', duplicates(session.documents, (d) => d.id)],

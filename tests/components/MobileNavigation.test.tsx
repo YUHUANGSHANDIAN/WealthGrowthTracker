@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { TAB_IDS, useNavigationStore } from '../../src/store/navigationStore';
+import { MAIN_SECTION_IDS, useNavigationStore } from '../../src/store/navigationStore';
 import { MOBILE_MORE_ITEMS, MOBILE_PRIMARY_ITEMS } from '../../src/constants/navigation';
 import { MobileNavigation } from '../../src/features/workspace/MobileNavigation';
 
@@ -17,7 +17,7 @@ describe('MobileNavigation', () => {
 
   it('makes every tab discoverable from the primary bar or More menu', () => {
     const visibleTabs = [...MOBILE_PRIMARY_ITEMS, ...MOBILE_MORE_ITEMS].map((item) => item.id);
-    expect(new Set(visibleTabs)).toEqual(new Set(TAB_IDS));
+    expect(new Set(visibleTabs)).toEqual(new Set(MAIN_SECTION_IDS));
 
     render(<MobileNavigation />);
     expect(screen.getByRole('navigation', { name: '移动导航' })).toBeInTheDocument();
@@ -38,7 +38,7 @@ describe('MobileNavigation', () => {
     await user.click(screen.getByRole('button', { name: '更多' }));
     await user.click(screen.getByRole('button', { name: item.label }));
 
-    expect(useNavigationStore.getState().tab).toBe(item.id);
+    expect(useNavigationStore.getState().tab).toBe(item.defaultTab);
     expect(screen.queryByRole('dialog', { name: '更多页面' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '更多' })).toHaveAttribute('aria-current', 'page');
     await user.click(screen.getByRole('button', { name: '更多' }));

@@ -12,6 +12,8 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Manager;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::ShellExt;
 
 const KEYRING_SERVICE: &str = "wealth-growth-tracker";
 const PROVIDERS: [&str; 7] = [
@@ -75,9 +77,64 @@ struct StoredProfile {
     persisted: bool,
 }
 
+enum RuntimeTransport {
+    Standard { child: Child, stdin: ChildStdin },
+    Sidecar { child: CommandChild },
+}
+
+impl RuntimeTransport {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), String> {
+        match self {
+            Self::Standard { stdin, .. } => stdin
+                .write_all(bytes)
+                .and_then(|_| stdin.flush())
+                .map_err(|error| error.to_string()),
+            Self::Sidecar { child } => child.write(bytes).map_err(|error| error.to_string()),
+        }
+    }
+
+    fn status(&mut self) -> String {
+        match self {
+            Self::Standard { child, .. } => child
+                .try_wait()
+                .ok()
+                .flatten()
+                .map(|status| status.to_string())
+                .unwrap_or_else(|| "still-running-or-unknown".to_string()),
+            Self::Sidecar { .. } => "plugin-managed-sidecar".to_string(),
+        }
+    }
+
+    fn pid(&self) -> u32 {
+        match self {
+            Self::Standard { child, .. } => child.id(),
+            Self::Sidecar { child } => child.pid(),
+        }
+    }
+
+    fn terminate(self) -> String {
+        match self {
+            Self::Standard { mut child, stdin } => {
+                drop(stdin);
+                let _ = child.kill();
+                child
+                    .wait()
+                    .map(|status| status.to_string())
+                    .unwrap_or_else(|error| format!("wait failed: {error}"))
+            }
+            Self::Sidecar { child } => {
+                let pid = child.pid();
+                match child.kill() {
+                    Ok(()) => format!("plugin-managed kill requested; pid={pid}"),
+                    Err(error) => format!("plugin-managed kill failed; pid={pid}: {error}"),
+                }
+            }
+        }
+    }
+}
+
 struct RuntimeProcess {
-    child: Child,
-    stdin: ChildStdin,
+    transport: RuntimeTransport,
     pending: Arc<Mutex<HashMap<String, Sender<Value>>>>,
     dead: Arc<AtomicBool>,
 }
@@ -97,8 +154,241 @@ pub struct AiBroker {
     inner: Arc<InnerState>,
 }
 
+/// Broker 侧事件与运行时 stderr 共用同一个日志文件，便于区分「运行时自己崩」与「被 Broker 杀掉」。
+fn append_runtime_log(line: &str) {
+    let dir = std::env::temp_dir().join("wealth-ai-runtime");
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("stderr.log"))
+    {
+        let _ = writeln!(file, "[broker] {line}");
+    }
+}
+
 fn ok_result(result: Value) -> Value {
     json!({ "ok": true, "result": result })
+}
+
+/// 无界面自检：用与 Broker 完全相同的启动参数（env_clear、工作目录、stdin/stdout 管道）
+/// 拉起随包运行时，依次发 status / configure / infer 三帧并收集响应与 stderr。
+/// 只用于 `--ai-selftest`，便于在没有 GUI 的情况下验证运行时链路。
+/// 走**真实 AiBroker**（含 pending/reader/重试层）的自检：不必打开窗口即可复现 GUI 路径。
+pub fn run_broker_selftest() -> Value {
+    run_broker_selftest_variant("openai", "gpt-4o-mini", false)
+}
+
+/// 用 Broker 路径跑一次 deepseek 配置（复现 GUI 里的真实参数差异）。
+pub fn run_broker_selftest_deepseek() -> Value {
+    // 与用户实际参数一致：model=deepseek-flash、credential 35 位纯 ASCII。
+    run_broker_selftest_variant("deepseek", "deepseek-flash", true)
+}
+
+/// 在真实 Tauri GUI 进程中验证官方 sidecar 传输能启动并配置 Runtime。
+/// 仅由 `--ai-plugin-selftest` 调用；不读取用户凭据、不访问供应商。
+pub fn run_plugin_configure_selftest(app: &tauri::AppHandle) -> Value {
+    let broker = AiBroker::default();
+    broker.inner.set_enabled(true);
+    let profile = ConnectionProfile {
+        profile_id: "selftest".into(),
+        provider_id: "deepseek".into(),
+        auth_kind: "api-key".into(),
+        model_id: "deepseek-flash".into(),
+        endpoint: None,
+        supports_vision: None,
+    };
+    let configure = broker.inner.configure(
+        Some(app),
+        profile,
+        Some(format!("sk-{}", "a".repeat(32))),
+        true,
+    );
+    let report = json!({
+        "ok": configure.is_ok(),
+        "configure": configure.unwrap_or_else(|error| json!({ "brokerError": error })),
+    });
+    let _ = broker.inner.remove_profile(Some(app), "selftest", false);
+    broker.inner.set_enabled(false);
+    append_runtime_log(&format!("plugin GUI selftest: {report}"));
+    report
+}
+
+/// 应用启动时在**自身 GUI 进程**里跑一次自检并写日志（不阻塞界面、不写凭据）。
+/// 这样能回答一个关键问题：子进程在 GUI 父进程下是否也会被杀。
+pub fn log_gui_selftest() {
+    std::thread::spawn(|| {
+        let report = run_broker_selftest_with(false);
+        append_runtime_log(&format!("gui selftest: {report}"));
+    });
+}
+
+/// 与 GUI 默认一致的「持久化凭据」自检：真实写一次系统安全存储，结束时删除该测试项。
+pub fn run_broker_selftest_persist() -> Value {
+    run_broker_selftest_with(true)
+}
+
+fn run_broker_selftest_with(persist: bool) -> Value {
+    run_broker_selftest_variant("openai", "gpt-4o-mini", persist)
+}
+
+fn run_broker_selftest_variant(provider_id: &str, model_id: &str, persist: bool) -> Value {
+    let broker = AiBroker::default();
+    broker.inner.set_enabled(true);
+    let profile = ConnectionProfile {
+        profile_id: "selftest".into(),
+        provider_id: provider_id.into(),
+        auth_kind: "api-key".into(),
+        model_id: model_id.into(),
+        endpoint: None,
+        supports_vision: None,
+    };
+    let configure = broker.inner.configure(
+        None,
+        profile,
+        Some(if provider_id == "deepseek" {
+            format!("sk-{}", "a".repeat(32))
+        } else {
+            "sk-synthetic-selftest".to_string()
+        }),
+        persist,
+    );
+    let infer = broker.inner.infer(
+        None,
+        InferenceRequest {
+            request_id: "selftest-infer".into(),
+            profile_id: "selftest".into(),
+            provider_id: provider_id.into(),
+            task: "analysis-question".into(),
+            input: json!({ "text": "synthetic", "facts": [] }),
+        },
+    );
+    let runtime_alive = broker
+        .inner
+        .runtime
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|process| !process.dead.load(Ordering::SeqCst));
+    let report = json!({
+        "ok": configure.is_ok() && infer.is_ok(),
+        "persist": persist,
+        "configure": configure.unwrap_or_else(|error| json!({ "brokerError": error })),
+        "infer": infer.unwrap_or_else(|error| json!({ "brokerError": error })),
+        "runtimeAliveBeforeShutdown": runtime_alive,
+    });
+    if persist {
+        // 清掉测试期间写进系统安全存储的条目。
+        let _ = broker.inner.remove_profile(None, "selftest", false);
+    }
+    broker.inner.set_enabled(false);
+    report
+}
+
+pub fn run_selftest() -> Value {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let dir = exe.parent().map(PathBuf::from).unwrap_or_default();
+    let entry = dir.join("ai-runtime").join("main.mjs");
+    let node = dir.join("node.exe");
+    if !entry.is_file() || !node.is_file() {
+        return json!({ "ok": false, "error": "AI_RUNTIME_MISSING", "entry": entry.to_string_lossy(), "node": node.to_string_lossy() });
+    }
+    let working_dir = std::env::temp_dir().join("wealth-ai-runtime");
+    let _ = std::fs::create_dir_all(&working_dir);
+    let mut command = Command::new(&node);
+    command
+        .arg(&entry)
+        .arg("--stdio")
+        .arg("--enable-ai-runtime")
+        .current_dir(&working_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command.env_clear();
+    #[cfg(windows)]
+    {
+        if let Ok(system_root) = std::env::var("SystemRoot") {
+            command.env("SystemRoot", system_root);
+        }
+        if let Ok(temp) = std::env::var("TEMP") {
+            command.env("TEMP", temp);
+        }
+    }
+    command.env("PATH", dir.to_string_lossy().to_string());
+    let Ok(mut child) = command.spawn() else {
+        return json!({ "ok": false, "error": "SPAWN_FAILED" });
+    };
+    let stderr_tail = Arc::new(Mutex::new(String::new()));
+    if let Some(stderr) = child.stderr.take() {
+        let sink = Arc::clone(&stderr_tail);
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                let mut sink = sink.lock().unwrap();
+                sink.push_str(&line);
+                sink.push('\n');
+            }
+        });
+    }
+    let mut stdin = match child.stdin.take() {
+        Some(stdin) => stdin,
+        None => return json!({ "ok": false, "error": "STDIN_UNAVAILABLE" }),
+    };
+    let stdout = child.stdout.take();
+    let (sender, receiver) = channel::<String>();
+    if let Some(stdout) = stdout {
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    let frames = [
+        json!({ "protocolVersion": 1, "requestId": "selftest-status", "operation": "status" })
+            .to_string(),
+        json!({
+            "protocolVersion": 1, "requestId": "selftest-configure", "operation": "configure",
+            "profile": { "profileId": "selftest", "providerId": "openai", "authKind": "api-key",
+                         "modelId": "gpt-4o-mini", "credential": "sk-synthetic-selftest" }
+        })
+        .to_string(),
+        json!({
+            "protocolVersion": 1, "requestId": "selftest-infer", "operation": "infer",
+            "profileId": "selftest", "providerId": "openai", "task": "analysis-question",
+            "input": { "text": "synthetic", "facts": [] }
+        })
+        .to_string(),
+    ];
+    let mut responses = Vec::new();
+    for frame in frames {
+        if writeln!(stdin, "{frame}").is_err() {
+            break;
+        }
+        let _ = stdin.flush();
+        match receiver.recv_timeout(Duration::from_secs(45)) {
+            Ok(line) => responses
+                .push(serde_json::from_str::<Value>(&line).unwrap_or(json!({ "raw": line }))),
+            Err(_) => responses.push(json!({ "error": "NO_RESPONSE_IN_TIME" })),
+        }
+    }
+    drop(stdin);
+    let status = child.wait().ok().map(|status| status.to_string());
+    json!({
+        "ok": true,
+        "responses": responses,
+        "runtimeStatus": status,
+        "stderr": stderr_tail.lock().unwrap().clone(),
+    })
+}
+
+/// 运行时意外退出时，命令层可以重建一次并重试同一个帧。
+fn is_runtime_exited(response: &Value) -> bool {
+    response
+        .get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        == Some("RUNTIME_EXITED")
 }
 
 fn error_result(code: &str) -> Value {
@@ -285,7 +575,7 @@ fn delete_credential(profile_id: &str) {
 }
 
 /// Locate the private stdio runtime. Never falls back to a shell or the data directory.
-fn runtime_entry(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn runtime_entry(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
     if let Ok(path) = std::env::var("WEALTH_AI_RUNTIME") {
         let candidate = PathBuf::from(path);
         if candidate.is_file() {
@@ -294,7 +584,7 @@ fn runtime_entry(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         return Err("AI_RUNTIME_MISSING".into());
     }
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Ok(resources) = app.path().resource_dir() {
+    if let Some(resources) = app.and_then(|app| app.path().resource_dir().ok()) {
         candidates.push(resources.join("ai-runtime").join("main.mjs"));
         candidates.push(
             resources
@@ -322,23 +612,163 @@ fn runtime_entry(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .ok_or_else(|| "AI_RUNTIME_MISSING".to_string())
 }
 
-fn spawn_runtime(app: &tauri::AppHandle) -> Result<RuntimeProcess, String> {
-    let entry = runtime_entry(app)?;
-    let node = resolve_node();
-    let working_dir = std::env::temp_dir().join("wealth-ai-runtime");
-    let _ = std::fs::create_dir_all(&working_dir);
+fn sanitize_runtime_stderr(line: &str) -> String {
+    let lower = line.to_ascii_lowercase();
+    if lower.contains("sk-") || lower.contains("bearer") || lower.contains("api_key") {
+        "[redacted line containing credential-like text]".to_string()
+    } else {
+        line.chars().take(500).collect::<String>()
+    }
+}
 
-    let mut command = Command::new(&node);
+fn dispatch_runtime_response(line: &str, pending: &Arc<Mutex<HashMap<String, Sender<Value>>>>) {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
+    let Some(id) = value
+        .get("requestId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return;
+    };
+    if let Some(sender) = pending.lock().unwrap().remove(&id) {
+        let _ = sender.send(value);
+    }
+}
+
+fn finish_runtime_reader(
+    pending: &Arc<Mutex<HashMap<String, Sender<Value>>>>,
+    dead: &Arc<AtomicBool>,
+) {
+    dead.store(true, Ordering::SeqCst);
+    for (_, sender) in pending.lock().unwrap().drain() {
+        let _ = sender.send(error_result("RUNTIME_EXITED"));
+    }
+}
+
+/// Tauri resource lookup returns Windows verbatim paths (`\\?\D:\...`). Node's
+/// launcher can parse-check those paths but may exit before evaluating them when
+/// launched from a GUI process. Convert only the representation; the target stays
+/// the same file and is still validated above.
+fn node_compatible_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{unc}"));
+        }
+        if let Some(local) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(local);
+        }
+    }
+    path
+}
+
+fn spawn_runtime(app: Option<&tauri::AppHandle>) -> Result<RuntimeProcess, String> {
+    let entry = node_compatible_path(runtime_entry(app)?);
+    let node = resolve_node();
+    let working_dir = node_compatible_path(std::env::temp_dir().join("wealth-ai-runtime"));
+    let _ = std::fs::create_dir_all(&working_dir);
+    append_runtime_log(&format!(
+        "runtime launch preparing: node={node} entry={} cwd={}",
+        entry.to_string_lossy(),
+        working_dir.to_string_lossy()
+    ));
+
+    // On Windows the GUI process's direct std::process pipes can be closed before
+    // node evaluates main.mjs. Tauri's official shell transport uses explicit
+    // os_pipe handles and SharedChild, avoiding that GUI-only startup race.
+    #[cfg(windows)]
+    if let Some(app) = app {
+        return spawn_plugin_runtime(app, &node, &entry, working_dir);
+    }
+
+    spawn_standard_runtime(&node, &entry, working_dir)
+}
+
+fn spawn_plugin_runtime(
+    app: &tauri::AppHandle,
+    node: &str,
+    entry: &std::path::Path,
+    working_dir: PathBuf,
+) -> Result<RuntimeProcess, String> {
+    let mut command = app
+        .shell()
+        .command(node)
+        .arg(entry)
+        .arg("--stdio")
+        .arg("--enable-ai-runtime")
+        .current_dir(&working_dir)
+        .env_clear()
+        .env("PATH", node_path_hint(node))
+        .env("WGT_AI_DIAGNOSTICS", "1");
+    #[cfg(windows)]
+    {
+        if let Ok(system_root) = std::env::var("SystemRoot") {
+            command = command.env("SystemRoot", system_root);
+        }
+        if let Ok(temp) = std::env::var("TEMP") {
+            command = command.env("TEMP", temp);
+        }
+    }
+    let (mut events, child) = command.spawn().map_err(|error| {
+        append_runtime_log(&format!("plugin runtime spawn failed: {error}"));
+        "AI_RUNTIME_MISSING".to_string()
+    })?;
+    append_runtime_log(&format!("plugin runtime spawned (pid {})", child.pid()));
+    let pending: Arc<Mutex<HashMap<String, Sender<Value>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let dead = Arc::new(AtomicBool::new(false));
+    let reader_pending = Arc::clone(&pending);
+    let reader_dead = Arc::clone(&dead);
+    std::thread::spawn(move || {
+        while let Some(event) = tauri::async_runtime::block_on(events.recv()) {
+            match event {
+                CommandEvent::Stdout(bytes) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    dispatch_runtime_response(line.trim_end_matches(['\r', '\n']), &reader_pending);
+                }
+                CommandEvent::Stderr(bytes) => {
+                    let line = String::from_utf8_lossy(&bytes);
+                    append_runtime_log(&sanitize_runtime_stderr(line.trim_end()));
+                }
+                CommandEvent::Error(error) => {
+                    append_runtime_log(&format!("plugin runtime event error: {error}"));
+                    break;
+                }
+                CommandEvent::Terminated(payload) => {
+                    append_runtime_log(&format!(
+                        "plugin runtime terminated: code={:?} signal={:?}",
+                        payload.code, payload.signal
+                    ));
+                    break;
+                }
+                _ => {}
+            }
+        }
+        finish_runtime_reader(&reader_pending, &reader_dead);
+    });
+    Ok(RuntimeProcess {
+        transport: RuntimeTransport::Sidecar { child },
+        pending,
+        dead,
+    })
+}
+
+fn spawn_standard_runtime(
+    node: &str,
+    entry: &std::path::Path,
+    working_dir: PathBuf,
+) -> Result<RuntimeProcess, String> {
+    let mut command = Command::new(node);
     command
-        .arg(&entry)
+        .arg(entry)
         .arg("--stdio")
         .arg("--enable-ai-runtime")
         .current_dir(&working_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    // Minimal environment only: no HOME/USERPROFILE, so provider CLIs and ambient
-    // credential files are not discoverable from the runtime process.
+        .stderr(Stdio::piped());
     command.env_clear();
     #[cfg(windows)]
     {
@@ -355,11 +785,22 @@ fn spawn_runtime(app: &tauri::AppHandle) -> Result<RuntimeProcess, String> {
             command.env("TMPDIR", temp);
         }
     }
-    command.env("PATH", node_path_hint(&node));
+    command.env("PATH", node_path_hint(node));
+    command.env("WGT_AI_DIAGNOSTICS", "1");
 
-    let mut child = command
-        .spawn()
-        .map_err(|_| "AI_RUNTIME_MISSING".to_string())?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    }
+
+    let mut child = command.spawn().map_err(|error| {
+        append_runtime_log(&format!("runtime spawn failed: {error}"));
+        "AI_RUNTIME_MISSING".to_string()
+    })?;
+    append_runtime_log(&format!("runtime spawned (pid {})", child.id()));
     let stdin = child
         .stdin
         .take()
@@ -368,36 +809,25 @@ fn spawn_runtime(app: &tauri::AppHandle) -> Result<RuntimeProcess, String> {
         .stdout
         .take()
         .ok_or_else(|| "AI_RUNTIME_MISSING".to_string())?;
+    if let Some(stderr) = child.stderr.take() {
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                append_runtime_log(&sanitize_runtime_stderr(&line));
+            }
+        });
+    }
     let pending: Arc<Mutex<HashMap<String, Sender<Value>>>> = Arc::new(Mutex::new(HashMap::new()));
     let dead = Arc::new(AtomicBool::new(false));
     let reader_pending = Arc::clone(&pending);
     let reader_dead = Arc::clone(&dead);
     std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            let Ok(line) = line else { break };
-            let Ok(value) = serde_json::from_str::<Value>(&line) else {
-                continue;
-            };
-            let Some(id) = value
-                .get("requestId")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-            else {
-                continue;
-            };
-            if let Some(sender) = reader_pending.lock().unwrap().remove(&id) {
-                let _ = sender.send(value);
-            }
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            dispatch_runtime_response(&line, &reader_pending);
         }
-        reader_dead.store(true, Ordering::SeqCst);
-        for (_, sender) in reader_pending.lock().unwrap().drain() {
-            let _ = sender.send(error_result("RUNTIME_EXITED"));
-        }
+        finish_runtime_reader(&reader_pending, &reader_dead);
     });
     Ok(RuntimeProcess {
-        child,
-        stdin,
+        transport: RuntimeTransport::Standard { child, stdin },
         pending,
         dead,
     })
@@ -439,7 +869,7 @@ impl InnerState {
     /// that `ai_cancel` can run while an inference is still pending.
     fn request(
         &self,
-        app: &tauri::AppHandle,
+        app: Option<&tauri::AppHandle>,
         frame: Value,
         timeout: Duration,
     ) -> Result<Value, String> {
@@ -463,11 +893,12 @@ impl InnerState {
             let process = runtime.as_mut().expect("runtime just initialized");
             process.pending.lock().unwrap().insert(id.clone(), sender);
             let line = format!("{frame}\n");
-            let written = process
-                .stdin
-                .write_all(line.as_bytes())
-                .and_then(|_| process.stdin.flush());
+            let written = process.transport.write(line.as_bytes());
             if written.is_err() {
+                let status = process.transport.status();
+                append_runtime_log(&format!(
+                    "stdin write failed; runtime status={status}; dropping runtime (request will fail RUNTIME_EXITED)"
+                ));
                 process.pending.lock().unwrap().remove(&id);
                 *runtime = None;
                 return Ok(error_result("RUNTIME_EXITED"));
@@ -481,13 +912,48 @@ impl InnerState {
                 }
                 Ok(error_result("TIMEOUT"))
             }
-            Err(RecvTimeoutError::Disconnected) => Ok(error_result("RUNTIME_EXITED")),
+            Err(RecvTimeoutError::Disconnected) => {
+                // 读线程结束说明子进程的 stdout 已关闭：把退出码一起记下来。
+                let status = self
+                    .runtime
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .map(|process| process.transport.status())
+                    .unwrap_or_else(|| "still-running-or-unknown".to_string());
+                append_runtime_log(&format!(
+                    "request {id} got RUNTIME_EXITED; child status={status}"
+                ));
+                Ok(error_result("RUNTIME_EXITED"))
+            }
         }
+    }
+
+    fn configure_frame(&self, profile: &ConnectionProfile, credential: Option<&str>) -> Value {
+        json!({
+            "protocolVersion": 1,
+            "requestId": self.next_request_id(),
+            "operation": "configure",
+            "profile": profile_frame(profile, credential),
+        })
+    }
+
+    /// Drop a runtime whose stdout closed before the first response. `Child` does not
+    /// terminate the process on drop, so explicitly clean up an orphan before retrying.
+    fn discard_runtime(&self, reason: &str) {
+        let Some(process) = self.runtime.lock().unwrap().take() else {
+            return;
+        };
+        let pid = process.transport.pid();
+        let status = process.transport.terminate();
+        append_runtime_log(&format!(
+            "discarded runtime ({reason}); pid={pid} status={status}"
+        ));
     }
 
     fn configure(
         &self,
-        app: &tauri::AppHandle,
+        app: Option<&tauri::AppHandle>,
         profile: ConnectionProfile,
         credential: Option<String>,
         persist: bool,
@@ -527,16 +993,70 @@ impl InnerState {
             },
         );
         self.configured.lock().unwrap().remove(&profile.profile_id);
-        let frame = json!({
-            "protocolVersion": 1,
-            "requestId": self.next_request_id(),
-            "operation": "configure",
-            "profile": profile_frame(&profile, effective.as_deref()),
-        });
-        match self
+        append_runtime_log(&format!(
+            "configure start: provider={} auth={} model={} persist={} endpoint={} credentialLen={} credentialClasses={}",
+            profile.provider_id,
+            profile.auth_kind,
+            profile.model_id.chars().take(64).collect::<String>(),
+            persist,
+            profile.endpoint.is_some(),
+            effective.as_deref().map(str::len).unwrap_or(0),
+            effective
+                .as_deref()
+                .map(|value| {
+                    let mut classes = Vec::new();
+                    if value.chars().all(|c| c.is_ascii_alphanumeric()) { classes.push("alnum"); }
+                    if value.chars().all(|c| c.is_ascii_graphic()) { classes.push("ascii-graphic"); }
+                    if value.chars().any(|c| c == '+') { classes.push("plus"); }
+                    if value.chars().any(|c| c == '/') { classes.push("slash"); }
+                    if value.chars().any(|c| c == '=') { classes.push("equals"); }
+                    if value.chars().any(|c| c.is_whitespace()) { classes.push("whitespace"); }
+                    if !value.is_ascii() {
+                        classes.push("non-ascii");
+                    }
+                    classes.join(",")
+                })
+                .unwrap_or_default()
+        ));
+        let frame = self.configure_frame(&profile, effective.as_deref());
+        let mut outcome = self
             .request(app, frame, CONFIGURE_TIMEOUT)
-            .and_then(interpret)
-        {
+            .and_then(interpret);
+        if matches!(&outcome, Err(code) if code == "RUNTIME_EXITED") {
+            // Node can occasionally lose its inherited stdio handles on the first
+            // launch in a Windows GUI session. The process itself is still healthy;
+            // rebuilding once avoids surfacing a transient startup race.
+            self.discard_runtime("configure received RUNTIME_EXITED");
+            let retry_frame = self.configure_frame(&profile, effective.as_deref());
+            outcome = self
+                .request(app, retry_frame, CONFIGURE_TIMEOUT)
+                .and_then(interpret);
+            append_runtime_log(&format!(
+                "configure retry after runtime rebuild: {}",
+                match &outcome {
+                    Ok(_) => "ok".to_string(),
+                    Err(code) => code.clone(),
+                }
+            ));
+        }
+        append_runtime_log(&format!(
+            "configure result: {}",
+            match &outcome {
+                Ok(_) => "ok".to_string(),
+                Err(code) => code.clone(),
+            }
+        ));
+        if matches!(&outcome, Err(code) if code == "RUNTIME_EXITED") {
+            let status = self
+                .runtime
+                .lock()
+                .unwrap()
+                .as_mut()
+                .map(|process| process.transport.status())
+                .unwrap_or_else(|| "still-running-or-unknown".to_string());
+            append_runtime_log(&format!("configure RUNTIME_EXITED child status={status}"));
+        }
+        match outcome {
             Ok(result) => {
                 self.configured
                     .lock()
@@ -553,7 +1073,11 @@ impl InnerState {
     }
 
     /// Re-configure the runtime after a restart without touching the keyring.
-    fn ensure_configured(&self, app: &tauri::AppHandle, profile_id: &str) -> Result<(), String> {
+    fn ensure_configured(
+        &self,
+        app: Option<&tauri::AppHandle>,
+        profile_id: &str,
+    ) -> Result<(), String> {
         if self.configured.lock().unwrap().contains(profile_id) {
             let alive = self
                 .runtime
@@ -599,7 +1123,7 @@ impl InnerState {
 
     fn models(
         &self,
-        app: &tauri::AppHandle,
+        app: Option<&tauri::AppHandle>,
         profile_id: &str,
         provider_id: &str,
     ) -> Result<Value, String> {
@@ -628,10 +1152,17 @@ impl InnerState {
             "profileId": profile_id,
             "providerId": provider_id,
         });
-        match self
-            .request(app, frame, CONFIGURE_TIMEOUT)
-            .and_then(interpret)
-        {
+        let mut response = self.request(app, frame.clone(), CONFIGURE_TIMEOUT)?;
+        if is_runtime_exited(&response) {
+            append_runtime_log(
+                "models hit RUNTIME_EXITED; rebuilding the runtime and retrying once",
+            );
+            self.configured.lock().unwrap().remove(profile_id);
+            if self.ensure_configured(app, profile_id).is_ok() {
+                response = self.request(app, frame, CONFIGURE_TIMEOUT)?;
+            }
+        }
+        match interpret(response) {
             Ok(result) => Ok(ok_result(
                 json!({ "models": result.get("models").cloned().unwrap_or(json!([])) }),
             )),
@@ -639,7 +1170,11 @@ impl InnerState {
         }
     }
 
-    fn infer(&self, app: &tauri::AppHandle, request: InferenceRequest) -> Result<Value, String> {
+    fn infer(
+        &self,
+        app: Option<&tauri::AppHandle>,
+        request: InferenceRequest,
+    ) -> Result<Value, String> {
         if !self.enabled.load(Ordering::SeqCst) {
             return Ok(error_result("AI_DISABLED"));
         }
@@ -670,7 +1205,17 @@ impl InnerState {
             "task": request.task,
             "input": request.input,
         });
-        match self.request(app, frame, INFER_TIMEOUT).and_then(interpret) {
+        let mut response = self.request(app, frame.clone(), INFER_TIMEOUT)?;
+        if is_runtime_exited(&response) {
+            append_runtime_log(
+                "infer hit RUNTIME_EXITED; rebuilding the runtime and retrying once",
+            );
+            self.configured.lock().unwrap().remove(&request.profile_id);
+            if self.ensure_configured(app, &request.profile_id).is_ok() {
+                response = self.request(app, frame, INFER_TIMEOUT)?;
+            }
+        }
+        match interpret(response) {
             Ok(result) => Ok(ok_result(result)),
             Err(code) => Ok(error_result(&code)),
         }
@@ -679,7 +1224,7 @@ impl InnerState {
     /// 图片视觉提取：只有被声明为可读图的连接才会收到图片，其余一律失败关闭。
     fn vision_extract(
         &self,
-        app: &tauri::AppHandle,
+        app: Option<&tauri::AppHandle>,
         request: InferenceRequest,
     ) -> Result<Value, String> {
         if !self.enabled.load(Ordering::SeqCst) {
@@ -735,15 +1280,19 @@ impl InnerState {
     /// 研究检索：由 Node 运行时按白名单抓取用户给出的公网 HTTPS 链接。
     fn research_lookup(
         &self,
-        app: &tauri::AppHandle,
+        app: Option<&tauri::AppHandle>,
         profile_id: &str,
         provider_id: &str,
+        request_id: &str,
         urls: Vec<String>,
     ) -> Result<Value, String> {
         if !self.enabled.load(Ordering::SeqCst) {
             return Ok(error_result("AI_DISABLED"));
         }
-        if !is_identifier(profile_id) || !PROVIDERS.contains(&provider_id) {
+        if !is_identifier(profile_id)
+            || !is_identifier(request_id)
+            || !PROVIDERS.contains(&provider_id)
+        {
             return Ok(error_result("INVALID_REQUEST"));
         }
         if let Err(code) = validate_research_urls(&urls) {
@@ -763,7 +1312,7 @@ impl InnerState {
         }
         let frame = json!({
             "protocolVersion": 1,
-            "requestId": self.next_request_id(),
+            "requestId": request_id,
             "operation": "research-lookup",
             "profileId": profile_id,
             "providerId": provider_id,
@@ -778,7 +1327,11 @@ impl InnerState {
         }
     }
 
-    fn cancel(&self, app: &tauri::AppHandle, target_request_id: &str) -> Result<Value, String> {
+    fn cancel(
+        &self,
+        app: Option<&tauri::AppHandle>,
+        target_request_id: &str,
+    ) -> Result<Value, String> {
         if !is_identifier(target_request_id) {
             return Ok(error_result("INVALID_REQUEST"));
         }
@@ -797,13 +1350,33 @@ impl InnerState {
         }
     }
 
-    fn remove_profile(&self, app: &tauri::AppHandle, profile_id: &str) -> Result<Value, String> {
+    fn remove_profile(
+        &self,
+        app: Option<&tauri::AppHandle>,
+        profile_id: &str,
+        preserve_credential: bool,
+    ) -> Result<Value, String> {
+        if !is_identifier(profile_id) {
+            return Ok(error_result("INVALID_REQUEST"));
+        }
+        let removed = self.profiles.lock().unwrap().contains_key(profile_id);
+        self.disable_profile(app, profile_id)?;
+        if !preserve_credential {
+            delete_credential(profile_id);
+        }
+        Ok(ok_result(json!({ "removed": removed })))
+    }
+
+    fn disable_profile(
+        &self,
+        app: Option<&tauri::AppHandle>,
+        profile_id: &str,
+    ) -> Result<Value, String> {
         if !is_identifier(profile_id) {
             return Ok(error_result("INVALID_REQUEST"));
         }
         let removed = self.profiles.lock().unwrap().remove(profile_id).is_some();
         self.configured.lock().unwrap().remove(profile_id);
-        delete_credential(profile_id);
         if self.enabled.load(Ordering::SeqCst)
             && self
                 .runtime
@@ -820,16 +1393,18 @@ impl InnerState {
             });
             let _ = self.request(app, frame, CANCEL_TIMEOUT);
         }
-        Ok(ok_result(json!({ "removed": removed })))
+        Ok(ok_result(json!({ "disabled": removed })))
     }
 
     fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::SeqCst);
         if !enabled {
-            if let Some(mut process) = self.runtime.lock().unwrap().take() {
-                drop(process.stdin);
-                let _ = process.child.kill();
-                let _ = process.child.wait();
+            append_runtime_log("AI disabled by user: killing runtime on purpose");
+            if let Some(process) = self.runtime.lock().unwrap().take() {
+                let status = process.transport.terminate();
+                append_runtime_log(&format!(
+                    "runtime killed after user disabled AI; status={status}"
+                ));
             }
             self.configured.lock().unwrap().clear();
             for entry in self.profiles.lock().unwrap().values_mut() {
@@ -859,7 +1434,7 @@ pub async fn ai_configure_profile(
     let inner = Arc::clone(&broker.inner);
     tauri::async_runtime::spawn_blocking(move || {
         inner.configure(
-            &app,
+            Some(&app),
             profile,
             credential,
             persist_credential.unwrap_or(false),
@@ -877,9 +1452,11 @@ pub async fn ai_models(
     provider_id: String,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
-    tauri::async_runtime::spawn_blocking(move || inner.models(&app, &profile_id, &provider_id))
-        .await
-        .map_err(|_| "BROKER_TASK_FAILED".to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        inner.models(Some(&app), &profile_id, &provider_id)
+    })
+    .await
+    .map_err(|_| "BROKER_TASK_FAILED".to_string())?
 }
 
 #[tauri::command]
@@ -889,7 +1466,7 @@ pub async fn ai_infer(
     request: InferenceRequest,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
-    tauri::async_runtime::spawn_blocking(move || inner.infer(&app, request))
+    tauri::async_runtime::spawn_blocking(move || inner.infer(Some(&app), request))
         .await
         .map_err(|_| "BROKER_TASK_FAILED".to_string())?
 }
@@ -901,7 +1478,7 @@ pub async fn ai_vision_extract(
     request: InferenceRequest,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
-    tauri::async_runtime::spawn_blocking(move || inner.vision_extract(&app, request))
+    tauri::async_runtime::spawn_blocking(move || inner.vision_extract(Some(&app), request))
         .await
         .map_err(|_| "BROKER_TASK_FAILED".to_string())?
 }
@@ -912,11 +1489,18 @@ pub async fn ai_research_lookup(
     broker: tauri::State<'_, AiBroker>,
     profile_id: String,
     provider_id: String,
+    target_request_id: String,
     urls: Vec<String>,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
     tauri::async_runtime::spawn_blocking(move || {
-        inner.research_lookup(&app, &profile_id, &provider_id, urls)
+        inner.research_lookup(
+            Some(&app),
+            &profile_id,
+            &provider_id,
+            &target_request_id,
+            urls,
+        )
     })
     .await
     .map_err(|_| "BROKER_TASK_FAILED".to_string())?
@@ -929,7 +1513,7 @@ pub async fn ai_cancel(
     target_request_id: String,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
-    tauri::async_runtime::spawn_blocking(move || inner.cancel(&app, &target_request_id))
+    tauri::async_runtime::spawn_blocking(move || inner.cancel(Some(&app), &target_request_id))
         .await
         .map_err(|_| "BROKER_TASK_FAILED".to_string())?
 }
@@ -939,11 +1523,30 @@ pub async fn ai_remove_profile(
     app: tauri::AppHandle,
     broker: tauri::State<'_, AiBroker>,
     profile_id: String,
+    preserve_credential: Option<bool>,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
-    tauri::async_runtime::spawn_blocking(move || inner.remove_profile(&app, &profile_id))
+    tauri::async_runtime::spawn_blocking(move || {
+        inner.remove_profile(
+            Some(&app),
+            &profile_id,
+            preserve_credential.unwrap_or(false),
+        )
+    })
+    .await
+    .map_err(|_| "BROKER_TASK_FAILED".to_string())?
+}
+
+#[tauri::command]
+pub async fn ai_disable_profile(
+    app: tauri::AppHandle,
+    broker: tauri::State<'_, AiBroker>,
+    profile_id: String,
+) -> Result<Value, String> {
+    let inner = Arc::clone(&broker.inner);
+    tauri::async_runtime::spawn_blocking(move || inner.disable_profile(Some(&app), &profile_id))
         .await
-        .map_err(|_| "BROKER_TASK_FAILED".to_string())?
+        .map_err(|error| error.to_string())?
 }
 
 #[cfg(test)]
@@ -1037,6 +1640,30 @@ mod tests {
         assert!(broker.inner.runtime.lock().unwrap().is_none());
         broker.inner.set_enabled(false);
         assert!(!broker.inner.enabled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn runtime_exit_detection_only_matches_that_code() {
+        assert!(is_runtime_exited(
+            &json!({ "ok": false, "error": { "code": "RUNTIME_EXITED" } })
+        ));
+        assert!(!is_runtime_exited(
+            &json!({ "ok": false, "error": { "code": "TIMEOUT" } })
+        ));
+        assert!(!is_runtime_exited(&json!({ "ok": true, "result": {} })));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn node_paths_do_not_use_windows_verbatim_prefix() {
+        assert_eq!(
+            node_compatible_path(PathBuf::from(r"\\?\D:\runtime\main.mjs")),
+            PathBuf::from(r"D:\runtime\main.mjs")
+        );
+        assert_eq!(
+            node_compatible_path(PathBuf::from(r"\\?\UNC\server\share\main.mjs")),
+            PathBuf::from(r"\\server\share\main.mjs")
+        );
     }
 
     fn vision_input() -> Value {

@@ -692,7 +692,7 @@ export interface ActivityLogEntry {
 
 /** 完整导出/导入用的备份结构（version 1.0.0，与旧版兼容）。 */
 export interface BackupData {
-  backupSchemaVersion?: 0 | 1;
+  backupSchemaVersion?: 0 | 1 | 2;
   version: string;
   exportDate: string;
   appInfo: { name: string; version: string };

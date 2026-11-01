@@ -38,7 +38,7 @@ describe('SettingsPage', () => {
   it('opens a linked category and applies the real appearance setting', () => {
     useNavigationStore.getState().navigate({ tab: 'settings', settingsSection: 'appearance' });
     render(<SettingsPage />);
-    expect(screen.getByRole('button', { name: '显示与无障碍' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: '外观偏好' })).toHaveAttribute('aria-current', 'page');
     fireEvent.change(screen.getByLabelText('主题模式'), { target: { value: 'dark' } });
     expect(useAppStore.getState().appearance.themeMode).toBe('dark');
     expect(screen.getByLabelText('减少动画')).toBeInTheDocument();
@@ -46,9 +46,9 @@ describe('SettingsPage', () => {
 
   it('keeps category selection in the deep link', () => {
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole('button', { name: '记录与报告' }));
+    fireEvent.click(screen.getByRole('button', { name: '记录规则' }));
     expect(window.location.hash).toBe('#/settings?section=records');
-    expect(screen.getByRole('heading', { name: '记录与报告' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '记录规则' })).toBeInTheDocument();
     expect(screen.getByText('尚未实现')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '管理历史快照' }));
     expect(useNavigationStore.getState().tab).toBe('history');
@@ -61,7 +61,7 @@ describe('SettingsPage', () => {
     expect(screen.getByText(/逐次授权数据范围/)).toBeInTheDocument();
     expect(screen.getByText(/API Key、本地模型和 mock 都不计入该发布门/)).toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '打开 AI 连接中心' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开模型连接' }));
     expect(useNavigationStore.getState().tab).toBe('ai');
   });
 

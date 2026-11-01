@@ -26,15 +26,21 @@ export async function putAttachment(input: { name: string; mime: string; bytes: 
   if (await backend.exists(key)) {
     return { key, sha256: hash, bytes: input.bytes.length, mime: input.mime, name: input.name };
   }
-  await backend.write(key, bytesToBase64(input.bytes));
+  if (backend.writeBytes) await backend.writeBytes(key, input.bytes);
+  else await backend.write(key, bytesToBase64(input.bytes));
   return { key, sha256: hash, bytes: input.bytes.length, mime: input.mime, name: input.name };
 }
 
 export async function getAttachment(ref: Pick<AttachmentRef, 'key' | 'sha256'>): Promise<Uint8Array> {
   if (!isAttachmentKey(ref.key)) throw new AttachmentError('附件引用无效');
-  const raw = await attachmentBackend().read(ref.key);
-  if (raw === null) throw new AttachmentError('附件不存在（可能已被清理）');
-  const bytes = base64ToBytes(raw);
+  const backend = attachmentBackend();
+  const bytes = backend.readBytes
+    ? await backend.readBytes(ref.key)
+    : await (async () => {
+        const raw = await backend.read(ref.key);
+        return raw === null ? null : base64ToBytes(raw);
+      })();
+  if (bytes === null) throw new AttachmentError('附件不存在（可能已被清理）');
   const hash = await sha256Hex(bytes);
   if (hash !== ref.sha256) throw new AttachmentError('附件哈希不符，已阻止使用');
   return bytes;

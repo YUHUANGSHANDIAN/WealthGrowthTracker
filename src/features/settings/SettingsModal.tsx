@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { APP_VERSION } from '../../constants/version';
+import { BUILD_COMMIT, BUILD_ID, BUILD_TIME } from '../../constants/buildInfo';
 import { getDefaultTimezone, TIMEZONE_OPTIONS } from '../../utils/countdown';
 import { checkForUpdate, recommendAsset, type ReleaseAsset } from '../../utils/updateCheck';
 import { platformCapabilities } from '../../utils/platform';
@@ -86,7 +87,7 @@ function AISection() {
         <div className="flex flex-wrap items-center gap-2"><h3>AI 接入状态</h3>{enabled ? <Badge tone="emerald">已启用</Badge> : <Badge tone="slate">未启用</Badge>}<Badge tone="slate">连接 {profiles.length}</Badge><Badge tone="slate">合成测试通过 {tested}</Badge></div>
         <p>AI 默认关闭，每次启动需重新启用；核心功能完全离线可用。业务请求必须在 AI 工作区逐次授权数据范围，凭据只交给系统安全存储或临时会话。</p>
       </div>
-      <Button variant="outline" onClick={() => navigate({ tab: 'ai' })}>打开 AI 连接中心</Button>
+      <Button variant="outline" onClick={() => navigate({ tab: 'ai', settingsSection: 'ai' })}>打开模型连接</Button>
       <div className="settings-note">
         <h3>订阅与发布边界</h3>
         <p>合成测试通过只证明端点与凭据当前可用。正式发布要求至少两类厂商许可的订阅路径完成真实认证、推理与撤销验收；API Key、本地模型和 mock 都不计入该发布门。</p>
@@ -288,7 +289,7 @@ function PrivacySection() {
   return (
     <div className="space-y-4 text-sm text-slate-600">
       <div className="settings-note"><h3>本地核心数据</h3><p>资产、历史和报告保存在当前设备使用的本地存储中。当前应用未集成广告或遥测 SDK；核心财富功能可离线使用。</p></div>
-      <div className="settings-note"><h3>AI 与联网边界</h3><p>AI 默认关闭。Web/PWA 只会连接你自己配置的 HTTPS 网关或本机端点，并且必须逐次授权数据范围后才会发送所选事实；凭据只保留在当前会话。桌面端运行时尚未接入，会明确提示不可用，也不会保存任何凭据。普通备份不含 AI 附注。主动检查更新会访问 GitHub API，下载与查看 Release 会打开外部页面。</p></div>
+      <div className="settings-note"><h3>AI 与联网边界</h3><p>AI 每次启动默认关闭。每条连接可以单独启用或停用，当前连接在重启后保留，但只有你再次开启 AI 后才会加载运行时。桌面凭据只进入系统安全存储；Web/PWA 仅保留当前会话凭据。业务请求仍会逐次展示最小授权范围，切换供应商不会自动外发历史数据。普通结构备份不含 AI 附注或密钥。</p></div>
       <div className="settings-note"><h3>界面隐藏与分享</h3><p>顶部金额隐藏用于遮挡界面，不代表数据加密。导出、分享和备份需单独检查内容并选择适用的脱敏选项；备份文件可能包含完整数据。</p></div>
       <div className="settings-note"><h3>本地活动日志</h3><p>活动日志记录操作时间、实体与描述；部分渠道结构操作的描述可能包含渠道名称和金额。分享备份或诊断内容前请检查，不应视为完全匿名。</p></div>
     </div>
@@ -310,6 +311,9 @@ function AboutSection() {
         <div>架构：<span className="font-medium">{caps.arch}</span></div>
         <div>存储后端：<span className="font-medium">{storageService.getAdapterName()}</span></div>
         <div>报告 Schema 版本：<span className="font-medium">{REPORT_SCHEMA_VERSION}</span></div>
+        <div>构建身份：<span className="font-medium break-all">{BUILD_ID}</span></div>
+        <div>提交：<span className="font-medium">{BUILD_COMMIT}</span></div>
+        {BUILD_TIME && <div>构建时间：<span className="font-medium">{BUILD_TIME}</span></div>}
       </div>
       <p>本应用的财富等级是游戏化成长体系，不代表投资能力评级或真实社会财富地位。</p>
     </div>

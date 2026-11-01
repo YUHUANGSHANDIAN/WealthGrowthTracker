@@ -30,7 +30,12 @@ beforeEach(async () => {
   await setAIEnabled(true);
   useAIConnectionStore.setState({
     enabled: true, busy: false, connectionRevision: 9, activeProfileId: 'p1',
-    profiles: [{ profileId: 'p1', providerId: 'gateway', authKind: 'api-key', label: '测试网关', modelId: 'm1', state: 'configured', endpoint: 'https://gateway.example.com/v1' }],
+    profiles: [{
+      profileId: 'p1', providerId: 'gateway', authKind: 'api-key', label: '测试网关', modelId: 'm1',
+      state: 'configured', endpoint: 'https://gateway.example.com/v1', enabled: true,
+      credentialRef: 'profile:p1', credentialPersisted: false, configRevision: 1,
+      capabilities: { text: true, vision: false, research: true }, health: 'healthy',
+    }],
   });
 });
 afterEach(async () => {

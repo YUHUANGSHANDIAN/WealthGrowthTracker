@@ -87,7 +87,14 @@ export function checkMonthlyHealth(
 ): DataIssue[] {
   const issues: DataIssue[] = [];
   const policyKeys = new Set(state.policies.map((policy) => `${policy.id}@${policy.version}`));
+  const taskKeys = new Set(state.sessions.map((session) => session.key));
   for (const session of state.sessions) {
+    if (session.linkedMonthlyTaskId && !taskKeys.has(session.linkedMonthlyTaskId)) {
+      issues.push(makeIssue('monthly', 'error', '临时任务关联失效', `任务 ${session.key} 关联的正式月记录不存在`, null, { entityId: session.key }));
+    }
+    if ((session.state === 'reviewed' || session.state === 'archived') && !session.result) {
+      issues.push(makeIssue('monthly', 'error', '已复核任务缺少结果', `任务 ${session.key} 没有结构化复核结果`, null, { entityId: session.key }));
+    }
     if (session.policyId && session.policyVersion !== null && !policyKeys.has(`${session.policyId}@${session.policyVersion}`)) {
       issues.push(makeIssue('monthly', 'error', '会话缺少可复现的策略版本', `会话 ${session.key} 指向的策略版本已不存在`, null, { entityId: session.key }));
     }

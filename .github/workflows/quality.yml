@@ -50,3 +50,6 @@ jobs:
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --all-features -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Verify local cache path guards
+        shell: pwsh
+        run: ./scripts/test-local-cache.ps1

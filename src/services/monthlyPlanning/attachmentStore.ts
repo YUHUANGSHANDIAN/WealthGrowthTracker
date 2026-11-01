@@ -1,6 +1,14 @@
 import { isTauri, createTauriFileSystem, type FileSystem } from '../storage/fs';
 import { storageService } from '../storage';
-import { ATTACHMENT_PREFIX, AttachmentError, attachmentFileName, isAttachmentKey } from './attachmentCodec';
+import {
+  ATTACHMENT_PREFIX,
+  AttachmentError,
+  attachmentFileName,
+  base64ToBytes,
+  bytesToBase64,
+  isAttachmentKey,
+  sha256Hex,
+} from './attachmentCodec';
 
 /**
  * 附件存储后端。
@@ -17,7 +25,9 @@ export const ATTACHMENT_DIR = 'monthly-planning/attachments';
 
 export interface AttachmentBackend {
   read(key: string): Promise<string | null>;
+  readBytes?(key: string): Promise<Uint8Array | null>;
   write(key: string, base64: string): Promise<void>;
+  writeBytes?(key: string, bytes: Uint8Array): Promise<void>;
   remove(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
 }
@@ -29,26 +39,38 @@ function tauriFs(): Promise<FileSystem> {
 }
 
 export function createFileAttachmentBackend(fs: FileSystem): AttachmentBackend {
+  async function readBytes(key: string): Promise<Uint8Array | null> {
+    const path = `${ATTACHMENT_DIR}/${attachmentFileName(key)}`;
+    try {
+      if (fs.readBinaryFile) return await fs.readBinaryFile(path);
+      return base64ToBytes(await fs.readTextFile(path));
+    } catch {
+      const inline = await storageService.getRaw(key);
+      return inline === null ? null : base64ToBytes(inline);
+    }
+  }
+
+  async function writeBytes(key: string, bytes: Uint8Array): Promise<void> {
+    try {
+      await fs.mkdir(ATTACHMENT_DIR);
+      if (fs.writeBinaryFile) await fs.writeBinaryFile(`${ATTACHMENT_DIR}/${attachmentFileName(key)}`, bytes);
+      else await fs.writeTextFile(`${ATTACHMENT_DIR}/${attachmentFileName(key)}`, bytesToBase64(bytes));
+    } catch (cause) {
+      throw new AttachmentError(`附件写入失败：${cause instanceof Error ? cause.message : '存储不可用'}`);
+    }
+    try { await storageService.remove(key); } catch { /* 保持内联副本 */ }
+  }
+
   return {
     async read(key) {
-      const path = `${ATTACHMENT_DIR}/${attachmentFileName(key)}`;
-      try {
-        return await fs.readTextFile(path);
-      } catch {
-        // 迁移未跑完或历史数据仍内联：回退到状态里的旧值，绝不因为换布局而读不到。
-        return storageService.getRaw(key);
-      }
+      const bytes = await readBytes(key);
+      return bytes === null ? null : bytesToBase64(bytes);
     },
+    readBytes,
     async write(key, base64) {
-      try {
-        await fs.mkdir(ATTACHMENT_DIR);
-        await fs.writeTextFile(`${ATTACHMENT_DIR}/${attachmentFileName(key)}`, base64);
-      } catch (cause) {
-        throw new AttachmentError(`附件写入失败：${cause instanceof Error ? cause.message : '存储不可用'}`);
-      }
-      // 文件写成功后再清掉可能存在的内联副本；失败只影响体积，不影响可读性。
-      try { await storageService.remove(key); } catch { /* 保持内联副本 */ }
+      return writeBytes(key, base64ToBytes(base64));
     },
+    writeBytes,
     async remove(key) {
       try { await fs.removeFile(`${ATTACHMENT_DIR}/${attachmentFileName(key)}`); } catch { /* 文件可能不在 */ }
       await storageService.remove(key);
@@ -63,7 +85,12 @@ export function createFileAttachmentBackend(fs: FileSystem): AttachmentBackend {
 export function createAdapterAttachmentBackend(adapter: typeof storageService): AttachmentBackend {
   return {
     read: (key) => adapter.getRaw(key),
+    async readBytes(key) {
+      const value = await adapter.getRaw(key);
+      return value === null ? null : base64ToBytes(value);
+    },
     async write(key, base64) { await adapter.setRaw(key, base64); },
+    async writeBytes(key, bytes) { await adapter.setRaw(key, bytesToBase64(bytes)); },
     remove: (key) => adapter.remove(key),
     async exists(key) { return (await adapter.getRaw(key)) !== null; },
   };
@@ -85,6 +112,14 @@ function createLazyFileSystem(): FileSystem {
   return {
     readTextFile: (p) => tauriFs().then((fs) => fs.readTextFile(p)),
     writeTextFile: (p, c) => tauriFs().then((fs) => fs.writeTextFile(p, c)),
+    readBinaryFile: (p) => tauriFs().then((fs) => {
+      if (!fs.readBinaryFile) throw new Error('当前文件系统不支持二进制读取');
+      return fs.readBinaryFile(p);
+    }),
+    writeBinaryFile: (p, c) => tauriFs().then((fs) => {
+      if (!fs.writeBinaryFile) throw new Error('当前文件系统不支持二进制写入');
+      return fs.writeBinaryFile(p, c);
+    }),
     exists: (p) => tauriFs().then((fs) => fs.exists(p)),
     mkdir: (p) => tauriFs().then((fs) => fs.mkdir(p)),
     readDir: (p) => tauriFs().then((fs) => fs.readDir(p)),
@@ -117,4 +152,36 @@ export async function migrateInlineAttachments(backendOverride?: AttachmentBacke
     moved += 1;
   }
   return moved;
+}
+
+/**
+ * 旧桌面版本把附件 Base64 文本写在内容寻址文件里。只有“解码后哈希等于键”时才转为
+ * 原始二进制；损坏或不匹配的文件原样保留，交给健康中心处理。
+ */
+export async function migrateLegacyBase64AttachmentFiles(
+  refs: ReadonlyArray<{ key: string; sha256: string }>,
+): Promise<number> {
+  if (!isTauri() || !refs.length) return 0;
+  const fs = await tauriFs();
+  if (!fs.readBinaryFile || !fs.writeBinaryFile) return 0;
+  let migrated = 0;
+  for (const ref of refs) {
+    if (!isAttachmentKey(ref.key)) continue;
+    const path = `${ATTACHMENT_DIR}/${attachmentFileName(ref.key)}`;
+    try {
+      const current = await fs.readBinaryFile(path);
+      if (await sha256Hex(current) === ref.sha256) continue;
+      const legacy = new TextDecoder('utf-8', { fatal: true }).decode(current).trim();
+      const decoded = base64ToBytes(legacy);
+      if (await sha256Hex(decoded) !== ref.sha256) continue;
+      await fs.writeBinaryFile(path, decoded);
+      if (await sha256Hex(await fs.readBinaryFile(path)) !== ref.sha256) {
+        throw new Error('二进制迁移读回校验失败');
+      }
+      migrated += 1;
+    } catch {
+      // 缺文件、损坏或调用方无权读取时只跳过；原始字节没有被改写。
+    }
+  }
+  return migrated;
 }

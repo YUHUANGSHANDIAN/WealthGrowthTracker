@@ -19,6 +19,7 @@
 
 <外部缓存根>\                 # 由 .wgt-local.json 指定（本机绝对路径，不写入仓库）
   cargo\                      # CARGO_TARGET_DIR：桌面构建的全部 target
+  frontend\                   # Vite 生产构建输出（不写回仓库 dist）
   temp\                       # 每次构建的会话 TEMP/TMP 目录
 
 <外部私人归档>\               # 存放源码快照、迁移清单与恢复材料（不进入仓库）
@@ -38,15 +39,17 @@
 # 只编译不打包，快速验证
 ./scripts/build-local.ps1 -NoBundle
 
-# 显式指定缓存根（覆盖 .wgt-local.json / 环境变量）
-./scripts/build-local.ps1 -CacheRoot D:\DevCache\wealth-growth-tracker
+# 显式指定外部缓存根（覆盖 .wgt-local.json / 环境变量）
+./scripts/build-local.ps1 -CacheRoot <外部缓存根>\wealth-growth-tracker
 ```
 
 包装脚本的行为约定：
 
-- 只修改**当前进程及子进程**的 `CARGO_TARGET_DIR` / `TEMP` / `TMP`，退出时恢复原值
+- 只修改**当前进程及子进程**的 `CARGO_TARGET_DIR` / `TEMP` / `TMP` /
+  `WGT_CACHE_ROOT` / `WGT_FRONTEND_DIST`，退出时恢复原值
   （包括"原本未设置"的状态），不使用 `setx`，不影响其它项目。
 - 拒绝把缓存根设为仓库根或仓库内部路径（那会造成反弹）。
+- 拒绝已退役的 `D:\Dev` 与 `D:\DevCache` 及其任何子路径，不会自动回退或创建旧根。
 - 直接运行 `npm run tauri:build` 仍会写回 `src-tauri/target`；发布的 CI 也保持默认输出，
   因此**本地请使用包装脚本**。
 
@@ -58,7 +61,8 @@
 - 可再生清单（删除后用脚本/命令重建，不需要备份）：
   `src-tauri/target`、`src-tauri/binaries`（`node scripts/fetch-node-sidecar.mjs`）、
   `.ai-runtime-build`（`node scripts/prepare-ai-runtime-resources.mjs`）、
-  `dist`（`npm run build`）、`.codex-visual`（视觉验证脚本重新生成）。
+  `dist`（未注入 `WGT_FRONTEND_DIST` 时的 Web/CI 构建输出）、
+  `.codex-visual`（视觉验证脚本重新生成）。
 - **不可再生清单（必须保护）**：`.git`、未提交源码、`WealthGrowthTracker\`（在用程序）、
   私人归档（旧程序副本、迁移脚本、历史报告/Excel/备份）、AI 凭据所在系统密钥库。
 

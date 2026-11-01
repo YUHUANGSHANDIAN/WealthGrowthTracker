@@ -29,7 +29,7 @@ function session(overrides: Partial<MonthlyReview> = {}): MonthlyReview {
 describe('月度理财持久化', () => {
   it('空值初始化，未来 schema 只读拒绝，重复会话键被拒绝', () => {
     expect(parseMonthlyPlanningState(null)).toEqual(emptyMonthlyPlanningState());
-    expect(() => parseMonthlyPlanningState({ schemaVersion: 2, sessions: [], policies: [], assignmentRules: [] })).toThrow('更新版本');
+    expect(() => parseMonthlyPlanningState({ schemaVersion: 3, sessions: [], policies: [], assignmentRules: [] })).toThrow('更新版本');
     expect(() => parseMonthlyPlanningState({ schemaVersion: 1, sessions: [{ key: 'monthly-planning:2026-07' }, { key: 'monthly-planning:2026-07' }], policies: [], assignmentRules: [] })).toThrow('重复');
     expect(() => parseMonthlyPlanningState({ schemaVersion: 1, sessions: [{ key: 'monthly-planning:2026-7' }], policies: [], assignmentRules: [] })).toThrow('键无效');
   });

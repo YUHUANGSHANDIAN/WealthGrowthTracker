@@ -31,6 +31,19 @@ describe('数据健康检查', () => {
     expect(fixed.history).toHaveLength(1);
     expect(fixed.history[0]!.totalAmount).toBe(20); // 保留最后一条
   });
+
+  it('单项修复不会顺带改写其他可修复问题', () => {
+    const channels: Channel[] = [{ id: 'a', name: 'A', emoji: '💰', amount: NaN, color: '#000', isParent: true, isExpanded: false, children: [] }];
+    const history: HistoryPoint[] = [
+      { date: '2026-01-01', totalAmount: 10 },
+      { date: '2026-01-01', totalAmount: 20 },
+    ];
+    const issues = checkDataHealth(channels, history).issues;
+    const duplicateOnly = issues.filter((issue) => issue.fix === 'dedupe-history');
+    const fixed = applyHealthFixes(channels, history, duplicateOnly);
+    expect(Number.isNaN(fixed.channels[0]!.amount)).toBe(true);
+    expect(fixed.history).toEqual([{ date: '2026-01-01', totalAmount: 20 }]);
+  });
 });
 
 describe('数据合并', () => {

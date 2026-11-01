@@ -14,7 +14,7 @@ export interface AuthorizedOperation {
   profileId: string;
   providerId: AIConnection['providerId'];
   modelId: string;
-  connectionRevision: number;
+  configRevision: number;
   question: string;
 }
 export interface ChangeProposal {
@@ -35,7 +35,7 @@ const strings = (v: unknown, max: number) => Array.isArray(v) && v.length <= max
 function profileCurrent(operation: AuthorizedOperation): void {
   const state = useAIConnectionStore.getState();
   const profile = state.profiles.find(p => p.profileId === operation.profileId);
-  if (!state.enabled || state.connectionRevision !== operation.connectionRevision || state.activeProfileId !== operation.profileId || !profile || !['configured', 'tested'].includes(profile.state)
+  if (!state.enabled || !profile?.enabled || !['configured', 'tested'].includes(profile.state)
     || profile.modelId !== operation.modelId || profile.providerId !== operation.providerId) throw new Error('连接或模型已变化，请重新授权');
   if (useWorkspaceStore.getState().amountsHidden) throw new Error('金额隐私已开启，请关闭后重新选择上下文');
 }
@@ -43,10 +43,10 @@ function profileCurrent(operation: AuthorizedOperation): void {
 export function prepareAIOperation(task: AITask, selection: ContextSelection, question: string): AuthorizedOperation {
   const state = useAIConnectionStore.getState();
   const profile = state.profiles.find(p => p.profileId === state.activeProfileId);
-  if (!state.enabled || !profile || !['configured', 'tested'].includes(profile.state)) throw new Error('请先在连接中心配置可用连接');
+  if (!state.enabled || !profile?.enabled || !['configured', 'tested'].includes(profile.state)) throw new Error('请先在连接中心配置可用连接');
   if (!question.trim() || question.length > 4_000) throw new Error('请输入问题，长度不超过 4000 字');
   const operation: AuthorizedOperation = { requestId: crypto.randomUUID(), task, pack: buildFactPack(selection),
-    profileId: profile.profileId, providerId: profile.providerId, modelId: profile.modelId, connectionRevision: state.connectionRevision, question: question.trim() };
+    profileId: profile.profileId, providerId: profile.providerId, modelId: profile.modelId, configRevision: profile.configRevision, question: question.trim() };
   profileCurrent(operation);
   operations.set(operation, JSON.stringify(operation));
   return operation;
@@ -63,9 +63,14 @@ export async function runAuthorizedAI(operation: AuthorizedOperation): Promise<I
     ? '仅返回 JSON：{"date":"YYYY-MM-DD","changes":[{"parentId":"已授权ID","childId":"可选已授权子ID","amount":非负数字}],"warnings":["歧义说明"]}。金额表示更新后的余额，不是收入/支出。无法确定的渠道不生成变更。'
     : '仅返回 JSON：{"summary":"简短概述","observations":[{"text":"解释","factIds":["已提供的factId"]}],"limitations":["覆盖限制"]}。每条观察至少引用一条提供的事实，不得伪造数值或引用。';
   const result = await inferAI({ requestId: operation.requestId, task: operation.task, profileId: operation.profileId, providerId: operation.providerId,
+    configRevision: operation.configRevision, dataRevision: operation.pack.manifest.baseRevision,
     input: { text: `${shape}\n业务日期：${todayString()}\n用户问题：${operation.question}`,
       facts: operation.pack.facts.map(({ factId, label, value, unit, asOf }) => ({ factId, label, value, unit, ...(asOf ? { asOf } : {}) })) } });
-  assertAIOperationCurrent(operation);
+  if (operations.get(operation) !== JSON.stringify(operation)) throw new Error('授权请求已被修改，请重新准备');
+  assertFactPackCurrent(operation.pack);
+  const state = useAIConnectionStore.getState();
+  const owner = state.profiles.find((profile) => profile.profileId === operation.profileId);
+  if (!state.enabled || !owner?.enabled) throw new Error('原连接已停用，迟到结果未保存');
   if (result.providerId !== operation.providerId || result.modelId !== operation.modelId) throw new Error('响应提供商或模型与授权不一致');
   return result;
 }

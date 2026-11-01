@@ -45,7 +45,6 @@ function WorkspaceSession({ target }: { target: AIWorkspaceTarget }) {
   const enabled = useAIConnectionStore(s => s.enabled);
   const profiles = useAIConnectionStore(s => s.profiles);
   const activeId = useAIConnectionStore(s => s.activeProfileId);
-  const connectionRevision = useAIConnectionStore(s => s.connectionRevision);
   const profile = profiles.find(p => p.profileId === activeId);
   const [question, setQuestion] = useState(questions[target.task]);
   const [amounts, setAmounts] = useState(target.task !== 'entry-draft' && target.task !== 'data-health-explanation');
@@ -87,7 +86,7 @@ function WorkspaceSession({ target }: { target: AIWorkspaceTarget }) {
       if (pending.current) void cancelAI(pending.current).catch(() => {});
       pending.current = null;
     };
-  }, [revision, connectionRevision, hidden]);
+  }, [revision, hidden]);
 
   function close() { invalidate(); useAIWorkspaceStore.getState().close(); }
   function requestClose() {
@@ -132,11 +131,14 @@ function WorkspaceSession({ target }: { target: AIWorkspaceTarget }) {
     } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败'); }
     finally { setBusy(false); }
   }
-  const ready = enabled && profile && ['configured', 'tested'].includes(profile.state);
+  const boundProfile = operation
+    ? profiles.find((item) => item.profileId === operation.profileId) ?? profile
+    : profile;
+  const ready = enabled && boundProfile?.enabled && ['configured', 'tested'].includes(boundProfile.state);
   return <>
     <Modal open onClose={requestClose} title={labels[target.task]} size="lg">
       <div className="space-y-5">
-        <div className="flex flex-wrap items-center gap-2"><Badge tone={ready ? 'emerald' : 'amber'}>{ready ? profile.label : '连接未就绪'}</Badge><span className="text-xs text-slate-500">{profile ? `${profile.providerId} · ${profile.modelId}` : '请先配置连接中心'}</span></div>
+        <div className="flex flex-wrap items-center gap-2"><Badge tone={ready ? 'emerald' : 'amber'}>{ready ? boundProfile.label : '连接未就绪'}</Badge><span className="text-xs text-slate-500">{boundProfile ? `${boundProfile.providerId} · ${boundProfile.modelId} · config r${boundProfile.configRevision}` : '请先配置连接中心'}</span></div>
         {!ready && <div className="rounded-lg bg-slate-50 p-4 text-sm"><p>连接测试仅使用合成消息。财务上下文由你在此逐次授权。</p><Button className="mt-3" variant="outline" onClick={() => { close(); useNavigationStore.getState().navigate({ tab: 'ai' }); }}>打开连接中心</Button></div>}
         {hidden ? <p role="status">金额隐私已开启，业务 AI 已暂停。</p> : <>
           <div className="text-sm text-slate-500">{target.reportId ? `报告：${report?.title ?? '报告已删除'}` : target.range ? `区间：${target.range.start} — ${target.range.end}` : target.task === 'entry-draft' ? `更新日期：${todayString()}（今天的渠道余额）` : '仅数据覆盖统计'} · revision {revision}</div>

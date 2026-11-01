@@ -400,7 +400,7 @@ export function buildBackup(src: BackupSource): BackupData {
   const totalAmount = totalAssets(src.channels);
   const currentLevel = getLevelByAmount(totalAmount);
   return {
-    backupSchemaVersion: 1,
+    backupSchemaVersion: 2,
     version: BACKUP_VERSION,
     exportDate: new Date().toISOString(),
     appInfo: { name: APP_NAME, version: BACKUP_VERSION },
@@ -451,7 +451,10 @@ export function parseBackup(text: string): ParseResult {
     return { ok: false, error: '文件不是有效的 JSON 格式' };
   }
   if (!isRecord(raw)) return { ok: false, error: '备份根节点格式不正确' };
-  if (raw.backupSchemaVersion !== undefined && raw.backupSchemaVersion !== 0 && raw.backupSchemaVersion !== 1) {
+  if (raw.backupSchemaVersion !== undefined
+    && raw.backupSchemaVersion !== 0
+    && raw.backupSchemaVersion !== 1
+    && raw.backupSchemaVersion !== 2) {
     return { ok: false, error: '备份 Schema 来自更新版本或无效，当前版本不能导入' };
   }
 

@@ -22,7 +22,15 @@ export interface ConnectionProfile {
   supportsVision?: boolean;
 }
 export interface RuntimeFact { factId: string; label: string; value: string; unit: 'CNY' | 'count' | 'text' | 'percent'; asOf?: string }
-export interface InferenceRequest {
+export interface AIRequestRoute {
+  taskId?: string;
+  configRevision?: number;
+  dataRevision?: number;
+  strategyVersion?: number | null;
+  promptVersion?: string;
+  runtimeGeneration?: number;
+}
+export interface InferenceRequest extends AIRequestRoute {
   requestId: string;
   profileId: string;
   providerId: ProviderId;
@@ -59,9 +67,8 @@ export interface InferenceResult {
 export interface ModelInfo { id: string; name: string; input: string[]; contextWindow: number | null; maxOutputTokens: number | null }
 
 const browserProfiles = new Map<string, { profile: ConnectionProfile; credential?: string }>();
-const requests = new Map<string, AbortController>();
+const requests = new Map<string, { controller: AbortController; profileId: string }>();
 let enabled = false;
-let connectionGeneration = 0;
 const identifier = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const BASE64_TEXT = /^[A-Za-z0-9+/]+={0,2}$/;
 /** 只有这些连接可以承载图片；Copilot 订阅会话始终是纯文本。 */
@@ -75,7 +82,7 @@ const messages: Record<string, string> = {
   CANCELLED: '已取消，未保存 AI 结果。', TIMEOUT: '请求超时，请检查连接后重试。',
   PROVIDER_FAILED: '模型请求失败，请检查认证、模型、服务额度或网络。',
   AI_RUNTIME_MISSING: '桌面 AI 运行时未安装或未打包；请安装包含运行时的桌面构建。',
-  RUNTIME_EXITED: 'AI 运行时已退出，请重试或重新启用 AI。',
+  RUNTIME_EXITED: 'AI 运行时已退出，请重试或重新启用 AI。诊断日志：%TEMP%\\wealth-ai-runtime\\stderr.log',
   KEYRING_UNAVAILABLE: '系统安全存储不可用；可改用当前会话临时凭据（不会落盘）。',
   PROFILE_UNAVAILABLE: '连接尚未注册到运行时，请重新连接。',
   INVALID_REQUEST: '请求不符合 AI 协议限制，已在上游拒绝。',
@@ -119,8 +126,7 @@ export function validateAIEndpoint(endpoint: string, local: boolean): string {
 export async function setAIEnabled(next: boolean): Promise<void> {
   if (!next) {
     enabled = false;
-    connectionGeneration++;
-    for (const request of requests.values()) request.abort();
+    for (const request of requests.values()) request.controller.abort();
     requests.clear(); browserProfiles.clear();
   }
   if (isTauri()) await native('ai_set_enabled', { enabled: next });
@@ -144,7 +150,6 @@ export async function configureAIProfile(profile: ConnectionProfile, credential?
   if (!enabled) throw failure('AI_DISABLED');
   validateConnectionProfile(profile);
   if (credential !== undefined && (credential.length > 16_384 || /[\r\n\0]/.test(credential))) throw new Error('凭据格式无效');
-  connectionGeneration++;
   if (isTauri()) return native('ai_configure_profile', { profile, credential: credential || null, persistCredential });
   if (!['gateway', 'ollama', 'lmstudio'].includes(profile.providerId)) throw failure('PROVIDER_UNAVAILABLE');
   const endpoint = validateAIEndpoint(profile.endpoint ?? '', profile.authKind === 'local');
@@ -153,10 +158,18 @@ export async function configureAIProfile(profile: ConnectionProfile, credential?
   return { state: 'configured' };
 }
 
-export async function removeAIProfile(profileId: string): Promise<void> {
+export async function removeAIProfile(profileId: string, preserveCredential = false): Promise<void> {
   if (!identifier.test(profileId)) throw new Error('连接身份无效');
-  connectionGeneration++;
-  if (isTauri()) await native('ai_remove_profile', { profileId });
+  await cancelAIProfile(profileId);
+  if (isTauri()) await native('ai_remove_profile', { profileId, preserveCredential });
+  browserProfiles.delete(profileId);
+}
+
+/** Remove the runtime registration while preserving the persisted credential for re-enable. */
+export async function disableAIProfile(profileId: string): Promise<void> {
+  if (!identifier.test(profileId)) throw new Error('连接身份无效');
+  await cancelAIProfile(profileId);
+  if (isTauri()) await native('ai_disable_profile', { profileId });
   browserProfiles.delete(profileId);
 }
 
@@ -165,8 +178,7 @@ async function browserFetch(profileId: string, path: string, body?: unknown, req
   const stored = browserProfiles.get(profileId);
   if (!stored) throw new Error('连接尚未就绪，请重新连接');
   if (requests.has(requestId)) throw new Error('请求 ID 重复');
-  const controller = new AbortController(); requests.set(requestId, controller);
-  const generation = connectionGeneration;
+  const controller = new AbortController(); requests.set(requestId, { controller, profileId });
   const timeout = setTimeout(() => controller.abort(), 60_000);
   try {
     const response = await fetch(`${stored.profile.endpoint}/${path}`, {
@@ -188,7 +200,7 @@ async function browserFetch(profileId: string, path: string, body?: unknown, req
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
     const value: unknown = JSON.parse(new TextDecoder().decode(bytes));
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw failure('PROVIDER_FAILED');
-    if (!enabled || generation !== connectionGeneration || browserProfiles.get(profileId) !== stored || controller.signal.aborted) throw failure('CANCELLED');
+    if (!enabled || browserProfiles.get(profileId) !== stored || controller.signal.aborted) throw failure('CANCELLED');
     return value as Record<string, unknown>;
   } catch (error) {
     if (controller.signal.aborted) throw failure('CANCELLED');
@@ -217,10 +229,16 @@ export async function inferAI(request: InferenceRequest): Promise<InferenceResul
       || typeof f.value !== 'string' || f.value.length > 512 || !['CNY', 'count', 'text', 'percent'].includes(f.unit))
     || new Set(request.input.facts.map(f => f.factId)).size !== request.input.facts.length) throw new Error('授权上下文无效或超过限制，请缩小范围');
   if (isTauri()) {
-    const generation = connectionGeneration;
-    const result = await native<InferenceResult>('ai_infer', { request });
-    if (!enabled || generation !== connectionGeneration) throw failure('CANCELLED');
-    return result;
+    if (requests.has(request.requestId)) throw new Error('请求 ID 重复');
+    const controller = new AbortController();
+    requests.set(request.requestId, { controller, profileId: request.profileId });
+    try {
+      const result = await native<InferenceResult>('ai_infer', { request });
+      if (!enabled || controller.signal.aborted) throw failure('CANCELLED');
+      return result;
+    } finally {
+      requests.delete(request.requestId);
+    }
   }
   const stored = browserProfiles.get(request.profileId);
   if (!stored || stored.profile.providerId !== request.providerId) throw new Error('连接与授权提供商不一致');
@@ -264,10 +282,16 @@ export async function visionExtractAI(request: VisionRequest): Promise<Inference
   if (!identifier.test(request.requestId) || !identifier.test(request.profileId) || request.task !== 'document-extraction') throw new Error('视觉请求无效');
   assertVisionInput(request.input);
   if (isTauri()) {
-    const generation = connectionGeneration;
-    const result = await native<InferenceResult>('ai_vision_extract', { request });
-    if (!enabled || generation !== connectionGeneration) throw failure('CANCELLED');
-    return result;
+    if (requests.has(request.requestId)) throw new Error('请求 ID 重复');
+    const controller = new AbortController();
+    requests.set(request.requestId, { controller, profileId: request.profileId });
+    try {
+      const result = await native<InferenceResult>('ai_vision_extract', { request });
+      if (!enabled || controller.signal.aborted) throw failure('CANCELLED');
+      return result;
+    } finally {
+      requests.delete(request.requestId);
+    }
   }
   const stored = browserProfiles.get(request.profileId);
   if (!stored || stored.profile.providerId !== request.providerId) throw new Error('连接与授权提供商不一致');
@@ -305,13 +329,35 @@ export async function researchLookupAI(request: { requestId: string; profileId: 
     if (url.length > 2_048 || parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash) throw failure('INVALID_URL');
   }
   if (!isTauri()) throw failure('RESEARCH_UNAVAILABLE');
-  const result = await native<{ results: ResearchSource[] }>('ai_research_lookup', { profileId: request.profileId, providerId: request.providerId, urls });
+  if (requests.has(request.requestId)) throw new Error('请求 ID 重复');
+  const controller = new AbortController();
+  requests.set(request.requestId, { controller, profileId: request.profileId });
+  let result: { results: ResearchSource[] };
+  try {
+    result = await native<{ results: ResearchSource[] }>('ai_research_lookup', {
+      profileId: request.profileId, providerId: request.providerId,
+      targetRequestId: request.requestId, urls,
+    });
+    if (!enabled || controller.signal.aborted) throw failure('CANCELLED');
+  } finally {
+    requests.delete(request.requestId);
+  }
   if (!result || !Array.isArray(result.results) || result.results.length !== urls.length) throw failure('PROVIDER_FAILED');
   return result;
 }
 
 export async function cancelAI(targetRequestId: string): Promise<void> {
-  connectionGeneration++;
-  if (isTauri()) await native('ai_cancel', { targetRequestId });
-  requests.get(targetRequestId)?.abort();
+  const request = requests.get(targetRequestId);
+  request?.controller.abort();
+  if (isTauri()) {
+    try { await native('ai_cancel', { targetRequestId }); } catch { /* local cancellation already won */ }
+  }
+}
+
+export async function cancelAIProfile(profileId: string): Promise<void> {
+  if (!identifier.test(profileId)) return;
+  const targets = [...requests.entries()]
+    .filter(([, request]) => request.profileId === profileId)
+    .map(([requestId]) => requestId);
+  await Promise.allSettled(targets.map((requestId) => cancelAI(requestId)));
 }
