@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+env:
+  WGT_BUILD_COMMIT: ${{ github.sha }}
+  WGT_BUILD_ID: ${{ github.sha }}-release
+
 # 附件直接上传到 GitHub Release，不再经过 Actions artifact 中转：
 # 私有仓库的 artifact 存储配额会随多次发布累积并阻塞上传，Release 附件不受该配额影响。
 # 因此每个平台构建完成后立即上传，最后的 Finalize 步骤只负责校验、校验值和发布。
