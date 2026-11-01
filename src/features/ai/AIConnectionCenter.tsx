@@ -43,6 +43,7 @@ const STATE_META: Record<AIConnection['state'], { label: string; tone: 'emerald'
   configured: { label: '已配置 · 未做合成测试', tone: 'blue' },
   tested: { label: '合成测试通过', tone: 'emerald' },
   'qualification-pending': { label: '待官方资格验证', tone: 'amber' },
+  'auth-error': { label: '认证或运行失败', tone: 'amber' },
   disconnected: { label: '未连接', tone: 'slate' },
 };
 
@@ -62,8 +63,10 @@ export function AIConnectionCenter() {
   const setEnabled = useAIConnectionStore(s => s.setEnabled);
   const connect = useAIConnectionStore(s => s.connect);
   const disconnect = useAIConnectionStore(s => s.disconnect);
-  const select = useAIConnectionStore(s => s.select);
+  const toggleEnabled = useAIConnectionStore(s => s.toggleEnabled);
+  const activate = useAIConnectionStore(s => s.activate);
   const markTested = useAIConnectionStore(s => s.markTested);
+  const markHealth = useAIConnectionStore(s => s.markHealth);
   const pushToast = useAppStore(s => s.pushToast);
   const desktop = isTauri();
 
@@ -74,6 +77,7 @@ export function AIConnectionCenter() {
   const [credential, setCredential] = useState('');
   const [persistCredential, setPersistCredential] = useState(true);
   const [supportsVision, setSupportsVision] = useState(false);
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [modelTarget, setModelTarget] = useState<string | null>(null);
@@ -95,15 +99,22 @@ export function AIConnectionCenter() {
     if (!modelId.trim()) { setError('请填写模型标识'); return; }
     if (entry.needsEndpoint && !endpoint.trim()) { setError('请填写端点地址'); return; }
     if (platformBlocked) { setError('此平台不直接连接官方云服务；请使用用户自建 HTTPS 网关或本地端点。'); return; }
-    if (entry.authKind === 'api-key' && !credential.trim()) { setError('请填写 API Key 或网关令牌'); return; }
+    const editing = editingProfileId
+      ? profiles.find((item) => item.profileId === editingProfileId)
+      : undefined;
+    if (entry.authKind === 'api-key' && !credential.trim() && !editing?.credentialPersisted) {
+      setError('请填写 API Key 或网关令牌');
+      return;
+    }
     const profile: ConnectionProfile = {
-      profileId: crypto.randomUUID(), providerId: entry.providerId, authKind: entry.authKind,
+      profileId: editingProfileId ?? crypto.randomUUID(), providerId: entry.providerId, authKind: entry.authKind,
       modelId: modelId.trim(), ...(entry.needsEndpoint ? { endpoint: endpoint.trim() } : {}),
       ...(supportsVision && VISION_PROVIDERS.includes(entry.providerId) ? { supportsVision: true } : {}),
     };
     try {
       await connect(profile, label.trim(), entry.authKind === 'local' ? undefined : credential.trim(), persistCredential && desktop);
       setCredential('');
+      setEditingProfileId(null);
       pushToast(desktop && persistCredential ? '连接已注册，凭据交由系统安全存储' : '连接已注册（凭据仅当前会话有效）', 'success');
     } catch (cause) { setError(cause instanceof Error ? cause.message : '连接失败'); }
   }
@@ -111,8 +122,14 @@ export function AIConnectionCenter() {
   async function loadModels(connection: AIConnection) {
     setError(null); setModels(null); setModelTarget(connection.profileId);
     setWorking(true);
-    try { setModels(await listAIModels(profileOf(connection))); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '模型列表获取失败'); }
+    try {
+      setModels(await listAIModels(profileOf(connection)));
+      markHealth(connection.profileId, 'healthy');
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '模型列表获取失败';
+      setError(message);
+      markHealth(connection.profileId, 'failed', message);
+    }
     finally { setWorking(false); }
   }
 
@@ -127,7 +144,11 @@ export function AIConnectionCenter() {
       });
       markTested(connection.profileId);
       setTestOutput({ profileId: connection.profileId, text: result.text.slice(0, 500), usage: result.usage });
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '合成消息测试失败'); }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '合成消息测试失败';
+      setError(message);
+      markHealth(connection.profileId, 'failed', message);
+    }
     finally { setWorking(false); }
   }
 
@@ -220,14 +241,51 @@ export function AIConnectionCenter() {
                         {connection.endpoint ? ` · ${connection.endpoint}` : ''}
                         {connection.supportsVision ? ' · 可读图' : ''}
                       </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {connection.enabled ? '连接已启用' : '连接已停用'} · 健康状态 {connection.health} · 配置 rev {connection.configRevision}
+                        {connection.lastError ? ` · ${connection.lastError}` : ''}
+                      </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {!isActive && ['configured', 'tested'].includes(connection.state) && (
-                        <Button size="sm" variant="outline" onClick={() => select(connection.profileId)}>设为当前</Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy || !enabled || (!connection.enabled && !desktop && connection.authKind !== 'local')}
+                        onClick={() => void toggleEnabled(connection.profileId, !connection.enabled)
+                          .catch(cause => setError(cause instanceof Error ? cause.message : '切换连接启停失败'))}
+                      >
+                        {connection.enabled ? '停用连接' : '启用连接'}
+                      </Button>
+                      <Button size="sm" variant="outline" disabled={busy || working || !enabled} onClick={() => {
+                        const catalog = CATALOG.find((item) =>
+                          item.providerId === connection.providerId && item.authKind === connection.authKind);
+                        if (!catalog) {
+                          setError('此连接类型当前不在可编辑目录中');
+                          return;
+                        }
+                        setCatalogKey(catalog.key);
+                        setEditingProfileId(connection.profileId);
+                        setLabel(connection.label);
+                        setModelId(connection.modelId);
+                        setEndpoint(connection.endpoint ?? '');
+                        setSupportsVision(connection.supportsVision === true);
+                        setCredential('');
+                        setModels(null);
+                      }}>编辑</Button>
+                      {!isActive && connection.enabled && (
+                        <Button size="sm" variant="outline" disabled={busy || !enabled}
+                          onClick={() => void activate(connection.profileId)
+                            .catch(cause => setError(cause instanceof Error ? cause.message : '切换当前连接失败'))}>
+                          设为当前
+                        </Button>
                       )}
-                      <Button size="sm" variant="outline" disabled={busy || working} onClick={() => void loadModels(connection)}>模型列表</Button>
-                      <Button size="sm" variant="outline" disabled={busy || working || connection.state === 'qualification-pending'} onClick={() => void testConnection(connection)}>合成消息测试</Button>
-                      <Button size="sm" variant="ghost" disabled={busy || working} onClick={() => void disconnect(connection.profileId).catch(cause => setError(cause instanceof Error ? cause.message : '移除失败'))}>移除</Button>
+                      <Button size="sm" variant="outline" disabled={busy || working || !enabled || !connection.enabled} onClick={() => void loadModels(connection)}>模型列表</Button>
+                      <Button size="sm" variant="outline" disabled={busy || working || !enabled || !connection.enabled || connection.state === 'qualification-pending'} onClick={() => void testConnection(connection)}>合成消息测试</Button>
+                      <Button size="sm" variant="ghost" disabled={busy || working} onClick={() => {
+                        if (window.confirm(`确认移除“${connection.label}”并删除其凭据引用？其他连接若共享授权不会被停用。`)) {
+                          void disconnect(connection.profileId).catch(cause => setError(cause instanceof Error ? cause.message : '移除失败'));
+                        }
+                      }}>移除连接</Button>
                     </div>
                   </div>
                   {modelTarget === connection.profileId && models && (

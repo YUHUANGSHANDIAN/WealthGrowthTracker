@@ -208,7 +208,7 @@ pub fn run_plugin_configure_selftest(app: &tauri::AppHandle) -> Value {
         "ok": configure.is_ok(),
         "configure": configure.unwrap_or_else(|error| json!({ "brokerError": error })),
     });
-    let _ = broker.inner.remove_profile(Some(app), "selftest");
+    let _ = broker.inner.remove_profile(Some(app), "selftest", false);
     broker.inner.set_enabled(false);
     append_runtime_log(&format!("plugin GUI selftest: {report}"));
     report
@@ -279,7 +279,7 @@ fn run_broker_selftest_variant(provider_id: &str, model_id: &str, persist: bool)
     });
     if persist {
         // 清掉测试期间写进系统安全存储的条目。
-        let _ = broker.inner.remove_profile(None, "selftest");
+        let _ = broker.inner.remove_profile(None, "selftest", false);
     }
     broker.inner.set_enabled(false);
     report
@@ -1283,12 +1283,16 @@ impl InnerState {
         app: Option<&tauri::AppHandle>,
         profile_id: &str,
         provider_id: &str,
+        request_id: &str,
         urls: Vec<String>,
     ) -> Result<Value, String> {
         if !self.enabled.load(Ordering::SeqCst) {
             return Ok(error_result("AI_DISABLED"));
         }
-        if !is_identifier(profile_id) || !PROVIDERS.contains(&provider_id) {
+        if !is_identifier(profile_id)
+            || !is_identifier(request_id)
+            || !PROVIDERS.contains(&provider_id)
+        {
             return Ok(error_result("INVALID_REQUEST"));
         }
         if let Err(code) = validate_research_urls(&urls) {
@@ -1308,7 +1312,7 @@ impl InnerState {
         }
         let frame = json!({
             "protocolVersion": 1,
-            "requestId": self.next_request_id(),
+            "requestId": request_id,
             "operation": "research-lookup",
             "profileId": profile_id,
             "providerId": provider_id,
@@ -1350,13 +1354,29 @@ impl InnerState {
         &self,
         app: Option<&tauri::AppHandle>,
         profile_id: &str,
+        preserve_credential: bool,
+    ) -> Result<Value, String> {
+        if !is_identifier(profile_id) {
+            return Ok(error_result("INVALID_REQUEST"));
+        }
+        let removed = self.profiles.lock().unwrap().contains_key(profile_id);
+        self.disable_profile(app, profile_id)?;
+        if !preserve_credential {
+            delete_credential(profile_id);
+        }
+        Ok(ok_result(json!({ "removed": removed })))
+    }
+
+    fn disable_profile(
+        &self,
+        app: Option<&tauri::AppHandle>,
+        profile_id: &str,
     ) -> Result<Value, String> {
         if !is_identifier(profile_id) {
             return Ok(error_result("INVALID_REQUEST"));
         }
         let removed = self.profiles.lock().unwrap().remove(profile_id).is_some();
         self.configured.lock().unwrap().remove(profile_id);
-        delete_credential(profile_id);
         if self.enabled.load(Ordering::SeqCst)
             && self
                 .runtime
@@ -1373,7 +1393,7 @@ impl InnerState {
             });
             let _ = self.request(app, frame, CANCEL_TIMEOUT);
         }
-        Ok(ok_result(json!({ "removed": removed })))
+        Ok(ok_result(json!({ "disabled": removed })))
     }
 
     fn set_enabled(&self, enabled: bool) {
@@ -1469,11 +1489,18 @@ pub async fn ai_research_lookup(
     broker: tauri::State<'_, AiBroker>,
     profile_id: String,
     provider_id: String,
+    target_request_id: String,
     urls: Vec<String>,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
     tauri::async_runtime::spawn_blocking(move || {
-        inner.research_lookup(Some(&app), &profile_id, &provider_id, urls)
+        inner.research_lookup(
+            Some(&app),
+            &profile_id,
+            &provider_id,
+            &target_request_id,
+            urls,
+        )
     })
     .await
     .map_err(|_| "BROKER_TASK_FAILED".to_string())?
@@ -1496,11 +1523,30 @@ pub async fn ai_remove_profile(
     app: tauri::AppHandle,
     broker: tauri::State<'_, AiBroker>,
     profile_id: String,
+    preserve_credential: Option<bool>,
 ) -> Result<Value, String> {
     let inner = Arc::clone(&broker.inner);
-    tauri::async_runtime::spawn_blocking(move || inner.remove_profile(Some(&app), &profile_id))
+    tauri::async_runtime::spawn_blocking(move || {
+        inner.remove_profile(
+            Some(&app),
+            &profile_id,
+            preserve_credential.unwrap_or(false),
+        )
+    })
+    .await
+    .map_err(|_| "BROKER_TASK_FAILED".to_string())?
+}
+
+#[tauri::command]
+pub async fn ai_disable_profile(
+    app: tauri::AppHandle,
+    broker: tauri::State<'_, AiBroker>,
+    profile_id: String,
+) -> Result<Value, String> {
+    let inner = Arc::clone(&broker.inner);
+    tauri::async_runtime::spawn_blocking(move || inner.disable_profile(Some(&app), &profile_id))
         .await
-        .map_err(|_| "BROKER_TASK_FAILED".to_string())?
+        .map_err(|error| error.to_string())?
 }
 
 #[cfg(test)]

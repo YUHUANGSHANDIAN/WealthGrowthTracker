@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  configureAIProfile, researchLookupAI, setAIEnabled, validateConnectionProfile, visionExtractAI,
+  cancelAI, configureAIProfile, inferAI, researchLookupAI, setAIEnabled, validateConnectionProfile, visionExtractAI,
   type ConnectionProfile,
 } from '../../src/services/ai/client';
 
@@ -80,6 +80,50 @@ describe('AI client vision and research boundaries', () => {
     await expect(researchLookupAI({ ...request, urls: ['https://example.com/a', 'https://example.com/a'] })).rejects.toThrow('1 到 5 个互不重复');
     await expect(researchLookupAI({ ...request, urls: Array.from({ length: 6 }, (_, index) => `https://example.com/${index}`) }))
       .rejects.toThrow('1 到 5 个互不重复');
+  });
+
+  it('switching to another connection does not cancel an older in-flight request', async () => {
+    let releaseA: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes('gateway-a')) {
+        return new Promise<Response>((resolve) => { releaseA = resolve; });
+      }
+      return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const a = { ...gateway, profileId: 'gateway-a', endpoint: 'https://gateway-a.example.com/v1' };
+    const b = { ...gateway, profileId: 'gateway-b', endpoint: 'https://gateway-b.example.com/v1' };
+    await configureAIProfile(a, 'synthetic-a');
+    const pending = inferAI({
+      requestId: crypto.randomUUID(), profileId: a.profileId, providerId: 'gateway',
+      task: 'analysis-question', input: { text: '合成请求 A', facts: [] },
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await configureAIProfile(b, 'synthetic-b');
+    releaseA?.(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"summary":"A","observations":[],"limitations":[]}' } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    }), { status: 200 }));
+    await expect(pending).resolves.toMatchObject({ providerId: 'gateway', modelId: gateway.modelId });
+  });
+
+  it('cancels only the requested operation and ignores its late response', async () => {
+    let release: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      release = resolve;
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    await configureAIProfile(gateway, 'synthetic-credential');
+    const requestId = crypto.randomUUID();
+    const pending = inferAI({
+      requestId, profileId: gateway.profileId, providerId: 'gateway',
+      task: 'analysis-question', input: { text: '合成取消请求', facts: [] },
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await cancelAI(requestId);
+    await expect(pending).rejects.toThrow('已取消');
+    release?.(new Response(JSON.stringify({ choices: [{ message: { content: '{}' } }] }), { status: 200 }));
   });
 
   it('accepts the monthly planning tasks that ship with this version', async () => {
