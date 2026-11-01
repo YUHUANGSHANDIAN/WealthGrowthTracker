@@ -320,6 +320,10 @@ export interface FinanceTaskResult {
 }
 
 export interface FinanceTaskRevision {
+  /** 稳定修订标识，由任务、版本和快照内容哈希共同确定。 */
+  revisionId: string;
+  /** 规范化任务快照的 SHA-256；用于验证不可变修订未被静默改写。 */
+  contentHash: string;
   taskId: string;
   revision: number;
   state: MonthlyReviewState;
@@ -327,6 +331,20 @@ export interface FinanceTaskRevision {
   baseDataRevision: number | null;
   policyVersion: number | null;
   snapshot: MonthlyReview;
+}
+
+export interface EvidenceIndexReference {
+  taskId: string;
+  documentId: string;
+}
+
+/** 跨任务证据去重索引；同一 SHA-256 只保留一个条目和全部引用。 */
+export interface EvidenceIndexEntry {
+  sha256: string;
+  relativePath: string;
+  originalName: string;
+  mime: string;
+  references: EvidenceIndexReference[];
 }
 
 export interface MonthlyReview {
@@ -380,6 +398,7 @@ export interface MonthlyPlanningState {
   schemaVersion: 2;
   sessions: MonthlyReview[];
   taskRevisions: FinanceTaskRevision[];
+  evidenceIndex: EvidenceIndexEntry[];
   policies: InvestmentPolicy[];
   assignmentRules: AssignmentRule[];
   settings: {
