@@ -4,13 +4,6 @@ import { HistoryPanel } from '../../src/features/history/HistoryPanel';
 import { useAppStore } from '../../src/store/appStore';
 import { useWorkspaceStore } from '../../src/store/workspaceStore';
 import type { HistoryPoint } from '../../src/types';
-import type { LineSeries } from '../../src/components/charts/LineChart';
-
-const chartRender = vi.hoisted(() => vi.fn());
-vi.mock('../../src/components/charts/LineChart', () => ({ LineChart: (props: { series: LineSeries[]; ariaLabel: string }) => {
-  chartRender(props);
-  return <div role="img" aria-label={props.ariaLabel}>历史趋势</div>;
-} }));
 
 const history: HistoryPoint[] = [
   { date: '2020-10-11', totalAmount: 100, source: 'manual', timestamp: Date.parse('2020-10-11T08:00:00.000Z') },
@@ -25,7 +18,6 @@ beforeEach(() => {
   saveNote = vi.fn<typeof initial.setHistoryEventNote>().mockResolvedValue(undefined);
   deletePoints = vi.fn<typeof initial.deleteHistoryPoints>();
   confirmEdit = vi.fn<typeof initial.confirmHistoryEdit>().mockResolvedValue(undefined);
-  chartRender.mockClear();
   useWorkspaceStore.setState({ amountsHidden: false });
   useAppStore.setState({ history, hydrated: true, recoveryError: null, maintenanceLabel: null, setHistoryEventNote: saveNote, deleteHistoryPoints: deletePoints, confirmHistoryEdit: confirmEdit });
 });
@@ -54,16 +46,15 @@ describe('history workspace', () => {
     expect(screen.getByRole('button', { name: '数据表' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('uses one filtered range for rows and chart while retaining the earlier comparison baseline', () => {
+  it('uses one filtered range for rows and links to the unified trend workspace', () => {
     render(<HistoryPanel />);
     fireEvent.change(screen.getByLabelText('起始日期'), { target: { value: '2020-10-13' } });
     expect(screen.queryByRole('article', { name: '2020-10-11 历史记录' })).not.toBeInTheDocument();
     expect(screen.getByText('增加 ¥25.00')).toBeInTheDocument();
-    const chart = chartRender.mock.lastCall?.[0] as { series: LineSeries[] };
-    expect(chart.series[0]?.points).toEqual([{ date: '2020-10-13', value: 125 }]);
+    expect(screen.getByRole('button', { name: '打开资产历史趋势' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('结束日期'), { target: { value: '2020-10-12' } });
     expect(screen.getByRole('alert')).toHaveTextContent('起始日期不能晚于结束日期');
-    expect(screen.queryByRole('img', { name: '总资产历史趋势图' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开资产历史趋势' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '清除筛选' }));
     expect(screen.getByRole('article', { name: '2020-10-11 历史记录' })).toBeInTheDocument();
   });

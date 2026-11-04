@@ -19,7 +19,11 @@ describe('navigation', () => {
   it('rejects unknown categories and categories on other pages', () => {
     expect(parseHash('#/settings?section=unknown').settingsSection).toBeUndefined();
     expect(parseHash('#/analysis?section=privacy').settingsSection).toBeUndefined();
-    expect(buildHash({ tab: 'analysis', settingsSection: 'privacy' })).toBe('#/review/analysis');
+    expect(buildHash({ tab: 'analysis', settingsSection: 'privacy' })).toBe('#/review/trends');
+    expect(parseHash('#/review/analysis?startDate=2026-01-01')).toMatchObject({
+      tab: 'analysis', startDate: '2026-01-01',
+    });
+    expect(parseHash('#/review/trends')).toMatchObject({ tab: 'analysis' });
   });
 
   it('maps the five main sections, auxiliary entries and old deep links', () => {

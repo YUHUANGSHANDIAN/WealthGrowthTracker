@@ -39,7 +39,7 @@ export const SECONDARY_NAV_ITEMS: Readonly<Record<MainSectionId, readonly Second
   review: [
     { label: '历史记录', tab: 'history' },
     { label: '财务报告', tab: 'reports' },
-    { label: '收益分析', tab: 'analysis' },
+    { label: '资产历史趋势', tab: 'analysis' },
   ],
   planning: [
     { label: '目标管理', tab: 'goals' },

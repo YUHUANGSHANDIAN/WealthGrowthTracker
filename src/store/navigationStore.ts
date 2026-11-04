@@ -71,7 +71,7 @@ function routeForPath(segments: string[]): Pick<Route, 'tab' | 'financeTaskKind'
     return { tab: 'monthly', financeTaskKind: isFinanceTaskKind(sub) ? sub : 'monthly-review' };
   }
   if (root === 'review') {
-    return { tab: sub === 'reports' || sub === 'analysis' ? sub : 'history' };
+    return { tab: sub === 'reports' ? 'reports' : sub === 'analysis' || sub === 'trends' ? 'analysis' : 'history' };
   }
   if (root === 'planning') return { tab: sub === 'prediction' ? 'prediction' : 'goals' };
   if (root === 'assets') return { tab: 'assets' };
@@ -120,7 +120,7 @@ function basePathFor(route: Route): string[] {
   switch (route.tab) {
     case 'history': return ['review', 'history'];
     case 'reports': return ['review', 'reports'];
-    case 'analysis': return ['review', 'analysis'];
+    case 'analysis': return ['review', 'trends'];
     case 'goals': return ['planning', 'goals'];
     case 'prediction': return ['planning', 'prediction'];
     case 'monthly': return ['finance', route.financeTaskKind ?? 'monthly-review'];
