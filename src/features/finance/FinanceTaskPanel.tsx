@@ -27,6 +27,7 @@ import type {
 import { importDocuments, type FileLike } from '../../services/monthlyPlanning/importDocuments';
 import { researchEvidenceFrom, parseUrlLines } from '../monthlyPlanning/aiEntry';
 import { researchLookupAI } from '../../services/ai/client';
+import { projectMonthlyPlanningClassification } from '../../domain/assets/classification';
 
 const TRADE_TASKS = new Set<FinanceTaskKind>(['ad-hoc-rebalance', 'take-profit-review']);
 const RESULT_STAGES = new Set<string>(['reviewing', 'ready', 'planned', 'confirmed', 'reviewed', 'blocked']);
@@ -81,7 +82,12 @@ export function FinanceTaskPanel({
   kind: Exclude<FinanceTaskKind, 'monthly-review'>;
   initialTaskId?: string;
 }) {
-  const planning = useAppStore((state) => state.monthlyPlanning);
+  const rawPlanning = useAppStore((state) => state.monthlyPlanning);
+  const assetClassification = useAppStore((state) => state.assetClassification);
+  const planning = useMemo(
+    () => projectMonthlyPlanningClassification(rawPlanning, assetClassification),
+    [rawPlanning, assetClassification],
+  );
   const channels = useAppStore((state) => state.channels);
   const dataRevision = useAppStore((state) => state.dataRevision);
   const upsertTask = useAppStore((state) => state.upsertMonthlySession);
@@ -257,7 +263,7 @@ export function FinanceTaskPanel({
           ...(holding.planId ? { planId: holding.planId } : {}),
           marketValue: next.observations.find((item) => item.holdingId === holding.id)?.marketValue ?? null,
           exposureTags: holding.exposureTags,
-          takeProfitEligible: kind === 'take-profit-review' && holding.exposureTags.includes('equity'),
+          takeProfitEligible: kind === 'take-profit-review' && holding.productType === 'fund',
         }));
         const investableTotal = sumMoney(next.observations.map((item) => item.marketValue ?? 0));
         const unknown = next.observations.filter((item) => item.marketValue === null).length;

@@ -4,6 +4,13 @@ import {
   upsertPolicy, upsertSession,
 } from '../services/monthlyPlanning/storage';
 import { migrateInlineAttachments, migrateLegacyBase64AttachmentFiles } from '../services/monthlyPlanning/attachmentStore';
+import {
+  emptyAssetClassificationState,
+  mergeAssetClassificationStates,
+  parseAssetClassificationState,
+  verifyAssetClassificationIntegrity,
+  type AssetClassificationState,
+} from '../domain/assets/classification';
 import type { ExecutionRecord, InvestmentPolicy, MonthlyPlanningState, MonthlyReview } from '../domain/portfolio/types';
 import { create } from 'zustand';
 import type {
@@ -158,12 +165,14 @@ interface AppState {
 
   // ---- 月度理财（WealthGrowthPlanner） ----
   monthlyPlanning: MonthlyPlanningState;
+  assetClassification: AssetClassificationState;
   /** 事务式写入月度会话：维护租约 + 备份 + 单次 rawSet + persist + flush */
   upsertMonthlySession: (session: MonthlyReview, label?: string) => Promise<void>;
   saveMonthlyPolicy: (policy: InvestmentPolicy) => Promise<void>;
   recordMonthlyExecution: (sessionKey: string, record: ExecutionRecord) => Promise<void>;
   setMonthlySettings: (patch: Partial<MonthlyPlanningState['settings']>) => Promise<void>;
   deleteMonthlySession: (key: string) => Promise<void>;
+  applyAssetClassification: (state: AssetClassificationState, label?: string) => Promise<void>;
 
   // 数据管理弹窗状态
   importModalOpen: boolean;
@@ -303,6 +312,7 @@ const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
   { key: STORAGE_KEYS.lotteryState, pick: (s) => s.lottery },
   { key: STORAGE_KEYS.activityLog, pick: (s) => s.activityLog },
   { key: STORAGE_KEYS.monthlyPlanning, pick: (s) => s.monthlyPlanning },
+  { key: STORAGE_KEYS.assetClassification, pick: (s) => s.assetClassification },
 ];
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -381,6 +391,7 @@ const persistentFields: ReadonlyArray<keyof AppState> = [
   'countdownProgressHistory', 'currentWealthLevel', 'wealthTrackerHistory',
   'levelAchievements', 'lottery', 'activityLog',
   'monthlyPlanning',
+  'assetClassification',
 ];
 
 export const useAppStore = create<AppState>()((rawSet, get) => {
@@ -511,6 +522,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
 
     importModalOpen: false,
     monthlyPlanning: emptyMonthlyPlanningState(),
+    assetClassification: emptyAssetClassificationState(),
     async upsertMonthlySession(session, label = '正在保存月度会话') {
       const release = beginLedgerMaintenance(label);
       try {
@@ -580,6 +592,19 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         release();
       }
     },
+    async applyAssetClassification(next, label = '正在保存资产分类') {
+      const release = beginLedgerMaintenance(label);
+      try {
+        await storageService.flush();
+        const manager = storageService.getDesktopManager();
+        if (manager && !(await manager.backupNow(true))) throw new Error('操作前备份不可用');
+        rawSet({ assetClassification: next });
+        persist();
+        await storageService.flush();
+      } finally {
+        release();
+      }
+    },
 
     // ---------------------------------------------------------------------
     hydrate() {
@@ -613,6 +638,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         activityLogData,
         projectionData,
         monthlyData,
+        classificationData,
       ] = await Promise.all([
         storageService.getJSON<{ channels: Channel[]; history: HistoryPoint[] }>(STORAGE_KEYS.wealthTrackerData),
         storageService.getJSON<FinancialReport[]>(STORAGE_KEYS.financialReports),
@@ -639,10 +665,14 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         storageService.getJSON<ActivityLogEntry[]>(STORAGE_KEYS.activityLog),
         storageService.getJSON<ReportProjectionQueue>(STORAGE_KEYS.reportProjectionQueue),
         storageService.getJSON<unknown>(STORAGE_KEYS.monthlyPlanning),
+        storageService.getJSON<unknown>(STORAGE_KEYS.assetClassification),
       ]);
       const parsedMonthlyPlanning = parseMonthlyPlanningState(monthlyData);
       const revisionIntegrity = await ensureTaskRevisionIntegrity(parsedMonthlyPlanning);
       const monthlyPlanning = revisionIntegrity.state;
+      const parsedAssetClassification = parseAssetClassificationState(classificationData);
+      const classificationIntegrity = await verifyAssetClassificationIntegrity(parsedAssetClassification);
+      const assetClassification = classificationIntegrity.state;
 
       validateLedgerShape(wtd, reports);
       validateFinancialExtensions({ countdown_data: countdown, goal_achievement_status: goal,
@@ -743,12 +773,14 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         lottery: lotteryData ?? defaultLotteryState(),
         activityLog: activityLogData ?? [],
         monthlyPlanning,
+        assetClassification,
         hydrated: false,
       });
 
       // The version and migrated ledger are one batch. A crash must never leave
       // a version-only "existing installation" with its canonical data missing.
-      if (isFirstRun || storedVersion !== APP_VERSION || reportMigration.changed > 0 || revisionIntegrity.changed) {
+      if (isFirstRun || storedVersion !== APP_VERSION || reportMigration.changed > 0
+        || revisionIntegrity.changed || classificationIntegrity.changed) {
         const mgr = storageService.getDesktopManager();
         if (!isFirstRun && mgr && !(await mgr.backupNow(true))) throw new Error('升级前备份不可用');
         const state = get();
@@ -1389,6 +1421,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         goals: { goals: s.goals, primaryGoalId: s.primaryGoalId },
         levelAchievements: s.levelAchievements,
         monthlyPlanning: s.monthlyPlanning,
+        assetClassification: s.assetClassification,
       };
       const backup = buildBackup(source);
       const text = JSON.stringify(backup, null, 2);
@@ -1414,7 +1447,14 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
           { channels: d.channels, history: d.history, reports: d.reports },
         );
         validateLedgerShape({ channels: merged.channels, history: merged.history }, merged.reports);
-        rawSet({ channels: normalizeChannelAmounts(merged.channels), history: merged.history, reports: merged.reports });
+        rawSet({
+          channels: normalizeChannelAmounts(merged.channels),
+          history: merged.history,
+          reports: merged.reports,
+          assetClassification: d.assetClassification
+            ? mergeAssetClassificationStates(s.assetClassification, d.assetClassification)
+            : s.assetClassification,
+        });
         persist();
         await storageService.flush();
         if (mgr) await drainReportProjection();
@@ -1440,6 +1480,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         lottery: d.lottery ?? defaultLotteryState(),
         goals: d.goals?.goals ?? [],
         primaryGoalId: d.goals?.primaryGoalId ?? null,
+        assetClassification: d.assetClassification ?? emptyAssetClassificationState(),
       });
       persist();
       await storageService.flush();

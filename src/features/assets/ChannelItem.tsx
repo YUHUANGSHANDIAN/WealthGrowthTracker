@@ -2,6 +2,7 @@ import React from 'react';
 import type { Channel, SubChannel } from '../../types';
 import { channelAmount } from '../../utils/channels';
 import { formatCNY } from '../../utils/money';
+import { classificationForChannel, productClassifications, type AssetClassificationState } from '../../domain/assets/classification';
 
 export interface AmountTarget {
   parentId: string;
@@ -50,7 +51,26 @@ function ActionButton({
   );
 }
 
-export function ChannelItem({ channel, handlers, isPinned = false }: { channel: Channel; handlers: ChannelHandlers; isPinned?: boolean }) {
+function productKindLabel(value: string): string {
+  if (value === 'fund-etf-feeder') return 'ETF 联接基金';
+  if (value === 'bank-gold-accumulation') return '银行黄金积存';
+  if (value === 'fund-other') return '基金';
+  if (value === 'cash') return '现金';
+  if (value === 'fixed-income') return '固收';
+  return '分类待核对';
+}
+
+export function ChannelItem({
+  channel,
+  handlers,
+  isPinned = false,
+  classifications,
+}: {
+  channel: Channel;
+  handlers: ChannelHandlers;
+  isPinned?: boolean;
+  classifications: AssetClassificationState;
+}) {
   const amount = channelAmount(channel);
   const children = channel.children ?? [];
   const hasChildren = children.length > 0;
@@ -122,7 +142,18 @@ export function ChannelItem({ channel, handlers, isPinned = false }: { channel: 
                 <span className="text-base" aria-hidden>
                   {sub.emoji}
                 </span>
-                <span className="flex-1 min-w-0 truncate text-sm text-slate-700">{sub.name}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-slate-700">{sub.name}</span>
+                  {(classificationForChannel(classifications, sub.id) || productClassifications(classifications, sub.id).length > 0) && (
+                    <span className="block truncate text-[10px] text-slate-400">
+                      {[
+                        productKindLabel(classificationForChannel(classifications, sub.id)?.productKind ?? 'other'),
+                        ...productClassifications(classifications, sub.id).map((item) => item.snapshot.displayName),
+                        ...(classificationForChannel(classifications, sub.id)?.exposureTags ?? []).map((tag) => `${tag} 敞口`),
+                      ].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                </span>
                 <button
                   className="text-sm font-medium text-slate-700 tabular hover:text-emerald-600 transition-colors"
                   onClick={() =>

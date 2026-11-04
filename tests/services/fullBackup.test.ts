@@ -72,6 +72,7 @@ describe('完整备份 ZIP', () => {
     });
     expect(built.filename).toMatch(/\.wgtbackup\.zip$/);
     expect(built.manifest.kind).toBe(FULL_BACKUP_FORMAT);
+    expect(built.manifest.classificationSchemaVersion).toBe(1);
     const parsed = await parseFullBackup(built.archive);
     expect(parsed.manifest.fileCount).toBe(3);
     expect(parsed.aiMetadataText).toContain('schemaVersion');

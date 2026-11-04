@@ -3,6 +3,11 @@ import { APP_VERSION } from '../../constants/version';
 import { validateLedgerShape, validateFinancialExtensions } from '../storage/validateLedger';
 import { emptyMonthlyPlanningState, parseMonthlyPlanningState } from '../monthlyPlanning/storage';
 import type { MonthlyPlanningState } from '../../domain/portfolio/types';
+import {
+  emptyAssetClassificationState,
+  parseAssetClassificationState,
+  type AssetClassificationState,
+} from '../../domain/assets/classification';
 import type {
   BackupData,
   Channel,
@@ -53,6 +58,7 @@ export interface BackupSource {
   levelAchievements?: LevelAchievement[];
   /** 月度理财状态（结构化备份含该域；附件内容不在此，需「完整含附件备份」） */
   monthlyPlanning?: MonthlyPlanningState | null;
+  assetClassification?: AssetClassificationState | null;
 }
 
 /** 解析+归一化后的可导入数据。 */
@@ -75,6 +81,7 @@ export interface ImportedData {
   goals?: { goals: Goal[]; primaryGoalId: string | null };
   levelAchievements?: LevelAchievement[];
   monthlyPlanning?: MonthlyPlanningState;
+  assetClassification?: AssetClassificationState;
 }
 
 export type ParseResult =
@@ -400,7 +407,7 @@ export function buildBackup(src: BackupSource): BackupData {
   const totalAmount = totalAssets(src.channels);
   const currentLevel = getLevelByAmount(totalAmount);
   return {
-    backupSchemaVersion: 2,
+    backupSchemaVersion: 3,
     version: BACKUP_VERSION,
     exportDate: new Date().toISOString(),
     appInfo: { name: APP_NAME, version: BACKUP_VERSION },
@@ -422,6 +429,7 @@ export function buildBackup(src: BackupSource): BackupData {
       goals: src.goals,
       level_achievements: src.levelAchievements,
       monthly_planning: src.monthlyPlanning ?? undefined,
+      asset_classification: src.assetClassification ?? emptyAssetClassificationState(),
     },
     metadata: {
       totalRecords: {
@@ -454,7 +462,8 @@ export function parseBackup(text: string): ParseResult {
   if (raw.backupSchemaVersion !== undefined
     && raw.backupSchemaVersion !== 0
     && raw.backupSchemaVersion !== 1
-    && raw.backupSchemaVersion !== 2) {
+    && raw.backupSchemaVersion !== 2
+    && raw.backupSchemaVersion !== 3) {
     return { ok: false, error: '备份 Schema 来自更新版本或无效，当前版本不能导入' };
   }
 
@@ -653,6 +662,13 @@ export function parseBackup(text: string): ParseResult {
       return { ok: false, error: `月度理财数据无法导入：${error instanceof Error ? error.message : '格式无效'}` };
     }
   }
+  if (data.asset_classification !== undefined) {
+    try {
+      imported.assetClassification = parseAssetClassificationState(data.asset_classification);
+    } catch (error) {
+      return { ok: false, error: `资产分类数据无法导入：${error instanceof Error ? error.message : '格式无效'}` };
+    }
+  }
 
   const metaRaw = isRecord(raw.metadata) ? raw.metadata : undefined;
   const meta = {
@@ -674,5 +690,6 @@ export function emptyImportedData(): ImportedData {
     goalAchieved: { hasAchievedGoal: false },
     countdownOpacity: 1,
     monthlyPlanning: emptyMonthlyPlanningState(),
+    assetClassification: emptyAssetClassificationState(),
   };
 }

@@ -30,6 +30,7 @@ export interface FullBackupManifest {
   createdAt: string;
   storageSchemaVersion: 1;
   monthlySchemaVersion: 2;
+  classificationSchemaVersion?: 1;
   fileCount: number;
   totalBytes: number;
   files: FullBackupFile[];
@@ -286,6 +287,7 @@ export async function buildFullBackup(input: {
     createdAt: now.toISOString(),
     storageSchemaVersion: 1,
     monthlySchemaVersion: 2,
+    classificationSchemaVersion: 1,
     fileCount: manifestFiles.length,
     totalBytes: manifestFiles.reduce((sum, file) => sum + file.bytes, 0),
     files: manifestFiles,
@@ -317,7 +319,8 @@ export async function parseFullBackup(bytes: Uint8Array): Promise<ParsedFullBack
   if (manifest.kind !== FULL_BACKUP_FORMAT || manifest.formatVersion !== FULL_BACKUP_FORMAT_VERSION) {
     throw new Error('完整备份格式或版本不受支持');
   }
-  if (manifest.storageSchemaVersion > 1 || manifest.monthlySchemaVersion > 2) {
+  if (manifest.storageSchemaVersion > 1 || manifest.monthlySchemaVersion > 2
+    || (manifest.classificationSchemaVersion !== undefined && manifest.classificationSchemaVersion > 1)) {
     throw new Error('完整备份来自更新版本，当前版本禁止恢复');
   }
   if (!Array.isArray(manifest.files) || manifest.files.length + 1 !== entries.size

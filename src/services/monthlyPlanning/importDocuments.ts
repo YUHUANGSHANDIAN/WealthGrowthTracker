@@ -4,6 +4,7 @@ import { assertIntakeAllowed, intakeDocument, type DocumentKind } from '../docum
 import { detectScopeHints, planImageChunks } from '../documents/image';
 import { getAttachment, putAttachment, sha256Hex } from './attachments';
 import type { Holding, HoldingObservation, MonthlyReview, SourceDocument } from '../../domain/portfolio/types';
+import { classifyFundHolding } from '../../domain/assets/classification';
 
 /**
  * 资料导入的纯逻辑部分（不含保存、不含界面），这样它可以被单测覆盖、
@@ -50,15 +51,25 @@ export function extractedHoldingId(documentId: string, tableIndex: number, rowIn
 }
 
 export function candidateToHolding(candidate: HoldingRowCandidate, id: string, channelId: string, platform: Holding['platform']): Holding {
+  const productType: Holding['productType'] = 'fund';
+  const classification = classifyFundHolding({
+    name: candidate.name ?? candidate.fundCode ?? '未命名持仓',
+    fundCode: candidate.fundCode ?? undefined,
+    parentChannelId: channelId,
+    exposureTags: [],
+    productType,
+  });
   return {
     id,
     platform,
     parentChannelId: channelId,
+    ...(classification.childChannelId ? { childChannelId: classification.childChannelId } : {}),
     fundCode: candidate.fundCode ?? undefined,
+    ...(classification.shareClass ? { shareClass: classification.shareClass } : {}),
     originalName: candidate.name ?? candidate.fundCode ?? '未命名持仓',
     currency: 'CNY',
-    productType: 'fund',
-    exposureTags: [],
+    productType,
+    exposureTags: classification.exposureTags,
   };
 }
 

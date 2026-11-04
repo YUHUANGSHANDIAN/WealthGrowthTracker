@@ -19,7 +19,7 @@ import {
 } from '../../services/monthlyPlanning/attachmentArchive';
 import { downloadCSV } from '../../components/charts/export';
 import { buildChannelsCsv, buildHistoryCsv } from '../../utils/dataCsv';
-import { checkDataHealth, checkMonthlyHealth, checkReportHealth, checkGoalHealth, checkAchievementHealth, checkLotteryHealth, domainLabel, type DataIssue, type HealthDomain } from '../../utils/dataHealth';
+import { checkDataHealth, checkMonthlyHealth, checkReportHealth, checkGoalHealth, checkAchievementHealth, checkLotteryHealth, checkClassificationHealth, domainLabel, type DataIssue, type HealthDomain } from '../../utils/dataHealth';
 import { previewMerge } from '../../utils/mergeData';
 import { platformCapabilities } from '../../utils/platform';
 import { useNavigationStore } from '../../store/navigationStore';
@@ -36,6 +36,7 @@ import {
 } from '../../services/export/fullBackup';
 import { restoreAIConnectionMetadata } from '../../store/aiConnectionStore';
 import { bytesToBase64, verifyAttachments } from '../../services/monthlyPlanning/attachments';
+import { ClassificationMigrationCard } from './ClassificationMigrationCard';
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -51,6 +52,7 @@ export function DataPanel() {
   const levelAchievements = useAppStore((s) => s.levelAchievements);
   const lottery = useAppStore((s) => s.lottery);
   const monthlyPlanning = useAppStore((s) => s.monthlyPlanning);
+  const assetClassification = useAppStore((s) => s.assetClassification);
   const navigate = useNavigationStore((s) => s.navigate);
 
   const [preview, setPreview] = useState<{ text: string; channels: number; history: number; reports: number; merge: ReturnType<typeof previewMerge> } | null>(null);
@@ -96,9 +98,10 @@ export function DataPanel() {
     const achievement = checkAchievementHealth(levelAchievements);
     const lotteryHealth = checkLotteryHealth(lottery);
     const monthly = checkMonthlyHealth(monthlyPlanning, { attachmentStatus });
-    const issues = [...base.issues, ...report, ...goal, ...achievement, ...lotteryHealth, ...monthly];
+    const classification = checkClassificationHealth(channels, monthlyPlanning, assetClassification);
+    const issues = [...base.issues, ...report, ...goal, ...achievement, ...lotteryHealth, ...monthly, ...classification];
     return { ...base, issues, ok: issues.length === 0 };
-  }, [channels, history, reports, goals, primaryGoalId, levelAchievements, lottery, monthlyPlanning, attachmentStatus]);
+  }, [channels, history, reports, goals, primaryGoalId, levelAchievements, lottery, monthlyPlanning, assetClassification, attachmentStatus]);
   const sortedHistory = useMemo(() => [...history].sort((a, b) => (a.date < b.date ? -1 : 1)), [history]);
 
   useEffect(() => {
@@ -510,6 +513,7 @@ export function DataPanel() {
       {/* 数据健康与维护中心（v1.6：动态 Maintenance Action + 问题详情） */}
       <MaintenanceActions actions={maintenanceActions} />
       <DataHealthCenter issues={health.issues} onFix={doFix} busy={busy} />
+      <ClassificationMigrationCard />
 
       {/* 活动日志 */}
       <ActivityLogCard />
@@ -931,7 +935,7 @@ function MaintenanceActions({ actions }: { actions: MaintenanceAction[] }) {
 
 const DOMAIN_ICONS: Record<HealthDomain, string> = {
   assets: '💰', history: '🕰️', reports: '📑', goals: '🎯', levels: '🏅', lottery: '🎟️', storage: '🗄️', settings: '⚙️',
-  monthly: '📅',
+  monthly: '📅', classification: '🧭',
 };
 
 function issueNavigateTarget(i: DataIssue): { tab: import('../../store/navigationStore').TabId; extra?: Record<string, string> } | null {
@@ -943,6 +947,7 @@ function issueNavigateTarget(i: DataIssue): { tab: import('../../store/navigatio
     case 'lottery': return { tab: 'lottery' };
     case 'levels': return { tab: 'assets' };
     case 'monthly': return { tab: 'monthly' };
+    case 'classification': return { tab: 'analysis' };
     case 'storage': return { tab: 'data' };
     case 'settings': return { tab: 'settings' };
     default: return null;

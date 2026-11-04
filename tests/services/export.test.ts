@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { BackupSource } from '../../src/services/export';
 import { buildBackup, parseBackup, BACKUP_VERSION } from '../../src/services/export';
 import { defaultChannels, defaultCoinRainConfig, defaultChartSettings } from '../../src/constants/defaults';
+import { emptyAssetClassificationState } from '../../src/domain/assets/classification';
 
 function makeSource(): BackupSource {
   return {
@@ -40,6 +41,7 @@ describe('导出 / 导入（数据兼容核心）', () => {
     expect(parsed.data.history.length).toBe(src.history.length);
     expect(parsed.data.countdown.targetAmount).toBe(1_000_000);
     expect(parsed.data.countdownOpacity).toBe(0.8);
+    expect(parsed.data.assetClassification).toEqual(emptyAssetClassificationState());
   });
 
   it('解析旧版备份（仅含核心 6 键）', () => {
@@ -135,8 +137,8 @@ describe('导出 / 导入（数据兼容核心）', () => {
 
   it('备份 Schema 独立于应用版本，拒绝未来 Schema', () => {
     const backup = buildBackup(makeSource());
-    expect(backup.backupSchemaVersion).toBe(2);
-    expect(parseBackup(JSON.stringify({ ...backup, backupSchemaVersion: 3 })).ok).toBe(false);
+    expect(backup.backupSchemaVersion).toBe(3);
+    expect(parseBackup(JSON.stringify({ ...backup, backupSchemaVersion: 4 })).ok).toBe(false);
     expect(parseBackup(JSON.stringify({ ...backup, backupSchemaVersion: undefined, version: '1.6.1' })).ok).toBe(true);
   });
 
