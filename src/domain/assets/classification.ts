@@ -116,7 +116,9 @@ function parseSnapshot(value: unknown, label: string): ClassificationSnapshot | 
     ...(value.childChannelId !== undefined ? { childChannelId: value.childChannelId as string } : {}),
     productKind: value.productKind as ProductKind,
     ...(value.shareClass !== undefined ? { shareClass: value.shareClass as 'A' | 'C' | 'other' } : {}),
-    exposureTags: [...new Set(value.exposureTags as string[])].sort(),
+    // Arrays are part of the signed event payload. Preserve their persisted order
+    // so parsing an older event cannot change its content hash.
+    exposureTags: [...value.exposureTags as string[]],
     ...(value.amountBasis !== undefined ? { amountBasis: value.amountBasis as ClassificationSnapshot['amountBasis'] } : {}),
   };
 }
@@ -171,7 +173,8 @@ export function parseAssetClassificationState(value: unknown): AssetClassificati
       before: parseSnapshot(raw.before, '分类事件 before '),
       after: parseSnapshot(raw.after, '分类事件 after '),
       source: raw.source as ClassificationSource,
-      evidenceIds: [...new Set(raw.evidenceIds)].sort(),
+      // evidenceIds participate in contentHash; keep the exact persisted order.
+      evidenceIds: [...raw.evidenceIds as string[]],
       ...(raw.observedAt !== undefined ? { observedAt: raw.observedAt } : {}),
       classifiedAt: raw.classifiedAt,
       ...(raw.migrationId !== undefined ? { migrationId: raw.migrationId } : {}),
@@ -249,10 +252,24 @@ export function productClassifications(
     .sort((a, b) => a.targetId.localeCompare(b.targetId));
 }
 
+function normalizeSnapshotForPersistence(snapshot: ClassificationSnapshot | null): ClassificationSnapshot | null {
+  if (snapshot === null) return null;
+  return {
+    ...snapshot,
+    exposureTags: [...new Set(snapshot.exposureTags)].sort(),
+  };
+}
+
 export async function createClassificationEvent(input: ClassificationEventInput): Promise<AssetClassificationEvent> {
   const id = crypto.randomUUID();
-  const contentHash = await sha256Text(canonicalJson({ ...input, id }));
-  return { ...input, id, contentHash };
+  const normalized: ClassificationEventInput = {
+    ...input,
+    evidenceIds: [...new Set(input.evidenceIds)].sort(),
+    before: normalizeSnapshotForPersistence(input.before),
+    after: normalizeSnapshotForPersistence(input.after),
+  };
+  const contentHash = await sha256Text(canonicalJson({ ...normalized, id }));
+  return { ...normalized, id, contentHash };
 }
 
 export async function verifyAssetClassificationIntegrity(

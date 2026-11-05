@@ -11,6 +11,7 @@ import {
   projectMonthlyPlanningClassification,
   verifyAssetClassificationIntegrity,
 } from '../../src/domain/assets/classification';
+import { canonicalJson, sha256Text } from '../../src/utils/canonicalHash';
 import {
   applyAlipayClassificationMigration,
   buildAlipayClassificationMigrationPlan,
@@ -170,6 +171,72 @@ describe('资产分类领域', () => {
 
   it('未来分类 schema 失败关闭', () => {
     expect(() => parseAssetClassificationState({ schemaVersion: 2, events: [], migrations: {} })).toThrow('更新版本');
+  });
+
+  it('新建事件规范化数组并支持持久化往返校验', async () => {
+    const event = await createClassificationEvent({
+      kind: 'product-classify',
+      target: { type: 'product', id: 'product:test' },
+      before: null,
+      after: {
+        productKind: 'other',
+        exposureTags: ['liquidity', 'gold', 'gold'],
+        amountBasis: 'unallocated',
+      },
+      source: 'rule-proposed',
+      evidenceIds: ['doc:z', 'doc:a', 'doc:z'],
+      classifiedAt: '2026-11-04T00:00:00.000Z',
+      reason: '合成测试',
+    });
+    expect(event.evidenceIds).toEqual(['doc:a', 'doc:z']);
+    expect(event.after?.exposureTags).toEqual(['gold', 'liquidity']);
+    const parsed = parseAssetClassificationState(JSON.parse(JSON.stringify({
+      ...emptyAssetClassificationState(),
+      events: [event],
+    })));
+    await expect(verifyAssetClassificationIntegrity(parsed)).resolves.toMatchObject({ changed: false });
+  });
+
+  it('已有事件按原始数组顺序解析后仍通过哈希校验', async () => {
+    const id = 'legacy-event';
+    const input = {
+      kind: 'holding-reclassify' as const,
+      target: { type: 'holding' as const, id: 'holding-1', taskId: 'task-1' },
+      before: { productKind: 'fund-other' as const, exposureTags: ['liquidity', 'gold'] },
+      after: { childChannelId: 'fund', productKind: 'fund-etf-feeder' as const, exposureTags: ['gold', 'liquidity'] },
+      source: 'user-confirmed' as const,
+      evidenceIds: ['doc:z', 'doc:a'],
+      classifiedAt: '2026-11-04T00:00:00.000Z',
+      reason: '已部署数据的哈希以当时数组顺序计算',
+    };
+    const event = { ...input, id, contentHash: await sha256Text(canonicalJson({ ...input, id })) };
+    const parsed = parseAssetClassificationState({
+      schemaVersion: 1,
+      migrations: {},
+      events: [event],
+    });
+    expect(parsed.events[0]?.evidenceIds).toEqual(['doc:z', 'doc:a']);
+    expect(parsed.events[0]?.after?.exposureTags).toEqual(['gold', 'liquidity']);
+    await expect(verifyAssetClassificationIntegrity(parsed)).resolves.toMatchObject({ changed: false });
+  });
+
+  it('分类事件被篡改后仍失败关闭', async () => {
+    const event = await createClassificationEvent({
+      kind: 'product-classify',
+      target: { type: 'channel', id: 'channel-1' },
+      before: null,
+      after: { productKind: 'other', exposureTags: ['gold'] },
+      source: 'user-confirmed',
+      evidenceIds: ['doc:1'],
+      classifiedAt: '2026-11-04T00:00:00.000Z',
+      reason: '合成测试',
+    });
+    const parsed = parseAssetClassificationState({
+      schemaVersion: 1,
+      migrations: {},
+      events: [{ ...event, reason: '被篡改' }],
+    });
+    await expect(verifyAssetClassificationIntegrity(parsed)).rejects.toThrow('内容哈希不符');
   });
 
   it('分类健康报告缺失迁移、基金归属和黄金敞口', () => {
