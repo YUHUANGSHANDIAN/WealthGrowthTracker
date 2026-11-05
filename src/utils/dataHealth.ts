@@ -3,8 +3,10 @@ import { round2 } from './money';
 import { isValidTimezone } from './goals';
 import { canonicalWeeklyPeriod, parseWeeklyPeriodKey } from './isoWeek';
 import type { MonthlyReview } from '../domain/portfolio/types';
+import type { AssetClassificationState } from '../domain/assets/classification';
+import { ALIPAY_GOLD_CLASSIFICATION_MIGRATION_ID, classificationForHolding } from '../domain/assets/classification';
 
-export type HealthDomain = 'assets' | 'history' | 'reports' | 'goals' | 'levels' | 'lottery' | 'storage' | 'settings' | 'monthly';
+export type HealthDomain = 'assets' | 'history' | 'reports' | 'goals' | 'levels' | 'lottery' | 'storage' | 'settings' | 'monthly' | 'classification';
 
 export interface FixStrategy {
   id: string;
@@ -70,7 +72,74 @@ export function domainLabel(d: HealthDomain): string {
     case 'storage': return '存储与备份';
     case 'settings': return '设置';
     case 'monthly': return '月度理财';
+    case 'classification': return '分类与敞口';
   }
+}
+
+/** 分类健康只报告问题，不自动改渠道、持仓或历史。 */
+export function checkClassificationHealth(
+  channels: Channel[],
+  state: { sessions: MonthlyReview[]; taskRevisions: Array<{ taskId: string; revision: number }> },
+  classifications: AssetClassificationState,
+): DataIssue[] {
+  const issues: DataIssue[] = [];
+  const channelIds = new Set(channels.flatMap((channel) => [channel.id, ...(channel.children ?? []).map((child) => child.id)]));
+  const taskIds = new Set(state.sessions.map((task) => task.key));
+  const holdingIds = new Set(state.sessions.flatMap((task) => task.holdings.map((holding) => `${task.key}:${holding.id}`)));
+  if (channelIds.has('alipay_gold') && !classifications.migrations[ALIPAY_GOLD_CLASSIFICATION_MIGRATION_ID]) {
+    issues.push(makeIssue('classification', 'warning', '支付宝分类迁移尚未应用',
+      '银行黄金、黄金基金归属和风险敞口仍使用未分类状态', null));
+  }
+  for (const event of classifications.events) {
+    if (event.target.type === 'channel' && !channelIds.has(event.target.id)) {
+      issues.push(makeIssue('classification', 'warning', '分类事件引用已删除渠道',
+        `渠道 ${event.target.id} 的分类事件仍存在`, null, { entityId: event.id }));
+    }
+    if (event.target.type === 'holding' && (!event.target.taskId || !taskIds.has(event.target.taskId)
+      || !holdingIds.has(`${event.target.taskId}:${event.target.id}`))) {
+      issues.push(makeIssue('classification', 'warning', '分类事件引用孤立持仓',
+        `持仓 ${event.target.id} 不存在于原任务`, null, { entityId: event.id }));
+    }
+    if (event.target.type === 'product' && event.after?.childChannelId
+      && !channelIds.has(event.after.childChannelId)) {
+      issues.push(makeIssue('classification', 'warning', '产品描述引用缺失渠道',
+        `产品 ${event.target.id} 引用的渠道不存在`, null, { entityId: event.id }));
+    }
+  }
+  for (const task of state.sessions) {
+    const duplicateCodes = new Map<string, number>();
+    let missingGoldExposure = 0;
+    let missingAlipayFundChannel = 0;
+    for (const holding of task.holdings) {
+      const classification = classificationForHolding(classifications, task.key, holding.id);
+      const exposureTags = classification?.exposureTags ?? holding.exposureTags;
+      const childChannelId = classification?.childChannelId ?? holding.childChannelId;
+      const key = `${holding.parentChannelId}:${holding.fundCode ?? holding.originalName}`;
+      duplicateCodes.set(key, (duplicateCodes.get(key) ?? 0) + 1);
+      if (/黄金/.test(holding.originalName) && !exposureTags.includes('gold')) {
+        missingGoldExposure += 1;
+      }
+      if (holding.parentChannelId === 'alipay' && holding.productType === 'fund'
+        && childChannelId !== 'alipay_fund') {
+        missingAlipayFundChannel += 1;
+      }
+    }
+    if (missingGoldExposure > 0) {
+      issues.push(makeIssue('classification', 'warning', '黄金产品缺少风险敞口',
+        `任务 ${task.key} 有 ${missingGoldExposure} 条黄金产品尚未标记 gold 敞口`, null, { entityId: task.key }));
+    }
+    if (missingAlipayFundChannel > 0) {
+      issues.push(makeIssue('classification', 'warning', '支付宝基金缺少基金叶子归属',
+        `任务 ${task.key} 有 ${missingAlipayFundChannel} 条基金尚未归入 alipay_fund`, null, { entityId: task.key }));
+    }
+    for (const [key, count] of duplicateCodes) {
+      if (count > 1) {
+        issues.push(makeIssue('classification', 'warning', '同渠道重复基金代码',
+          `${key} 在同一任务出现 ${count} 次；保留原记录，禁止自动合并`, null, { entityId: task.key }));
+      }
+    }
+  }
+  return issues;
 }
 
 /**

@@ -692,7 +692,7 @@ export interface ActivityLogEntry {
 
 /** 完整导出/导入用的备份结构（version 1.0.0，与旧版兼容）。 */
 export interface BackupData {
-  backupSchemaVersion?: 0 | 1 | 2;
+  backupSchemaVersion?: 0 | 1 | 2 | 3;
   version: string;
   exportDate: string;
   appInfo: { name: string; version: string };
@@ -718,6 +718,8 @@ export interface BackupData {
     goals?: GoalState;
     /** 月度理财状态（新域；结构化备份含该键，附件内容不在此） */
     monthly_planning?: MonthlyPlanningState;
+    /** 资产产品分类与风险敞口事件；不含第二份资产余额 */
+    asset_classification?: AssetClassificationState;
   };
   metadata?: {
     totalRecords?: Record<string, number>;
@@ -729,3 +731,4 @@ export interface BackupData {
   totalCount?: number;
 }
 import type { MonthlyPlanningState } from '../domain/portfolio/types';
+import type { AssetClassificationState } from '../domain/assets/classification';

@@ -6,16 +6,16 @@ import { todayString } from '../../utils/date';
 import { Card, Button, Badge, EmptyState } from '../../components/ui/primitives';
 import { Modal, ConfirmDialog } from '../../components/ui/Modal';
 import { TextField } from '../../components/ui/form';
-import { LineChart } from '../../components/charts/LineChart';
-import { BRAND } from '../../components/charts/palette';
 import type { HistoryEditProposal } from './transaction';
 import { HistoryRecords } from './HistoryRecords';
-import { buildHistoryRows, historyChartPoints, historySource, isHistoryDate } from './historyView';
+import { buildHistoryRows, historySource, isHistoryDate } from './historyView';
+import { useNavigationStore } from '../../store/navigationStore';
 
 export function HistoryPanel() {
   const history = useAppStore((s) => s.history);
   const hidden = useWorkspaceStore((s) => s.amountsHidden);
   const { prepareHistoryEdit, confirmHistoryEdit, deleteHistoryPoints } = useAppStore();
+  const navigate = useNavigationStore((state) => state.navigate);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingDate, setEditingDate] = useState<string | null>(null);
@@ -45,19 +45,6 @@ export function HistoryPanel() {
     if (rangeEnd) list = list.filter((row) => row.point.date <= rangeEnd);
     return list;
   }, [sortedAsc, rangeStart, rangeEnd, rangeInvalid]);
-
-  const chartSeries = useMemo(
-    () => [
-      {
-        id: 'total',
-        name: '总资产',
-        color: BRAND,
-        points: historyChartPoints(filtered),
-        area: true,
-      },
-    ],
-    [filtered],
-  );
 
   useEffect(() => {
     if (hidden) { setAmount(''); setFormOpen(false); setProposal(null); setDiscardOpen(false); }
@@ -143,7 +130,7 @@ export function HistoryPanel() {
       <p className="text-sm leading-relaxed text-slate-600">按日回顾资产快照与事件。缺失日期保留断点；事件备注只帮助回忆，不构成现金流台账。</p>
       <Card className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-          <h2 className="font-semibold text-slate-800">资产历史趋势</h2>
+          <h2 className="font-semibold text-slate-800">快照覆盖</h2>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <label className="min-w-0 flex-1 text-xs text-slate-500">起始日期
             <input
@@ -167,12 +154,22 @@ export function HistoryPanel() {
           </div>
         </div>
         {rangeInvalid && <p className="mb-3 text-sm text-red-600" role="alert">起始日期不能晚于结束日期。</p>}
-        {chartSeries[0]!.points.some(point => point.value !== null) ? (
-          <LineChart series={chartSeries} valueFormatter={formatCNY} ariaLabel="总资产历史趋势图" />
-        ) : (
-          <EmptyState icon="📊" title={rangeInvalid ? '请调整日期范围' : '暂无可绘制的历史数据'} description="添加有效历史记录，或调整日期筛选范围。" />
-        )}
-        <p className="mt-3 text-xs leading-relaxed text-slate-500">当前范围有 {observedDays} 个有效记录日{spanDays !== null && spanDays > 0 ? `，范围共 ${spanDays} 天` : ''}。未记录的日期不补零；变化与前一有效记录比较，基准可能在筛选范围之前。</p>
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+          <div>
+            <div className="text-2xl font-semibold tabular text-slate-800">{observedDays} 个有效记录日</div>
+            <p className="mt-1 text-xs leading-relaxed text-slate-500">
+              {spanDays !== null && spanDays > 0 ? `筛选范围共 ${spanDays} 天。` : '选择日期范围以查看覆盖。'}
+              未记录日期不补零；趋势、渠道结构与变动解读统一在「资产历史趋势」中查看。
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            className="min-h-[44px]"
+            onClick={() => navigate({ tab: 'analysis', startDate: rangeStart || undefined, endDate: rangeEnd || undefined })}
+          >
+            打开资产历史趋势
+          </Button>
+        </div>
       </Card>
 
       <div className="flex flex-wrap items-center justify-between gap-3">

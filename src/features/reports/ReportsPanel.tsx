@@ -29,6 +29,7 @@ import {
 } from './reportSort';
 import { getLevelByAmount } from '../../constants/levels';
 import { ReportAIAnnotations } from '../ai/ReportAIAnnotations';
+import { classificationForChannel, type AssetClassificationState } from '../../domain/assets/classification';
 
 const TYPE_META: Record<ReportType, { label: string; icon: string; tone: 'emerald' | 'blue' | 'purple' }> = {
   weekly: { label: '周报', icon: '📅', tone: 'emerald' },
@@ -482,6 +483,7 @@ function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, 
   onRepair: (r: FinancialReport) => void;
   onEditFull: (r: FinancialReport) => void;
 }) {
+  const classifications = useAppStore((state) => state.assetClassification);
   const [shareOpen, setShareOpen] = useState(false);
   const navigate = useNavigationStore((s) => s.navigate);
   const positive = report.changeAmount >= 0;
@@ -561,7 +563,7 @@ function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, 
         <section>
           <SectionTitle>资产构成</SectionTitle>
           {report.assetComposition && report.assetComposition.parents.length > 0 ? (
-            <HierarchicalComposition comp={report.assetComposition} />
+            <HierarchicalComposition comp={report.assetComposition} classifications={classifications} />
           ) : items.length > 0 ? (
             <BarChart items={items} ariaLabel="报告资产构成" />
           ) : (
@@ -852,7 +854,7 @@ function RepairReportModal({ report, history, onClose, onApply }: {
 }
 
 /** 层级资产构成：父渠道 rollup 条 + 点击展开子渠道 breakdown。 */
-function HierarchicalComposition({ comp }: { comp: ReportAssetComposition }) {
+function HierarchicalComposition({ comp, classifications }: { comp: ReportAssetComposition; classifications: AssetClassificationState }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const parents = [...comp.parents].sort((a, b) => b.amount - a.amount);
   const maxAmount = Math.max(1, ...parents.map((p) => p.amount));
@@ -871,6 +873,7 @@ function HierarchicalComposition({ comp }: { comp: ReportAssetComposition }) {
       {parents.map((p) => {
         const open = expanded.has(p.id);
         const widthPct = Math.max(2, (p.amount / maxAmount) * 100);
+        const currentParentName = classificationForChannel(classifications, p.id)?.displayName;
         return (
           <div key={p.id} className="border border-slate-100 rounded-lg overflow-hidden">
             <button
@@ -881,6 +884,7 @@ function HierarchicalComposition({ comp }: { comp: ReportAssetComposition }) {
               <span aria-hidden>{p.emoji}</span>
               <span className="flex-1 min-w-0">
                 <span className="font-semibold text-slate-800 text-sm truncate">{p.name}</span>
+                {currentParentName && currentParentName !== p.name && <span className="block text-[11px] text-slate-400">当前分类名称：{currentParentName}</span>}
                 <span className="block h-1.5 mt-1 bg-slate-100 rounded-full overflow-hidden">
                   <span className="block h-full bg-emerald-500 rounded-full" style={{ width: `${widthPct}%` }} />
                 </span>
@@ -898,7 +902,12 @@ function HierarchicalComposition({ comp }: { comp: ReportAssetComposition }) {
                 {[...p.children].sort((a, b) => b.amount - a.amount).map((c) => (
                   <div key={c.id} className="flex items-center gap-2 px-4 py-2 pl-8">
                     <span aria-hidden>{c.emoji}</span>
-                    <span className="flex-1 text-sm text-slate-700 truncate">{c.name}</span>
+                    <span className="flex-1 text-sm text-slate-700 truncate">
+                      {c.name}
+                      {classificationForChannel(classifications, c.id)?.displayName
+                        && classificationForChannel(classifications, c.id)?.displayName !== c.name
+                        && <span className="block text-[10px] text-slate-400">当前：{classificationForChannel(classifications, c.id)?.displayName}</span>}
+                    </span>
                     <span className="text-sm tabular text-slate-600">{formatCNY(c.amount)}</span>
                     <span className="text-xs text-slate-400 tabular w-20 text-right">占父 {c.percentageOfParent.toFixed(1)}%</span>
                     <span className="text-xs text-slate-400 tabular w-20 text-right">占总 {c.percentageOfTotal.toFixed(1)}%</span>

@@ -5,6 +5,12 @@ import { emptyMonthlyPlanningState } from '../../src/services/monthlyPlanning/st
 import { createFinanceDraftSession } from '../../src/domain/portfolio/session';
 import { putAttachment } from '../../src/services/monthlyPlanning/attachments';
 import {
+  createClassificationEvent,
+  emptyAssetClassificationState,
+  parseAssetClassificationState,
+  verifyAssetClassificationIntegrity,
+} from '../../src/domain/assets/classification';
+import {
   FULL_BACKUP_FORMAT,
   buildFullBackup,
   createStoredZip,
@@ -72,6 +78,7 @@ describe('完整备份 ZIP', () => {
     });
     expect(built.filename).toMatch(/\.wgtbackup\.zip$/);
     expect(built.manifest.kind).toBe(FULL_BACKUP_FORMAT);
+    expect(built.manifest.classificationSchemaVersion).toBe(1);
     const parsed = await parseFullBackup(built.archive);
     expect(parsed.manifest.fileCount).toBe(3);
     expect(parsed.aiMetadataText).toContain('schemaVersion');
@@ -110,5 +117,32 @@ describe('完整备份 ZIP', () => {
       monthlyPlanning: emptyMonthlyPlanningState(),
       aiMetadata: JSON.stringify({ apiKey: 'must-not-be-in-backup' }),
     })).rejects.toThrow('不应进入备份');
+  });
+
+  it('完整备份往返后分类事件仍可验证', async () => {
+    const event = await createClassificationEvent({
+      kind: 'product-classify',
+      target: { type: 'channel', id: 'synthetic-channel' },
+      before: null,
+      after: { productKind: 'other', exposureTags: ['gold'] },
+      source: 'user-confirmed',
+      evidenceIds: ['doc:z', 'doc:a'],
+      classifiedAt: '2026-11-01T08:00:00.000Z',
+      reason: '合成备份测试',
+    });
+    const classification = { ...emptyAssetClassificationState(), events: [event] };
+    await storageService.setRaw(STORAGE_KEYS.assetClassification, JSON.stringify(classification));
+    const built = await buildFullBackup({
+      revision: 4,
+      monthlyPlanning: emptyMonthlyPlanningState(),
+      now: new Date('2026-11-01T08:00:00.000Z'),
+    });
+    const parsedBackup = await parseFullBackup(built.archive);
+    const envelope = JSON.parse(parsedBackup.stateText) as { payload: Record<string, string> };
+    const parsedClassification = parseAssetClassificationState(
+      JSON.parse(envelope.payload.asset_classification_state ?? ''),
+    );
+    expect(parsedClassification.events).toHaveLength(1);
+    await expect(verifyAssetClassificationIntegrity(parsedClassification)).resolves.toMatchObject({ changed: false });
   });
 });

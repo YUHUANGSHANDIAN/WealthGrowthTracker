@@ -36,7 +36,7 @@ export function defaultChannels(): Channel[] {
         child('alipay_yuebao', '余额宝', '💎', '#F59E0B', 'alipay'),
         child('alipay_fund', '基金', '📊', '#3B82F6', 'alipay'),
         child('alipay_fixed', '定期', '🔒', '#8B5CF6', 'alipay'),
-        child('alipay_gold', '黄金', '🥇', '#D97706', 'alipay'),
+        child('alipay_gold', '银行黄金', '🏦', '#D97706', 'alipay'),
         child('alipay_securities', '券商理财', '📈', '#06B6D4', 'alipay'),
       ],
     },

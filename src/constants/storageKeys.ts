@@ -24,6 +24,8 @@ export const STORAGE_KEYS = {
   goals: 'goals',
   /** 月度理财（WealthGrowthPlanner）状态：新域，独立键，不与旧键混用 */
   monthlyPlanning: 'monthly_planning_state',
+  /** 资产产品形态、渠道分类和风险敞口事件；不保存第二份资产余额 */
+  assetClassification: 'asset_classification_state',
   countdownOpacity: 'countdown_opacity',
   coinRainConfig: 'coin_rain_config',
   countdownProgressHistory: 'countdown_progress_history',

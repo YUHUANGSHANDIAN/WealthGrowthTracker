@@ -14,6 +14,7 @@ import { AmountBatchModal } from './AmountBatchModal';
 import { AIActionButton } from '../ai/AIActionButton';
 import type { FirstChildStrategy, LastChildStrategy } from '../../utils/channels';
 import type { ChannelGrowth } from '../../types';
+import { HoldingClassificationPanel } from './HoldingClassificationPanel';
 
 type SortConfig =
   | { mode: 'default' }
@@ -54,6 +55,7 @@ function sortSubChildren(children: SubChannel[], sort: SubSort, growths: Map<str
 
 export function AssetsPanel() {
   const channels = useAppStore((s) => s.channels);
+  const assetClassification = useAppStore((s) => s.assetClassification);
   const history = useAppStore((s) => s.history);
   const sortRules = useAppStore((s) => s.sortRules);
   const pinnedChannelIds = useAppStore((s) => s.pinnedChannelIds);
@@ -280,10 +282,11 @@ export function AssetsPanel() {
       ) : (
         <div className="space-y-3">
           {sortedChannels.map((c) => (
-            <ChannelItem key={c.id} channel={c} handlers={handlers} isPinned={pinned.has(c.id)} />
+            <ChannelItem key={c.id} channel={c} handlers={handlers} isPinned={pinned.has(c.id)} classifications={assetClassification} />
           ))}
         </div>
       )}
+      <HoldingClassificationPanel />
 
       {/* 表单弹窗 */}
       <ChannelFormModal
