@@ -56,6 +56,12 @@ try {
             build = @{
                 beforeBuildCommand = ''
             }
+            bundle = @{
+                # Keep downloaded bundler tools on the same drive as the
+                # external Cargo target. Otherwise NSIS extraction can fail
+                # with ERROR_NOT_SAME_DEVICE when the user cache is on C:.
+                useLocalToolsDir = $true
+            }
         } | ConvertTo-Json -Compress -Depth 4
         $tauriArgs = @(
             'tauri', 'build', '--ci',
