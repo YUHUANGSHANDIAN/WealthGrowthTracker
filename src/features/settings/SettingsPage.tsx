@@ -1,17 +1,18 @@
 import { useNavigationStore } from '../../store/navigationStore';
 import { SettingsContent } from './SettingsModal';
+import { PageHeader } from '../../components/ui/workspace';
 
 export function SettingsPage() {
   const section = useNavigationStore((state) => state.settingsSection ?? 'profile');
   const navigate = useNavigationStore((state) => state.navigate);
   return (
     <div className="settings-page">
-      <div className="workspace-intro">
-        <div>
-          <h2>你的工作台偏好</h2>
-          <p>个人设置、记录规则和数据边界；每个分类都可通过链接直接打开。</p>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="应用设置"
+        title="你的工作台偏好"
+        description="个人偏好、记录规则与数据边界分区管理。危险操作与能力验证状态分开呈现。"
+        context={<><span>普通偏好</span><span>·</span><span>模型连接</span><span>·</span><span>数据健康与恢复</span></>}
+      />
       <SettingsContent section={section} onSectionChange={(settingsSection) => navigate({ tab: 'settings', settingsSection })} />
     </div>
   );

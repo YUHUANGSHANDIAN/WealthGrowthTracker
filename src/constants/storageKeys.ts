@@ -35,6 +35,20 @@ export const STORAGE_KEYS = {
   levelAchievements: 'level_achievements',
   lotteryState: 'lottery_state',
   activityLog: 'activity_log',
+  /** Stable identity for this canonical ledger. Drafts and named views are scoped by it. */
+  ledgerIdentity: 'ledger_identity',
+  /** Monotonic revision for protected financial/domain state; persisted across restarts. */
+  dataRevision: 'data_revision',
+  /** Non-secret recoverable editor drafts. Never contains credentials or binary attachment copies. */
+  workspaceDrafts: 'workspace_drafts',
+  /** User decisions for data-health issues. */
+  healthReviews: 'health_review_state',
+  /** Append-only immutable snapshots of financial report revisions. */
+  reportRevisions: 'report_revision_state',
+  /** Saved goal assumptions, not projected facts. */
+  goalScenarios: 'goal_scenario_state',
+  /** Named filters and safe UI preferences. */
+  workspaceUi: 'workspace_ui_state',
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { LotteryState } from '../../src/types';
 import { checkLotteryHealth, checkDataHealth, checkReportHealth } from '../../src/utils/dataHealth';
-import { useNavigationStore } from '../../src/store/navigationStore';
+import { buildHash, parseHash, useNavigationStore } from '../../src/store/navigationStore';
 
 function lotteryState(): LotteryState {
   return {
@@ -67,5 +67,29 @@ describe('Navigation', () => {
     useNavigationStore.getState().navigate({ tab: 'assets' });
     expect(useNavigationStore.getState().tab).toBe('assets');
     expect(useNavigationStore.getState().reportId).toBeUndefined();
+  });
+
+  it('深层上下文写入 hash 并可恢复', () => {
+    const hash = buildHash({
+      tab: 'reports',
+      reportId: 'r 1',
+      reportMode: 'revisions',
+      reportRevisionFrom: 'old',
+      reportRevisionTo: 'current',
+    });
+    expect(parseHash(hash)).toMatchObject({
+      tab: 'reports',
+      reportId: 'r 1',
+      reportMode: 'revisions',
+      reportRevisionFrom: 'old',
+      reportRevisionTo: 'current',
+    });
+    const trend = parseHash('#/review/trends?compareFrom=2026-01-01&compareTo=2026-02-01&assetView=holdings');
+    expect(trend).toMatchObject({
+      tab: 'analysis',
+      trendCompareFrom: '2026-01-01',
+      trendCompareTo: '2026-02-01',
+      assetView: 'holdings',
+    });
   });
 });

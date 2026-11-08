@@ -1,10 +1,12 @@
 import { Badge, Button, Card } from '../../components/ui/primitives';
-import { FINANCE_TASK_KIND_LABELS } from '../../domain/portfolio/session';
+import { FINANCE_TASK_KIND_LABELS, taskKindOf } from '../../domain/portfolio/session';
 import type { FinanceTaskKind } from '../../domain/portfolio/types';
 import { useNavigationStore } from '../../store/navigationStore';
 import { useAIConnectionStore } from '../../store/aiConnectionStore';
 import { MonthlyPlannerPanel } from '../monthlyPlanning/MonthlyPlannerPanel';
 import { FinanceTaskPanel } from './FinanceTaskPanel';
+import { useAppStore } from '../../store/appStore';
+import { PageHeader } from '../../components/ui/workspace';
 
 const TASK_CARDS: Array<{
   kind: FinanceTaskKind;
@@ -29,12 +31,27 @@ export function FinanceWorkbench() {
   const connections = useAIConnectionStore((state) => state.profiles);
   const currentId = useAIConnectionStore((state) => state.activeProfileId);
   const activate = useAIConnectionStore((state) => state.activate);
+  const sessions = useAppStore((state) => state.monthlyPlanning.sessions);
   const current = connections.find((item) => item.profileId === currentId);
   const enabledConnections = connections.filter((item) => item.enabled);
   const selected = TASK_CARDS.find((item) => item.kind === kind) ?? TASK_CARDS[1]!;
+  const latestTask = [...sessions]
+    .filter((task) => !['archived', 'cancelled'].includes(task.state))
+    .sort((a, b) => b.generatedAt.localeCompare(a.generatedAt))[0];
 
   return (
     <div className="space-y-5">
+      <PageHeader
+        eyebrow="连续理财工作区"
+        title={selected ? FINANCE_TASK_KIND_LABELS[kind] : '理财工作台'}
+        description="从证据、核对、方案到人工回执与归档使用同一份权威账本；AI 关闭时仍可完成本地工作。"
+        context={<><span>{sessions.filter((task) => !['archived', 'cancelled'].includes(task.state)).length} 个进行中任务</span><span>·</span><span>当前连接 {current?.label ?? 'AI 已关闭/未选择'}</span></>}
+        primaryAction={latestTask ? (
+          <Button onClick={() => navigate({ tab: 'monthly', financeTaskKind: taskKindOf(latestTask), financeTaskId: latestTask.key })}>
+            继续上次工作
+          </Button>
+        ) : <Button onClick={() => navigate({ tab: 'monthly', financeTaskKind: 'monthly-review' })}>开始月度复盘</Button>}
+      />
       <Card className="p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

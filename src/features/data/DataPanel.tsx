@@ -20,6 +20,7 @@ import {
 import { downloadCSV } from '../../components/charts/export';
 import { buildChannelsCsv, buildHistoryCsv } from '../../utils/dataCsv';
 import { checkDataHealth, checkMonthlyHealth, checkReportHealth, checkGoalHealth, checkAchievementHealth, checkLotteryHealth, checkClassificationHealth, domainLabel, type DataIssue, type HealthDomain } from '../../utils/dataHealth';
+import { taskKindOf } from '../../domain/portfolio/session';
 import { previewMerge } from '../../utils/mergeData';
 import { platformCapabilities } from '../../utils/platform';
 import { useNavigationStore } from '../../store/navigationStore';
@@ -37,6 +38,7 @@ import {
 import { restoreAIConnectionMetadata } from '../../store/aiConnectionStore';
 import { bytesToBase64, verifyAttachments } from '../../services/monthlyPlanning/attachments';
 import { ClassificationMigrationCard } from './ClassificationMigrationCard';
+import { ChangePreviewPanel, PageHeader } from '../../components/ui/workspace';
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -494,6 +496,13 @@ export function DataPanel() {
 
   return (
     <div className="space-y-4">
+      <PageHeader
+        eyebrow="设置 · 数据维护"
+        title="数据健康、备份与存储"
+        description="核对问题、导入导出、完整备份和存储位置在同一工作区管理；危险操作与实际状态分开显示。"
+        context={<><span>{channels.length} 个父渠道</span><span>·</span><span>{history.length} 条历史</span><span>·</span><span>{monthlyPlanning.sessions.length} 个理财任务</span></>}
+        primaryAction={<Button onClick={() => void handleFullBackup()}>创建完整备份</Button>}
+      />
       {/* 数据概览 */}
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-3">数据概览</h2>
@@ -870,7 +879,7 @@ function StorageLocationModal({ open, currentRoot, onClose, onMigrate }: {
           <div className="text-xs text-slate-400 mb-1">当前数据位置</div>
           <div className="text-sm font-mono text-slate-700 break-all">{currentRoot || '—'}</div>
         </div>
-        <TextField label="新数据目录（绝对路径）" value={target} onChange={(e) => setTarget(e.target.value)} error={error} placeholder="例如：D:\\WealthData" autoFocus />
+        <TextField label="新数据目录（绝对路径）" value={target} onChange={(e) => setTarget(e.target.value)} error={error} placeholder="例如：E:\\FinancialData" autoFocus />
         <p className="text-xs text-slate-400">
           迁移会复制整个数据目录树并读回校验。旧目录保留，确认新位置可用后请手动清理。目标目录应为空或尚不存在，且父目录已存在。
         </p>
@@ -964,10 +973,15 @@ function DataHealthCenter({
   busy: boolean;
 }) {
   const navigate = useNavigationStore((s) => s.navigate);
+  const routeIssueId = useNavigationStore((s) => s.healthIssueId);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [ignored, setIgnored] = useState<Set<string>>(new Set());
+  const reviews = useAppStore((s) => s.healthReviews.records);
+  const ledgerId = useAppStore((s) => s.ledgerIdentity.ledgerId);
 
-  const visible = issues.filter((i) => !ignored.has(i.id));
+  const visible = issues.filter((issue) => {
+    const review = reviews.find((item) => item.ledgerId === ledgerId && item.issueId === issue.id);
+    return !(review?.status === 'resolved' && review.fingerprint === issue.fingerprint);
+  });
   const grouped = useMemo(() => {
     const m = new Map<HealthDomain, DataIssue[]>();
     for (const i of visible) {
@@ -977,6 +991,14 @@ function DataHealthCenter({
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [visible]);
+  useEffect(() => {
+    if (!routeIssueId) return;
+    setExpanded(routeIssueId);
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`health-issue-${routeIssueId.replace(/[^0-9A-Za-z_-]/g, '_')}`)?.scrollIntoView({ block: 'center' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [routeIssueId]);
 
   if (visible.length === 0) {
     return (
@@ -998,6 +1020,11 @@ function DataHealthCenter({
         <Badge tone={errorCount > 0 ? 'red' : 'amber'}>{visible.length} 个问题{errorCount > 0 ? `（${errorCount} 错误）` : ''}</Badge>
       </div>
 
+      {routeIssueId && !visible.some((issue) => issue.id === routeIssueId) && (
+        <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
+          指定的问题已解决、已移除或来自另一份数据。当前显示最新健康扫描结果。
+        </div>
+      )}
       <div className="space-y-3">
         {grouped.map(([domain, list]) => (
           <div key={domain} className="border border-slate-100 rounded-lg overflow-hidden">
@@ -1007,18 +1034,29 @@ function DataHealthCenter({
             </div>
             <div className="divide-y divide-slate-50">
               {list.map((i) => (
-                <div key={i.id} className="px-3 py-2">
+                <div
+                  id={`health-issue-${i.id.replace(/[^0-9A-Za-z_-]/g, '_')}`}
+                  key={i.id}
+                  className={`px-3 py-2 ${routeIssueId === i.id ? 'bg-emerald-50/60' : ''}`}
+                >
                   <div className="flex items-start gap-2">
                     <button className="flex-1 text-left min-w-0" onClick={() => setExpanded(expanded === i.id ? null : i.id)} aria-expanded={expanded === i.id}>
                       <div className="flex items-center gap-2">
                         <span className={i.severity === 'error' ? 'text-red-500' : 'text-amber-500'} aria-hidden>{i.severity === 'error' ? '✖' : '⚠'}</span>
                         <span className="text-sm text-slate-700 font-medium">{i.title}</span>
+                        {(() => {
+                          const review = reviews.find((item) => item.ledgerId === ledgerId && item.issueId === i.id && item.fingerprint === i.fingerprint);
+                          return review ? (
+                            <Badge tone={review.status === 'resolved' ? 'emerald' : review.status === 'deferred' ? 'amber' : 'blue'}>
+                              {review.status === 'resolved' ? '已解决' : review.status === 'deferred' ? '暂缓' : '已阅未解决'}
+                            </Badge>
+                          ) : null;
+                        })()}
                       </div>
                     </button>
                     {issueNavigateTarget(i) && (
                       <button className="text-xs text-slate-400 hover:text-emerald-600" onClick={() => { const t = issueNavigateTarget(i)!; navigate({ tab: t.tab, ...(t.extra ?? {}) }); }}>定位 ›</button>
                     )}
-                    <button className="text-xs text-slate-300 hover:text-slate-500" onClick={() => setIgnored((s) => new Set(s).add(i.id))}>忽略</button>
                   </div>
                   {expanded === i.id && (
                     <div className="mt-1 pl-5 text-xs text-slate-500 space-y-1">
@@ -1036,6 +1074,7 @@ function DataHealthCenter({
                       ))}
                       {i.possiblyDestructive && <p className="text-red-500">此操作可能改变数据，修复前自动备份。</p>}
                       {!i.fixable && <p className="text-slate-500">此项没有通用自动修复，请先定位来源并人工核对。</p>}
+                      <HealthReviewActions issue={i} />
                     </div>
                   )}
                 </div>
@@ -1045,6 +1084,177 @@ function DataHealthCenter({
         ))}
       </div>
     </Card>
+  );
+}
+
+function HealthReviewActions({ issue }: { issue: DataIssue }) {
+  const reviews = useAppStore((state) => state.healthReviews.records);
+  const planning = useAppStore((state) => state.monthlyPlanning);
+  const saveReview = useAppStore((state) => state.saveHealthReview);
+  const dataRevision = useAppStore((state) => state.dataRevision);
+  const ledgerId = useAppStore((state) => state.ledgerIdentity.ledgerId);
+  const navigate = useNavigationStore((state) => state.navigate);
+  const current = reviews.find((item) => item.ledgerId === ledgerId && item.issueId === issue.id);
+  const stale = current && current.fingerprint !== issue.fingerprint;
+  const [open, setOpen] = useState(false);
+  const [status, setStatus] = useState<'acknowledged' | 'deferred' | 'resolved'>(
+    current?.status === 'resolved' ? 'resolved' : current?.status ?? 'acknowledged',
+  );
+  const [reason, setReason] = useState(stale ? '' : current?.reason ?? '');
+  const firstResolution = issue.allowedResolutions[0] ?? 'evidence-accepted';
+  const [resolution, setResolution] = useState<'distinct-identity' | 'evidence-accepted' | 'data-corrected' | 'not-applicable'>(
+    current?.resolution && issue.allowedResolutions.includes(current.resolution)
+      ? current.resolution
+      : firstResolution,
+  );
+  const [reviewAfter, setReviewAfter] = useState(current?.reviewAfter ?? '');
+  const [evidenceReviewed, setEvidenceReviewed] = useState(false);
+  const [error, setError] = useState('');
+
+  async function save() {
+    if (!reason.trim()) { setError('请填写处理原因，不能只点“已阅”'); return; }
+    if (status === 'resolved' && (issue.evidenceRefs.length > 0 || (issue.evidence?.length ?? 0) > 0) && !evidenceReviewed) {
+      setError('请先查看并确认原始证据，再记录“已解决”');
+      return;
+    }
+    if (issue.severity === 'error' && status === 'resolved') {
+      setError('完整性错误不能在问题仍存在时直接标记解决；请先完成修复并重新扫描');
+      return;
+    }
+    try {
+      setError('');
+      await saveReview({
+        id: `${issue.id}@${ledgerId}`,
+        issueId: issue.id,
+        ledgerId,
+        code: issue.code,
+        ruleVersion: issue.ruleVersion,
+        status,
+        reason: reason.trim(),
+        ...(status === 'resolved' ? { resolution } : {}),
+        baseRevision: dataRevision,
+        fingerprint: issue.fingerprint,
+        actorKind: 'user',
+        sourceEventIds: issue.evidenceRefs
+          .filter((ref) => ref.kind === 'classification-event')
+          .map((ref) => ref.id),
+        operationId: crypto.randomUUID(),
+        ...(status === 'deferred' && reviewAfter ? { reviewAfter } : {}),
+        revalidatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      setOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '处理记录保存失败');
+    }
+  }
+
+  return (
+    <div className="mt-2 rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-600">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">核对处理</span>
+        {current ? (
+          <Badge tone={stale ? 'amber' : current.status === 'resolved' ? 'emerald' : 'blue'}>
+            {stale ? '依据已变化，需复核' : current.status === 'resolved' ? '已确认处理' : current.status === 'deferred' ? '已暂缓' : '已阅'}
+          </Badge>
+        ) : <Badge tone="slate">待处理</Badge>}
+        <button type="button" className="ml-auto text-blue-700 underline" onClick={() => setOpen((value) => !value)}>
+          {current ? '更新处理' : '记录处理结果'}
+        </button>
+      </div>
+      {current && !stale && <p className="mt-1 text-slate-500">原因：{current.reason}</p>}
+      {open && (
+        <div className="mt-2 space-y-2">
+          <ChangePreviewPanel
+            baseRevision={dataRevision}
+            impacts={[{
+              kind: issue.impact.financialDataChanged ? 'financial' : 'metadata',
+              label: issue.impact.financialDataChanged ? '会修改财务数据' : '不修改财务数据',
+              description: issue.impact.summary,
+              affectedIds: issue.impact.affectedIds,
+            }]}
+          />
+          {issue.evidenceRefs.length > 0 && (
+            <div className="rounded border border-slate-200 p-2">
+              <div className="font-medium text-slate-700">可定位证据</div>
+              <div className="mt-1 space-y-1">
+                {issue.evidenceRefs.map((reference) => (
+                  <button
+                    key={`${reference.kind}:${reference.id}`}
+                    type="button"
+                    className="block w-full rounded px-2 py-1 text-left text-blue-700 hover:bg-blue-50"
+                    onClick={() => {
+                      if (reference.kind === 'holding') {
+                        navigate({
+                          tab: 'assets',
+                          assetView: 'holdings',
+                          holdingId: reference.taskId ? `${reference.taskId}:${reference.id}` : reference.id,
+                        });
+                      } else if (reference.kind === 'report') {
+                        navigate({ tab: 'reports', reportId: reference.id, reportMode: 'read' });
+                      } else if (reference.kind === 'history') {
+                        navigate({ tab: 'history', historyDate: reference.date ?? reference.id });
+                      } else if (reference.kind === 'channel') {
+                        navigate({ tab: 'assets', channelId: reference.id });
+                      } else if (reference.taskId) {
+                        const task = planning.sessions.find((item) => item.key === reference.taskId);
+                        navigate({
+                          tab: 'monthly',
+                          financeTaskId: reference.taskId,
+                          financeTaskKind: task ? taskKindOf(task) : 'monthly-review',
+                        });
+                      }
+                    }}
+                  >
+                    {reference.kind} · {reference.label ?? reference.id}
+                    {reference.date ? ` · ${reference.date}` : ''}
+                    {reference.source ? ` · ${reference.source}` : ''} ›
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {(issue.evidenceRefs.length > 0 || (issue.evidence?.length ?? 0) > 0) && (
+            <label className="flex items-start gap-2 rounded border border-slate-200 p-2">
+              <input type="checkbox" checked={evidenceReviewed} onChange={(event) => setEvidenceReviewed(event.target.checked)} className="mt-0.5 h-4 w-4" />
+              <span>我已查看上述原始证据，并理解本次操作会修改与不会修改的内容。</span>
+            </label>
+          )}
+          <label className="block">处理结果
+            <select value={status} onChange={(event) => setStatus(event.target.value as typeof status)} className="mt-1 w-full rounded border border-slate-300 bg-white p-2">
+              <option value="acknowledged">已阅，仍需处理</option>
+              <option value="deferred">暂缓，稍后复核</option>
+              <option value="resolved" disabled={issue.severity === 'error'}>确认已处理</option>
+            </select>
+          </label>
+          {status === 'resolved' && (
+            <label className="block">确认依据
+              <select value={resolution} onChange={(event) => setResolution(event.target.value as typeof resolution)} className="mt-1 w-full rounded border border-slate-300 bg-white p-2">
+                {issue.allowedResolutions.includes('distinct-identity') && <option value="distinct-identity">已确认是不同账户、份额或批次</option>}
+                {issue.allowedResolutions.includes('evidence-accepted') && <option value="evidence-accepted">已核对并接受现有证据</option>}
+                {issue.allowedResolutions.includes('data-corrected') && <option value="data-corrected">底层数据已修正并重新校验</option>}
+                {issue.allowedResolutions.includes('not-applicable') && <option value="not-applicable">经证据确认不适用</option>}
+              </select>
+            </label>
+          )}
+          {status === 'deferred' && (
+            <label className="block">复核日期（可选）
+              <input
+                type="date"
+                value={reviewAfter}
+                onChange={(event) => setReviewAfter(event.target.value)}
+                className="mt-1 w-full rounded border border-slate-300 bg-white p-2"
+              />
+            </label>
+          )}
+          <label className="block">原因或后续动作
+            <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={2} className="mt-1 w-full rounded border border-slate-300 bg-white p-2" placeholder="例如：同代码但账户和份额类别不同，保留为独立记录" />
+          </label>
+          {error && <p role="alert" className="text-red-600">{error}</p>}
+          <button type="button" className="rounded bg-emerald-700 px-3 py-1.5 font-medium text-white" onClick={() => void save()}>保存并重新校验</button>
+        </div>
+      )}
+    </div>
   );
 }
 

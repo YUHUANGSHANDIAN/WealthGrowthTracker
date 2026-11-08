@@ -68,7 +68,7 @@ export function createPiAdapter(profile, { fetchImpl, apiLoader = loadApi, subsc
           for (const name of ["content-type", "accept", "anthropic-version", "anthropic-beta"]) {
             if (request.headers.has(name)) headers.set(name, request.headers.get(name));
           }
-          headers.set("user-agent", "WealthGrowthTracker/1.10.0-preview.1");
+          headers.set("user-agent", "WealthGrowthTracker/1.11.0-preview.1");
           if (profile.authKind !== "local") headers.set(profile.providerId === "anthropic" ? "x-api-key" : "authorization", profile.providerId === "anthropic" ? profile.credential : `Bearer ${profile.credential}`);
           return await fetch(new Request(request, { headers }));
         } catch (error) { mappedError = error; throw error; }

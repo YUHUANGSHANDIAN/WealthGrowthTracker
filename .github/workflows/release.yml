@@ -47,6 +47,10 @@ jobs:
         run: npm run privacy:test
       - name: Web build
         run: npm run build
+      - name: Install visual test browser
+        run: npx playwright install --with-deps chromium
+      - name: Experience accessibility and responsive tests
+        run: npm run test:e2e
       - name: AI runtime dependencies
         run: npm ci --prefix ai-runtime
       - name: AI runtime tests

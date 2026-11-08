@@ -22,6 +22,8 @@ import { makeLotteryTransaction } from './lotteryTx';
 import { LOTTERY_TX_META, LOTTERY_CATEGORY_META } from '../../constants/featureMeta';
 import { LotteryExcelImportModal } from './LotteryExcelImportModal';
 import { todayString } from '../../utils/date';
+import { useNavigationStore } from '../../store/navigationStore';
+import { PageHeader } from '../../components/ui/workspace';
 
 type ProjectFilter = 'all' | 'active' | 'closed' | 'archived' | 'detailed' | 'summary-only';
 type ProjectSort = 'net' | 'roi' | 'stake' | 'prize' | 'txn';
@@ -38,6 +40,8 @@ export function LotteryPanel() {
     archiveLotteryProject,
     deleteLotteryProject,
   } = useAppStore();
+  const navigate = useNavigationStore((state) => state.navigate);
+  const routeProjectId = useNavigationStore((state) => state.lotteryProjectId);
 
   const [txOpen, setTxOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<LotteryTransaction | null>(null);
@@ -61,6 +65,9 @@ export function LotteryPanel() {
   const days = useMemo(() => dailyStats(lottery), [lottery]);
 
   const detailProject = detailProjectId ? lottery.projects.find((p) => p.id === detailProjectId) ?? null : null;
+  useEffect(() => {
+    if (routeProjectId) setDetailProjectId(routeProjectId);
+  }, [routeProjectId]);
 
   const cumulativeSeries = useMemo(
     () => [{ id: 'cum', name: '累计净盈亏', color: '#8B5CF6', points: days.map((d) => ({ date: d.date, value: d.cumulativeNet })), area: true }],
@@ -120,6 +127,14 @@ export function LotteryPanel() {
 
   return (
     <div className="space-y-4">
+      <PageHeader
+        eyebrow="独立资金池"
+        title="彩票记录"
+        description="记录当前资金池、项目交易与历史汇总；不提供开奖预测、投注建议或追损引导。"
+        context={<><span>{lottery.projects.length} 个项目</span><span>·</span><span>{lottery.transactions.length} 笔明细交易</span><span>·</span><span>与主财富账本隔离</span></>}
+        primaryAction={<Button onClick={() => setTxOpen(true)}>记一笔交易</Button>}
+        secondaryActions={<Button variant="outline" onClick={() => setImportOpen(true)}>导入旧 Excel</Button>}
+      />
       {/* —— 第一组：当前资金池（真实 ledger）—— */}
       <Card className="p-4">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -196,7 +211,10 @@ export function LotteryPanel() {
             </div>
           </div>
           {projectBarItems.length > 0 ? (
-            <ProjectPLBars items={projectBarItems} onSelect={(id) => setDetailProjectId(id)} />
+            <ProjectPLBars items={projectBarItems} onSelect={(id) => {
+              setDetailProjectId(id);
+              navigate({ tab: 'lottery', lotteryProjectId: id });
+            }} />
           ) : (
             <p className="text-sm text-slate-400">当前筛选下没有项目。</p>
           )}
@@ -294,7 +312,10 @@ export function LotteryPanel() {
         <ProjectDetailModal
           project={detailProject}
           transactions={lottery.transactions.filter((t) => t.projectId === detailProject.id)}
-          onClose={() => setDetailProjectId(null)}
+          onClose={() => {
+            setDetailProjectId(null);
+            navigate({ tab: 'lottery' });
+          }}
           onEdit={() => { setEditingProject(detailProject); setProjectOpen(true); }}
           onArchive={() => archiveLotteryProject(detailProject.id)}
           onDelete={() => { setDeleteProjectTarget(detailProject); }}
@@ -344,9 +365,9 @@ function ProjectPLBars({ items, onSelect }: {
         const summary = it.summary;
         return (
           <button key={it.id} className="w-full text-left py-1 px-1 rounded hover:bg-slate-50" onClick={() => onSelect(it.id)} title={`收入 ${formatCNY(summary.prizeIncome)} · 支出 ${formatCNY(summary.stakeExpense)} · 净盈亏 ${formatCNY(summary.netProfitLoss)}${summary.roi != null ? ` · ROI ${summary.roi.toFixed(1)}%` : ''} · ${it.detailType === 'detailed' ? '详细交易' : '历史汇总'}`}>
-            <div className="flex items-center gap-2 text-sm">
-              <span className="w-44 shrink-0 truncate text-slate-700">{it.label}</span>
-              <span className="flex-1 relative h-4 bg-slate-50 rounded-full overflow-hidden">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="min-w-0 flex-1 basis-32 truncate text-slate-700 sm:w-44 sm:flex-none">{it.label}</span>
+              <span className="relative order-3 h-4 basis-full overflow-hidden rounded-full bg-slate-50 sm:order-none sm:flex-1 sm:basis-auto">
                 <span className="absolute left-1/2 top-0 bottom-0 w-px bg-slate-300" aria-hidden />
                 {pos ? (
                   <span className="absolute left-1/2 top-0 bottom-0 bg-emerald-500 rounded-r-full" style={{ width: `${wPct}%` }} aria-hidden />
@@ -354,7 +375,7 @@ function ProjectPLBars({ items, onSelect }: {
                   <span className="absolute right-1/2 top-0 bottom-0 bg-red-500 rounded-l-full" style={{ width: `${wPct}%` }} aria-hidden />
                 )}
               </span>
-              <span className={`w-28 shrink-0 text-right tabular font-medium ${pos ? 'text-emerald-600' : 'text-red-600'}`}>
+              <span className={`w-24 shrink-0 text-right tabular font-medium sm:w-28 ${pos ? 'text-emerald-600' : 'text-red-600'}`}>
                 {pos ? '+' : ''}{formatCNY(it.value)}
               </span>
               <span className="w-12 shrink-0 text-right text-xs text-slate-400 tabular">{summary.roi != null ? `${summary.roi.toFixed(1)}%` : '—'}</span>

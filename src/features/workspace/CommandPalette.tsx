@@ -5,10 +5,127 @@ import { Modal } from '../../components/ui/Modal';
 import { TextField } from '../../components/ui/form';
 import { SETTINGS_SECTIONS } from '../../constants/settings';
 import { FINANCE_TASK_KIND_LABELS, taskKindOf } from '../../domain/portfolio/session';
-const PAGES:{id:TabId;label:string;description:string}[]=[{id:'overview',label:'总览',description:'资产近况与下一步'},{id:'assets',label:'资产',description:'账户与金额更新'},{id:'monthly',label:'理财',description:'七类可追溯理财任务'},{id:'history',label:'历史记录',description:'每日快照与事件'},{id:'reports',label:'财务报告',description:'周期报告与修订'},{id:'analysis',label:'资产历史趋势',description:'真实时间轴、渠道结构与变动解读'},{id:'goals',label:'目标管理',description:'进度、期限与里程碑'},{id:'prediction',label:'情景预测',description:'本地情景与假设'},{id:'lottery',label:'彩票',description:'独立资金池与历史表现'},{id:'data',label:'数据维护',description:'健康、导入与备份'},{id:'ai',label:'模型连接',description:'连接、切换与授权状态'},{id:'settings',label:'偏好设置',description:'资料、外观、安全与隐私'}];
-export function CommandPalette({open,onClose}:{open:boolean;onClose:()=>void}){
- const [query,setQuery]=useState('');const channels=useAppStore(s=>s.channels);const reports=useAppStore(s=>s.reports);const goals=useAppStore(s=>s.goals);const monthly=useAppStore(s=>s.monthlyPlanning);
- const items=useMemo(()=>{const all:{key:string;label:string;detail:string;keywords?:string;route:Route}[]=PAGES.map(p=>({key:p.id,label:p.label,detail:p.description,route:{tab:p.id,...(p.id==='monthly'?{financeTaskKind:'monthly-review' as const}:{})}}));for(const section of SETTINGS_SECTIONS)all.push({key:'settings:'+section.id,label:'设置 · '+section.label,detail:section.description,keywords:section.keywords,route:{tab:'settings',settingsSection:section.id}});for(const c of channels){all.push({key:'channel:'+c.id,label:c.name,detail:'资产渠道',route:{tab:'assets',channelId:c.id}});for(const ch of c.children??[])all.push({key:'channel:'+ch.id,label:c.name+' / '+ch.name,detail:'子渠道',route:{tab:'assets',channelId:ch.id}});}for(const r of reports)all.push({key:'report:'+r.id,label:r.title,detail:r.startDate+' — '+r.endDate,route:{tab:'reports',reportId:r.id}});for(const g of goals)all.push({key:'goal:'+g.id,label:g.name,detail:'财富目标',route:{tab:'goals',goalId:g.id}});for(const task of monthly.sessions){const kind=taskKindOf(task);all.push({key:'finance:'+task.key,label:task.title||FINANCE_TASK_KIND_LABELS[kind],detail:'理财任务 · '+task.snapshotAsOf+' · '+FINANCE_TASK_KIND_LABELS[kind],route:{tab:'monthly',financeTaskKind:kind,financeTaskId:task.key}});for(const document of task.documents)all.push({key:'evidence:'+task.key+':'+document.id,label:document.originalName,detail:'证据资料 · '+(document.declaredDate??'日期未知')+' · '+FINANCE_TASK_KIND_LABELS[kind],route:{tab:'monthly',financeTaskKind:kind,financeTaskId:task.key}});}return all.filter(i=>(i.label+' '+i.detail+' '+(i.keywords??'')).toLowerCase().includes(query.trim().toLowerCase())).slice(0,30);},[channels,reports,goals,monthly.sessions,query]);
- function choose(route:Route){useNavigationStore.getState().navigate(route);onClose();setQuery('');}
- return <Modal open={open} onClose={onClose} title="搜索与快捷导航"><TextField label="搜索本地内容" placeholder="页面、渠道、报告、目标、理财任务或证据…" value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&items[0])choose(items[0].route);}}/><p className="text-xs text-slate-500 mt-2">只搜索本机数据和设置项 · 结果显示对象类型与日期 · Enter 打开首项</p><div className="mt-4 space-y-1">{items.map(i=><button key={i.key} onClick={()=>choose(i.route)} className="w-full text-left p-3 rounded-lg hover:bg-slate-50"><span className="block text-sm font-medium">{i.label}</span><span className="text-xs text-slate-500">{i.detail}</span></button>)}{!items.length&&<p className="p-4 text-sm text-slate-500">没有匹配内容</p>}</div></Modal>;
+const PAGES: Array<{ id: TabId; label: string; description: string }> = [
+  { id: 'overview', label: '总览', description: '资产近况与下一步' },
+  { id: 'assets', label: '资产', description: '账户、持仓与金额更新' },
+  { id: 'monthly', label: '理财', description: '七类可追溯理财任务' },
+  { id: 'history', label: '历史记录', description: '每日快照与事件' },
+  { id: 'reports', label: '财务报告', description: '周期报告与修订' },
+  { id: 'analysis', label: '资产历史趋势', description: '真实时间轴、渠道结构与变动解读' },
+  { id: 'goals', label: '目标管理', description: '进度、期限与里程碑' },
+  { id: 'prediction', label: '情景预测', description: '本地情景与假设' },
+  { id: 'lottery', label: '彩票', description: '独立资金池与历史表现' },
+  { id: 'data', label: '数据维护', description: '健康、导入与备份' },
+  { id: 'ai', label: '模型连接', description: '连接、切换与授权状态' },
+  { id: 'settings', label: '偏好设置', description: '资料、外观、安全与隐私' },
+];
+
+export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [query, setQuery] = useState('');
+  const channels = useAppStore((state) => state.channels);
+  const reports = useAppStore((state) => state.reports);
+  const goals = useAppStore((state) => state.goals);
+  const monthly = useAppStore((state) => state.monthlyPlanning);
+
+  const items = useMemo(() => {
+    const all: Array<{ key: string; label: string; detail: string; keywords?: string; route: Route }> = PAGES.map((page) => ({
+      key: page.id,
+      label: page.label,
+      detail: page.description,
+      route: {
+        tab: page.id,
+        ...(page.id === 'monthly' ? { financeTaskKind: 'monthly-review' as const } : {}),
+      },
+    }));
+    for (const section of SETTINGS_SECTIONS) {
+      all.push({
+        key: `settings:${section.id}`,
+        label: `设置 · ${section.label}`,
+        detail: section.description,
+        keywords: section.keywords,
+        route: { tab: 'settings', settingsSection: section.id },
+      });
+    }
+    for (const channel of channels) {
+      all.push({ key: `channel:${channel.id}`, label: channel.name, detail: '资产渠道', route: { tab: 'assets', channelId: channel.id } });
+      for (const child of channel.children ?? []) {
+        all.push({
+          key: `channel:${child.id}`,
+          label: `${channel.name} / ${child.name}`,
+          detail: '子渠道',
+          route: { tab: 'assets', channelId: child.id },
+        });
+      }
+    }
+    for (const report of reports) {
+      all.push({
+        key: `report:${report.id}`,
+        label: report.title,
+        detail: `财务报告 · ${report.startDate} — ${report.endDate} · 数据截至 ${report.dataAsOf ?? report.endDate}`,
+        route: { tab: 'reports', reportId: report.id, reportMode: 'read' },
+      });
+    }
+    for (const goal of goals) {
+      all.push({ key: `goal:${goal.id}`, label: goal.name, detail: '财富目标', route: { tab: 'goals', goalId: goal.id } });
+    }
+    for (const task of monthly.sessions) {
+      const kind = taskKindOf(task);
+      all.push({
+        key: `finance:${task.key}`,
+        label: task.title || FINANCE_TASK_KIND_LABELS[kind],
+        detail: `理财任务 · ${task.snapshotAsOf} · ${FINANCE_TASK_KIND_LABELS[kind]}`,
+        route: { tab: 'monthly', financeTaskKind: kind, financeTaskId: task.key },
+      });
+      for (const document of task.documents) {
+        all.push({
+          key: `evidence:${task.key}:${document.id}`,
+          label: document.originalName,
+          detail: `证据资料 · ${document.declaredDate ?? '日期未知'} · ${FINANCE_TASK_KIND_LABELS[kind]}`,
+          route: { tab: 'monthly', financeTaskKind: kind, financeTaskId: task.key, financeEvidenceId: document.id },
+        });
+      }
+      for (const holding of task.holdings) {
+        all.push({
+          key: `holding:${task.key}:${holding.id}`,
+          label: holding.originalName,
+          detail: `历史持仓观察 · ${task.snapshotAsOf} · ${holding.fundCode ?? '代码未知'}`,
+          route: { tab: 'assets', assetView: 'holdings', holdingId: `${task.key}:${holding.id}` },
+        });
+      }
+    }
+    const needle = query.trim().toLowerCase();
+    return all
+      .filter((item) => `${item.label} ${item.detail} ${item.keywords ?? ''}`.toLowerCase().includes(needle))
+      .slice(0, 30);
+  }, [channels, goals, monthly.sessions, query, reports]);
+
+  function choose(route: Route) {
+    useNavigationStore.getState().navigate(route);
+    onClose();
+    setQuery('');
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="搜索与快捷导航">
+      <TextField
+        label="搜索本地内容"
+        placeholder="页面、渠道、报告、目标、理财任务、持仓或证据…"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && items[0]) choose(items[0].route);
+        }}
+      />
+      <p className="mt-2 text-xs text-slate-500">只搜索本机对象名称与日期，不显示金额、附件正文或凭据；Enter 打开首项。</p>
+      <div className="mt-4 space-y-1">
+        {items.map((item) => (
+          <button key={item.key} onClick={() => choose(item.route)} className="w-full rounded-lg p-3 text-left hover:bg-slate-50">
+            <span className="block text-sm font-medium">{item.label}</span>
+            <span className="text-xs text-slate-500">{item.detail}</span>
+          </button>
+        ))}
+        {!items.length && <p className="p-4 text-sm text-slate-500">没有匹配内容</p>}
+      </div>
+    </Modal>
+  );
 }

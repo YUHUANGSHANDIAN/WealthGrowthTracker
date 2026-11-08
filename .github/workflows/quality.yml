@@ -34,6 +34,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
       - run: npm ci --prefix ai-runtime
       - run: npm test --prefix ai-runtime
       - name: Verify desktop packaging scripts

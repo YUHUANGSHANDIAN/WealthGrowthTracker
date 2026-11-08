@@ -247,4 +247,22 @@ describe('资产分类领域', () => {
     expect(issues.some((issue) => issue.title === '支付宝基金缺少基金叶子归属')).toBe(true);
     expect(issues.every((issue) => issue.fix === null)).toBe(true);
   });
+
+  it('同代码不同份额保留独立证据，并生成可逐项处理的问题', () => {
+    const planning = planningWith([
+      { ...holding('h1', '合成基金A', '123456'), shareClass: 'A' },
+      { ...holding('h2', '合成基金C', '123456'), shareClass: 'C' },
+    ]);
+    planning.sessions[0]!.holdings[1] = {
+      ...planning.sessions[0]!.holdings[1]!,
+      childChannelId: 'alipay_fund',
+    };
+    const issues = checkClassificationHealth(channels, planning, emptyAssetClassificationState());
+    const duplicate = issues.find((issue) => issue.title === '同渠道重复基金代码');
+    expect(duplicate).toBeDefined();
+    expect(duplicate?.evidenceRefs.filter((reference) => reference.kind === 'holding')).toHaveLength(2);
+    expect(duplicate?.impact.financialDataChanged).toBe(false);
+    expect(duplicate?.allowedResolutions).toContain('distinct-identity');
+    expect(duplicate?.id).not.toBe('classification:rule-duplicate');
+  });
 });

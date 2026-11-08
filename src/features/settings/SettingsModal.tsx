@@ -28,14 +28,28 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
 export function SettingsContent({ section, onSectionChange }: { section: SettingsSectionId; onSectionChange: (section: SettingsSectionId) => void }) {
   const current = SETTINGS_SECTIONS.find((item) => item.id === section)!;
   const titleId = useId();
+  const [search, setSearch] = useState('');
+  const needle = search.trim().toLowerCase();
+  const filteredSections = SETTINGS_SECTIONS.filter((item) =>
+    !needle || `${item.label} ${item.description} ${item.keywords}`.toLowerCase().includes(needle));
   return (
     <div className="settings-layout">
       <nav className="settings-nav" aria-label="设置分类">
-        {SETTINGS_SECTIONS.map((item) => (
+        <label className="settings-search">
+          <span className="sr-only">搜索设置</span>
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="搜索设置…"
+          />
+        </label>
+        {filteredSections.map((item) => (
           <button key={item.id} type="button" onClick={() => onSectionChange(item.id)} aria-current={section === item.id ? 'page' : undefined}>
             {item.label}
           </button>
         ))}
+        {!filteredSections.length && <p className="px-2 py-3 text-xs text-slate-500">没有匹配的设置项</p>}
       </nav>
       <section className="settings-section" aria-labelledby={titleId}>
         <header className="settings-section-heading">
@@ -152,6 +166,12 @@ function AppearanceSection() {
           { value: 'light', label: '浅色' },
           { value: 'system', label: '跟随系统' },
           { value: 'dark', label: '深色' },
+        ]} />
+      <SelectField label="内容密度" value={appearance.density ?? 'comfortable'}
+        onChange={(e) => setAppearance({ ...appearance, density: e.target.value as 'comfortable' | 'compact' })}
+        options={[
+          { value: 'comfortable', label: '舒适' },
+          { value: 'compact', label: '紧凑' },
         ]} />
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={appearance.followWealthTheme} onChange={(e) => setAppearance({ ...appearance, followWealthTheme: e.target.checked })}

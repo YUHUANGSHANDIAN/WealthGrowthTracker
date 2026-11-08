@@ -10,12 +10,16 @@ import type { HistoryEditProposal } from './transaction';
 import { HistoryRecords } from './HistoryRecords';
 import { buildHistoryRows, historySource, isHistoryDate } from './historyView';
 import { useNavigationStore } from '../../store/navigationStore';
+import { FilterBar, PageHeader, SavedViewBar } from '../../components/ui/workspace';
 
 export function HistoryPanel() {
   const history = useAppStore((s) => s.history);
   const hidden = useWorkspaceStore((s) => s.amountsHidden);
   const { prepareHistoryEdit, confirmHistoryEdit, deleteHistoryPoints } = useAppStore();
   const navigate = useNavigationStore((state) => state.navigate);
+  const routeStart = useNavigationStore((state) => state.startDate);
+  const routeEnd = useNavigationStore((state) => state.endDate);
+  const routeHistoryDate = useNavigationStore((state) => state.historyDate);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingDate, setEditingDate] = useState<string | null>(null);
@@ -32,8 +36,22 @@ export function HistoryPanel() {
   const [deletingDates, setDeletingDates] = useState<string[] | null>(null);
   const [deleteError, setDeleteError] = useState('');
 
-  const [rangeStart, setRangeStart] = useState('');
-  const [rangeEnd, setRangeEnd] = useState('');
+  const [rangeStart, setRangeStart] = useState(routeStart ?? '');
+  const [rangeEnd, setRangeEnd] = useState(routeEnd ?? '');
+
+  useEffect(() => {
+    setRangeStart(routeStart ?? '');
+    setRangeEnd(routeEnd ?? '');
+  }, [routeEnd, routeStart]);
+
+  useEffect(() => {
+    if (!routeHistoryDate) return;
+    if ((rangeStart && routeHistoryDate < rangeStart) || (rangeEnd && routeHistoryDate > rangeEnd)) {
+      setRangeStart('');
+      setRangeEnd('');
+      navigate({ tab: 'history', historyDate: routeHistoryDate });
+    }
+  }, [navigate, rangeEnd, rangeStart, routeHistoryDate]);
 
   const sortedAsc = useMemo(() => buildHistoryRows(history), [history]);
   const rangeInvalid = !!rangeStart && !!rangeEnd && rangeStart > rangeEnd;
@@ -127,16 +145,49 @@ export function HistoryPanel() {
 
   return (
     <div className="min-w-0 space-y-4">
-      <p className="text-sm leading-relaxed text-slate-600">按日回顾资产快照与事件。缺失日期保留断点；事件备注只帮助回忆，不构成现金流台账。</p>
+      <PageHeader
+        eyebrow="历史事实"
+        title="每日快照与事件"
+        description="按日回顾真实资产快照与事件注记。缺失日期保留断点；资产变化不自动解释为收入、支出或投资收益，事件备注不构成现金流台账。"
+        context={<><span>{history.length} 条记录</span><span>·</span><span>每个日期最多一条</span></>}
+        primaryAction={<Button onClick={openAdd} disabled={hidden}>添加历史记录</Button>}
+      />
       <Card className="p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold text-slate-800">快照覆盖</h2>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <label className="min-w-0 flex-1 text-xs text-slate-500">起始日期
+          <span className="text-xs text-slate-500">日期范围同步到地址，返回时保留</span>
+        </div>
+        <FilterBar
+          resultCount={filtered.length}
+          actions={<div className="flex flex-wrap items-center gap-2">
+            <SavedViewBar
+              page="history"
+              tab="history"
+              filters={{ rangeStart, rangeEnd }}
+              onApply={(filters) => {
+                setRangeStart(typeof filters.rangeStart === 'string' ? filters.rangeStart : '');
+                setRangeEnd(typeof filters.rangeEnd === 'string' ? filters.rangeEnd : '');
+              }}
+              routeForFilters={(filters) => ({
+                startDate: typeof filters.rangeStart === 'string' && filters.rangeStart ? filters.rangeStart : undefined,
+                endDate: typeof filters.rangeEnd === 'string' && filters.rangeEnd ? filters.rangeEnd : undefined,
+                historyDate: routeHistoryDate,
+              })}
+            />
+            {(rangeStart || rangeEnd) && <Button variant="ghost" size="sm" onClick={() => navigate({ tab: 'history' })}>清除筛选</Button>}
+          </div>}
+        >
+            <label className="min-w-0 text-xs text-slate-500">起始日期
             <input
               type="date"
               value={rangeStart}
-              onChange={(e) => setRangeStart(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setRangeStart(next);
+                if (!next || !rangeEnd || next <= rangeEnd) {
+                  navigate({ tab: 'history', startDate: next || undefined, endDate: rangeEnd || undefined, historyDate: routeHistoryDate });
+                }
+              }}
               className="mt-1 min-h-[44px] w-full min-w-0 px-2 py-1.5 text-xs border border-slate-300 rounded-lg"
               aria-label="起始日期"
             />
@@ -145,14 +196,18 @@ export function HistoryPanel() {
             <input
               type="date"
               value={rangeEnd}
-              onChange={(e) => setRangeEnd(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setRangeEnd(next);
+                if (!next || !rangeStart || rangeStart <= next) {
+                  navigate({ tab: 'history', startDate: rangeStart || undefined, endDate: next || undefined, historyDate: routeHistoryDate });
+                }
+              }}
               className="mt-1 min-h-[44px] w-full min-w-0 px-2 py-1.5 text-xs border border-slate-300 rounded-lg"
               aria-label="结束日期"
             />
             </label>
-            {(rangeStart || rangeEnd) && <Button variant="ghost" size="sm" className="min-h-[44px] self-end" onClick={() => { setRangeStart(''); setRangeEnd(''); }}>清除筛选</Button>}
-          </div>
-        </div>
+        </FilterBar>
         {rangeInvalid && <p className="mb-3 text-sm text-red-600" role="alert">起始日期不能晚于结束日期。</p>}
         <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
           <div>
@@ -193,7 +248,14 @@ export function HistoryPanel() {
         {display.length === 0 ? (
           <EmptyState icon="🗓️" title="暂无记录" description="手动添加历史数据，或调整日期筛选范围。" />
         ) : (
-          <HistoryRecords rows={display} selected={selected} onToggleSelect={toggleSelect} onEdit={openEdit} onDelete={recordDate => { setDeleteError(''); setDeletingDates([recordDate]); }} />
+          <HistoryRecords
+            rows={display}
+            selected={selected}
+            onToggleSelect={toggleSelect}
+            onEdit={openEdit}
+            onDelete={recordDate => { setDeleteError(''); setDeletingDates([recordDate]); }}
+            highlightDate={routeHistoryDate}
+          />
         )}
       </Card>
 

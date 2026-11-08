@@ -16,8 +16,33 @@ export interface FixStrategy {
   action?: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history';
 }
 
+export interface HealthEvidenceRef {
+  kind: 'holding' | 'task' | 'report' | 'history' | 'channel' | 'classification-event' | 'document';
+  id: string;
+  taskId?: string;
+  label?: string;
+  date?: string;
+  source?: string;
+}
+
+export interface HealthImpactPreview {
+  financialDataChanged: boolean;
+  summary: string;
+  affectedIds: string[];
+}
+
+export type HealthResolution =
+  | 'distinct-identity'
+  | 'evidence-accepted'
+  | 'data-corrected'
+  | 'not-applicable';
+
 export interface DataIssue {
   id: string;
+  code: string;
+  ruleVersion: number;
+  /** Changes whenever the issue's evidence or message changes; stale review decisions must be re-evaluated. */
+  fingerprint: string;
   domain: HealthDomain;
   entityId?: string;
   severity: 'warning' | 'error';
@@ -31,20 +56,54 @@ export interface DataIssue {
   fixable: boolean;
   fix: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history' | null;
   category: string;
+  evidenceRefs: HealthEvidenceRef[];
+  impact: HealthImpactPreview;
+  allowedResolutions: HealthResolution[];
 }
 
-let issueSeq = 0;
+export const HEALTH_RULE_VERSION = 2;
+
+function stableHash(value: string): string {
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ (code + index), 0x85ebca6b);
+  }
+  return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`;
+}
+
 function makeIssue(
   domain: HealthDomain,
   severity: 'warning' | 'error',
   title: string,
   description: string,
   fix: DataIssue['fix'],
-  opts: Partial<Pick<DataIssue, 'entityId' | 'evidence' | 'fixStrategies' | 'safeAutoFix' | 'possiblyDestructive'>> = {},
+  opts: Partial<Pick<DataIssue,
+    'entityId' | 'evidence' | 'fixStrategies' | 'safeAutoFix' | 'possiblyDestructive' |
+    'evidenceRefs' | 'impact' | 'allowedResolutions'
+  >> = {},
 ): DataIssue {
-  issueSeq += 1;
+  const code = `rule-${stableHash(title)}`;
+  const fingerprint = stableHash(JSON.stringify({
+    version: HEALTH_RULE_VERSION,
+    domain,
+    title,
+    description,
+    fix,
+    entityId: opts.entityId,
+    evidence: opts.evidence,
+    evidenceRefs: opts.evidenceRefs,
+    impact: opts.impact,
+    allowedResolutions: opts.allowedResolutions,
+  }));
+  const entity = opts.entityId ?? 'global';
   return {
-    id: `${domain}-${issueSeq}`,
+    id: `${domain}:${code}:${entity}`,
+    code,
+    ruleVersion: HEALTH_RULE_VERSION,
+    fingerprint,
     domain,
     entityId: opts.entityId,
     severity,
@@ -58,6 +117,14 @@ function makeIssue(
     fixable: fix !== null || (opts.fixStrategies?.length ?? 0) > 0,
     fix,
     category: domainLabel(domain),
+    evidenceRefs: opts.evidenceRefs ?? [],
+    impact: opts.impact ?? {
+      financialDataChanged: false,
+      summary: '此决定只记录核对状态，不修改资产余额、历史、报告或任务事实。',
+      affectedIds: entity === 'global' ? [] : [entity],
+    },
+    allowedResolutions: opts.allowedResolutions
+      ?? (severity === 'error' ? ['data-corrected'] : ['distinct-identity', 'evidence-accepted', 'not-applicable']),
   };
 }
 
@@ -107,7 +174,7 @@ export function checkClassificationHealth(
     }
   }
   for (const task of state.sessions) {
-    const duplicateCodes = new Map<string, number>();
+    const duplicateCodes = new Map<string, typeof task.holdings>();
     let missingGoldExposure = 0;
     let missingAlipayFundChannel = 0;
     for (const holding of task.holdings) {
@@ -115,7 +182,7 @@ export function checkClassificationHealth(
       const exposureTags = classification?.exposureTags ?? holding.exposureTags;
       const childChannelId = classification?.childChannelId ?? holding.childChannelId;
       const key = `${holding.parentChannelId}:${holding.fundCode ?? holding.originalName}`;
-      duplicateCodes.set(key, (duplicateCodes.get(key) ?? 0) + 1);
+      duplicateCodes.set(key, [...(duplicateCodes.get(key) ?? []), holding]);
       if (/黄金/.test(holding.originalName) && !exposureTags.includes('gold')) {
         missingGoldExposure += 1;
       }
@@ -132,10 +199,40 @@ export function checkClassificationHealth(
       issues.push(makeIssue('classification', 'warning', '支付宝基金缺少基金叶子归属',
         `任务 ${task.key} 有 ${missingAlipayFundChannel} 条基金尚未归入 alipay_fund`, null, { entityId: task.key }));
     }
-    for (const [key, count] of duplicateCodes) {
-      if (count > 1) {
+    for (const [key, holdings] of duplicateCodes) {
+      if (holdings.length > 1) {
+        const observationByHolding = new Map(task.observations.map((observation) => [observation.holdingId, observation]));
+        const evidenceRefs: HealthEvidenceRef[] = holdings.map((holding) => {
+          const observation = observationByHolding.get(holding.id);
+          return {
+            kind: 'holding',
+            id: holding.id,
+            taskId: task.key,
+            label: `${holding.originalName}${holding.shareClass ? ` · ${holding.shareClass}` : ''}`,
+            date: task.snapshotAsOf,
+            source: observation?.quality.source ?? observation?.evidence[0]?.excerpt,
+          };
+        });
+        for (const event of classifications.events.filter((item) =>
+          item.target.type === 'holding'
+          && item.target.taskId === task.key
+          && holdings.some((holding) => holding.id === item.target.id))) {
+          evidenceRefs.push({ kind: 'classification-event', id: event.id, taskId: task.key, date: event.classifiedAt });
+        }
         issues.push(makeIssue('classification', 'warning', '同渠道重复基金代码',
-          `${key} 在同一任务出现 ${count} 次；保留原记录，禁止自动合并`, null, { entityId: task.key }));
+          `${key} 在同一任务出现 ${holdings.length} 次；保留原记录，禁止自动合并`,
+          null,
+          {
+            entityId: `${task.key}:${key}`,
+            evidence: holdings.map((holding) =>
+              `${holding.originalName} · 代码 ${holding.fundCode ?? '未知'} · 份额 ${holding.shareClass ?? '未记录'} · 账户 ${holding.childChannelId ?? '未归属'} · 观察 ${task.snapshotAsOf}`),
+            evidenceRefs,
+            impact: {
+              financialDataChanged: false,
+              summary: '确认独立身份只会解除该重复代码提示，不合并持仓、不修改观察值或渠道余额。',
+              affectedIds: holdings.map((holding) => holding.id),
+            },
+          }));
       }
     }
   }
