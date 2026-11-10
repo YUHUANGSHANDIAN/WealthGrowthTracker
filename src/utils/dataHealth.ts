@@ -196,7 +196,7 @@ export function checkClassificationHealth(
         `任务 ${task.key} 有 ${missingGoldExposure} 条黄金产品尚未标记 gold 敞口`, null, { entityId: task.key }));
     }
     if (missingAlipayFundChannel > 0) {
-      issues.push(makeIssue('classification', 'warning', '支付宝基金缺少基金叶子归属',
+      issues.push(makeIssue('classification', 'warning', '支付宝基金缺少基金子渠道归属',
         `任务 ${task.key} 有 ${missingAlipayFundChannel} 条基金尚未归入 alipay_fund`, null, { entityId: task.key }));
     }
     for (const [key, holdings] of duplicateCodes) {

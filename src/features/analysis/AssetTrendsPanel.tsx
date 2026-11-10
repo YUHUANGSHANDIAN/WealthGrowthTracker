@@ -21,6 +21,7 @@ import {
 } from '../../domain/analysis/assetTrends';
 import { projectMonthlyPlanningClassification } from '../../domain/assets/classification';
 import { SavedViewBar } from '../../components/ui/workspace';
+import { CHANNEL_TERMS } from '../../constants/channelTerms';
 
 const RANGES = [
   { value: '30', label: '30天' },
@@ -422,7 +423,7 @@ export function AssetTrendsPanel() {
             <label className="trend-field">层级
               <select value={level} onChange={(event) => setLevel(event.target.value as 'parent' | 'leaf')}>
                 <option value="parent">父渠道</option>
-                <option value="leaf">叶子渠道</option>
+                <option value="leaf">{CHANNEL_TERMS.detailLevel}</option>
               </select>
             </label>
             {level === 'leaf' && (
@@ -485,7 +486,7 @@ export function AssetTrendsPanel() {
               />
             </>
           ) : <EmptyState icon="🏦" title="渠道快照不足" description="所选区间没有可用的渠道构成记录。" />}
-          <p className="mt-3 text-xs leading-relaxed text-slate-500">缺快照不补零；父级与子级分开显示。无历史持仓证据的 A/C 分类搬移不会回填历史金额。</p>
+          <p className="mt-3 text-xs leading-relaxed text-slate-500">缺快照不补零；{CHANNEL_TERMS.parentRollup}与{CHANNEL_TERMS.subchannel}明细分开显示，{CHANNEL_TERMS.noDoubleCount}。无历史持仓证据的 A/C 分类搬移不会回填历史金额。</p>
         </Card>
       )}
 

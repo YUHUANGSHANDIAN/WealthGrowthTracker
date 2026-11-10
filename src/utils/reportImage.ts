@@ -1,5 +1,6 @@
 import type { FinancialReport } from '../types';
 import { getLevelByTheme } from '../constants/levels';
+import { CHANNEL_TERMS } from '../constants/channelTerms';
 import {
   privacyAmount,
   privacyChange,
@@ -181,7 +182,7 @@ export function buildReportSvg(
       const amt = privacyAmount(p.amount, privacy);
       const amountText = amt != null && amt !== '' ? ` ${esc(amt)}` : '';
       channels += `<g>
-        <text x="40" y="${y + barH / 2 + 5}" font-size="14" font-weight="600" fill="#1f2937">${esc(p.emoji ?? '')} ${esc(p.name)}</text>
+        <text x="40" y="${y + barH / 2 + 5}" font-size="14" font-weight="600" fill="#1f2937">${esc(p.emoji ?? '')} ${esc(p.name)}${p.children.length ? '' : ` · ${CHANNEL_TERMS.parentDirect}`}</text>
         <rect x="${barX}" y="${y}" width="${w}" height="${barH}" rx="6" fill="${pal.primary}" opacity="0.85"/>
         <text x="${barX + w + 8}" y="${y + barH / 2 + 5}" font-size="13" fill="#475569">${pct}${amountText}</text>
       </g>`;
@@ -197,7 +198,7 @@ export function buildReportSvg(
       y += 6;
     }
   } else if (flatDetails.length > 0) {
-    // 旧版扁平叶子渠道（无父子映射）
+    // 旧版扁平渠道（无父子映射）
     const barStartY = (template === 'social' || template === 'story' ? totalValueY + 210 : totalValueY + 200);
     const barH = template === 'story' ? 40 : 30;
     const gap = template === 'story' ? 22 : 14;

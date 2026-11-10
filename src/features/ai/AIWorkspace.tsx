@@ -17,7 +17,7 @@ import { ExplanationView } from './ExplanationView';
 
 const labels: Record<AITask, string> = {
   'report-interpretation': '报告解读', 'analysis-question': '分析问答', 'entry-draft': '自然语言余额录入',
-  'data-health-explanation': '数据健康解释', 'goal-scenario': '目标情景解释',
+  'data-health-explanation': '数据健康解释', 'data-health-assistant': '数据健康助手', 'goal-scenario': '目标情景解释',
   'document-extraction': '资料结构化提取（需视觉模型）', 'attribution-explanation': '归属解释',
   'research-summary': '研究摘要', 'monthly-narrative': '月度叙述',
 };
@@ -25,6 +25,7 @@ const questions: Record<AITask, string> = {
   'report-interpretation': '请解释这份报告的资产变化、覆盖限制，以及我需要核对的事实。',
   'analysis-question': '请解释所选区间的资产变化和数据覆盖；没有现金流依据时不要推断原因。',
   'entry-draft': '', 'data-health-explanation': '请解释这些数据覆盖指标代表什么，并建议我在数据中心检查哪些项目。不要执行修复。',
+  'data-health-assistant': '请解释当前数据健康问题，并只引用已授权事实。',
   'goal-scenario': '请根据我授权的确定性事实解释目标情景的假设和限制。',
   'document-extraction': '请把已授权的资料内容按结构化字段返回；无法确定的字段标记为未知，不要猜测金额。',
   'attribution-explanation': '请解释这些持仓的归属判断依据与不确定之处，不要改变任何金额。',

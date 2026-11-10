@@ -22,7 +22,7 @@ import { hasValidReportEvidence } from './evidence';
 export const REPORT_SCHEMA_VERSION = 5;
 export const REPORT_RENDERER_VERSION = 4;
 
-/** 当前渠道构成报告所需的份额明细（叶子渠道）。 */
+/** 当前渠道构成报告所需的份额明细（子渠道或父渠道直接金额）。 */
 export function buildChannelDetails(channels: Channel[], total: number): ReportChannelDetail[] {
   const leaves = leafChannels(channels);
   return leaves.map((l) => ({

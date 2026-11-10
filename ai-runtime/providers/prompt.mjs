@@ -8,5 +8,10 @@ export const SYSTEM_PROMPT = [
 ].join(" ");
 
 export function userPrompt({ task, input }) {
-  return JSON.stringify({ task, authorizedFacts: input.facts, question: input.text });
+  return JSON.stringify({
+    task,
+    authorizedFacts: input.facts,
+    recentConversation: input.conversation ?? [],
+    question: input.text,
+  });
 }

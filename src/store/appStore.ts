@@ -91,6 +91,12 @@ import { detectCelebrations, type CelebrationEvent } from '../utils/celebrate';
 import { DEFAULT_SMART_CONFIG } from '../utils/smartSort';
 import { mergeData } from '../utils/mergeData';
 import { checkDataHealth, applyHealthFixes } from '../utils/dataHealth';
+import {
+  assertHealthFixProposal,
+  consumeHealthFixProposal,
+  type HealthFixProposal,
+} from '../features/data/issueFix';
+import type { HealthScanInput } from '../utils/healthScan';
 import { createAuthRecord, verifySecret, type AuthRecord } from '../utils/auth';
 import {
   crossedLevelAchievements,
@@ -331,6 +337,7 @@ interface AppState {
   exportData: () => Promise<void>;
   importData: (jsonText: string, mode?: 'replace' | 'merge', baseRevision?: number) => Promise<{ ok: boolean; message: string }>;
   applyDataFixes: (baseRevision?: number, fix?: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history') => Promise<{ fixed: number }>;
+  commitHealthFix: (proposal: HealthFixProposal) => Promise<{ fixed: number }>;
 }
 
 const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
@@ -1718,6 +1725,54 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         await storageService.flush();
         return { fixed };
       } finally { release(); }
+    },
+    async commitHealthFix(proposal) {
+      const snapshot = (): HealthScanInput => {
+        const state = get();
+        return {
+          channels: state.channels,
+          history: state.history,
+          reports: state.reports,
+          goals: state.goals,
+          primaryGoalId: state.primaryGoalId,
+          levelAchievements: state.levelAchievements,
+          lottery: state.lottery,
+          monthlyPlanning: state.monthlyPlanning,
+          assetClassification: state.assetClassification,
+        };
+      };
+      const initial = get();
+      assertHealthFixProposal(snapshot(), initial.dataRevision, proposal);
+      const release = beginLedgerMaintenance('正在应用单项健康修复');
+      try {
+        await storageService.flush();
+        const manager = storageService.getDesktopManager();
+        if (manager && !(await manager.backupNow(true))) throw new Error('操作前备份不可用');
+        const current = get();
+        assertHealthFixProposal(snapshot(), current.dataRevision, proposal);
+        const audit: ActivityLogEntry = {
+          id: crypto.randomUUID(),
+          type: 'health-fix',
+          timestamp: new Date().toISOString(),
+          entityType: 'health-issue',
+          entityId: proposal.issueId,
+          description: `${proposal.summary}；操作 ${proposal.operationId}`,
+        };
+        rawSet({
+          channels: proposal.after.channels,
+          history: proposal.after.history,
+          activityLog: [audit, ...current.activityLog].slice(0, 200),
+        });
+        persist([STORAGE_KEYS.wealthTrackerData, STORAGE_KEYS.activityLog]);
+        await storageService.flush();
+        const issueStillExists = checkDataHealth(get().channels, get().history).issues
+          .some((issue) => issue.id === proposal.issueId && issue.fingerprint === proposal.issueFingerprint);
+        if (issueStillExists) throw new Error('修复已写入，但重新扫描仍发现同一问题；请立即核对备份');
+        consumeHealthFixProposal(proposal);
+        return { fixed: 1 };
+      } finally {
+        release();
+      }
     },
   };
 });

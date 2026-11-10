@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const e2ePort = process.env.WGT_E2E_PORT ?? '4300';
+const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
+
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 45_000,
@@ -20,7 +23,7 @@ export default defineConfig({
     ...devices['Desktop Chrome'],
     // Visual baselines are generated and compared on Windows with Playwright's
     // package-pinned Chromium build, not the runner's changing Edge channel.
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: e2eBaseUrl,
     locale: 'zh-CN',
     timezoneId: 'Asia/Shanghai',
     viewport: { width: 1440, height: 900 },
@@ -40,8 +43,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4173',
-    url: 'http://127.0.0.1:4173',
+    command: `npm run build && npm run preview -- --host 127.0.0.1 --port ${e2ePort}`,
+    url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
   },

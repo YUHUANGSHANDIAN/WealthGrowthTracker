@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AIRuntime } from "../runtime.mjs";
-import { parseRequest, MAX_INPUT_TEXT_LENGTH } from "../protocol.mjs";
+import { parseRequest, MAX_INPUT_TEXT_LENGTH, MAX_CONVERSATION_MESSAGES } from "../protocol.mjs";
 
 const inferRequest = (overrides = {}) => JSON.stringify({
   protocolVersion: 1,
@@ -28,6 +28,27 @@ test("rejects invalid facts, repeated IDs and oversized input", () => {
   const duplicate = { factId: "same", label: "x", value: "1", unit: "CNY" };
   assert.throws(() => parseRequest(inferRequest({ input: { text: "x", facts: [duplicate, duplicate] } })), { code: "INVALID_REQUEST" });
   assert.throws(() => parseRequest(inferRequest({ input: { text: "x".repeat(MAX_INPUT_TEXT_LENGTH + 1), facts: [] } })), { code: "INVALID_REQUEST" });
+});
+
+test("accepts a bounded health-assistant conversation and rejects extra fields", () => {
+  const input = {
+    text: "Why is this issue present?",
+    facts: [],
+    conversation: Array.from({ length: MAX_CONVERSATION_MESSAGES }, (_, index) => ({
+      role: index % 2 ? "assistant" : "user",
+      text: `Synthetic turn ${index}`,
+    })),
+  };
+  const parsed = parseRequest(inferRequest({ task: "data-health-assistant", input }));
+  assert.equal(parsed.input.conversation.length, MAX_CONVERSATION_MESSAGES);
+  assert.throws(() => parseRequest(inferRequest({
+    task: "data-health-assistant",
+    input: { ...input, conversation: [...input.conversation, { role: "user", text: "overflow" }] },
+  })), { code: "INVALID_REQUEST" });
+  assert.throws(() => parseRequest(inferRequest({
+    task: "data-health-assistant",
+    input: { ...input, tool: "forbidden" },
+  })), { code: "INVALID_REQUEST" });
 });
 
 test("default runtime is disabled, reports no tools and never calls providers", async () => {

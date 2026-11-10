@@ -1,5 +1,6 @@
 import type { FinancialReport } from '../../types';
 import { formatCNY } from '../../utils/money';
+import { CHANNEL_TERMS } from '../../constants/channelTerms';
 
 /** 报告文件基础名（ASCII，便于 CI / 文件系统），如 2026-W40-weekly-report。 */
 export function reportFileBase(report: FinancialReport): string {
@@ -29,12 +30,13 @@ export function reportHtml(report: FinancialReport): string {
   const pct = Math.abs(report.changePercentage);
   const comp = report.assetComposition;
 
-  // 层级资产构成（父渠道粗体 + 子渠道缩进）；无层级时回退扁平叶子列表。
+  // 层级资产构成（父渠道粗体 + 子渠道缩进）；无层级时回退扁平渠道列表。
   let rows = '';
   if (comp && comp.parents.length > 0) {
     rows = comp.parents
       .map((p) => {
-        const parentRow = `<tr class="parent"><td><b>${esc(p.emoji ?? '')} ${esc(p.name)}</b></td><td class="num">${formatCNY(p.amount)}</td><td class="num">${p.percentageOfTotal.toFixed(1)}%</td><td class="num">—</td></tr>`;
+        const parentKind = p.children.length ? CHANNEL_TERMS.parentRollup : CHANNEL_TERMS.parentDirect;
+        const parentRow = `<tr class="parent"><td><b>${esc(p.emoji ?? '')} ${esc(p.name)}</b><br><small>${parentKind}</small></td><td class="num">${formatCNY(p.amount)}</td><td class="num">${p.percentageOfTotal.toFixed(1)}%</td><td class="num">—</td></tr>`;
         const childRows = p.children
           .map(
             (c) => `<tr><td class="child">└ ${esc(c.emoji ?? '')} ${esc(c.name)}</td><td class="num">${formatCNY(c.amount)}</td><td class="num">${c.percentageOfTotal.toFixed(1)}%</td><td class="num">${c.percentageOfParent.toFixed(1)}%</td></tr>`,
@@ -47,7 +49,7 @@ export function reportHtml(report: FinancialReport): string {
     rows = [...report.channelDetails]
       .sort((a, b) => b.amount - a.amount)
       .map(
-        (c) => `<tr><td>${esc(c.emoji ?? '')} ${esc(c.name)}</td><td class="num">${formatCNY(c.amount)}</td><td class="num">${c.percentage.toFixed(1)}%</td><td class="num">—</td></tr>`,
+        (c) => `<tr><td>${esc(c.emoji ?? '')} ${esc(c.name)}<br><small>${c.isParent ? CHANNEL_TERMS.parentDirect : CHANNEL_TERMS.subchannel}</small></td><td class="num">${formatCNY(c.amount)}</td><td class="num">${c.percentage.toFixed(1)}%</td><td class="num">—</td></tr>`,
       )
       .join('');
   }

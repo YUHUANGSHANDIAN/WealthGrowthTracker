@@ -30,7 +30,7 @@ const forbiddenContents = [
   /财富成长记AI主应用/,
 ];
 const textPath = /\.(ts|tsx|js|mjs|cjs|json|md|txt|html|css|yml|yaml|toml|rs|svg|webmanifest|nsh|ps1|xml|lock)$/i;
-const auditToolPath = /^scripts\/(?:privacy|artifact-privacy).*(?:check|test)\.mjs$/i;
+const auditToolPath = /^scripts\/(?:(?:privacy|artifact-privacy)|create-privacy).*\.mjs$/i;
 const allowedBinaryPath = [
   /^assets\/app-icon\.png$/i,
   /^public\/icons\/[^/]+\.png$/i,

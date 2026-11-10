@@ -4,10 +4,18 @@ import { useAppStore } from '../../src/store/appStore';
 import { useAIConnectionStore } from '../../src/store/aiConnectionStore';
 import { useWorkspaceStore } from '../../src/store/workspaceStore';
 import { setAIEnabled } from '../../src/services/ai/client';
-import { confirmAIChange, prepareAIChange, prepareAIOperation, runAuthorizedAI, validateExplanation } from '../../src/services/ai/business';
+import {
+  confirmAIChange,
+  prepareAIChange,
+  prepareAIOperation,
+  runAuthorizedAI,
+  validateExplanation,
+  validateHealthAssistantReply,
+} from '../../src/services/ai/business';
 import { isAnnotationStale, listAIAnnotations, saveAIAnnotation } from '../../src/services/ai/annotations';
 import type { Channel, FinancialReport } from '../../src/types';
 import { todayString } from '../../src/utils/date';
+import { checkDataHealth } from '../../src/utils/dataHealth';
 
 const channels: Channel[] = [{
   id: 'bank', name: '银行', emoji: '🏦', amount: 0, color: '#000', isParent: true, isExpanded: false,
@@ -103,5 +111,52 @@ describe('trusted AI business operations', () => {
     useAppStore.setState({ reports: [{ ...report, revision: 3 }] });
     expect(isAnnotationStale(listed[0]!)).toBe(true);
     expect(useAppStore.getState().reports[0]?.totalAmount).toBe(5_000);
+  });
+
+  it('bounds health conversation context and rejects forged facts or actions', () => {
+    useAppStore.setState({
+      history: [
+        { date: '2026-01-01', totalAmount: 1 },
+        { date: '2026-01-01', totalAmount: 2 },
+      ],
+    });
+    const real = checkDataHealth([], useAppStore.getState().history).issues.find((item) => item.fix === 'dedupe-history')!;
+    const operation = prepareAIOperation('data-health-assistant', {
+      includeChannels: false,
+      includeHistory: false,
+      includeLottery: false,
+      includeAmounts: false,
+      includeDataHealth: true,
+      healthIssueId: real.id,
+      healthIssueFingerprint: real.fingerprint,
+      includeHealthEvidence: false,
+    }, '为什么提示重复日期？', Array.from({ length: 6 }, (_, index) => ({
+      role: index % 2 ? 'assistant' as const : 'user' as const,
+      text: `最近消息 ${index}`,
+    })));
+    expect(operation.pack.facts.some((fact) => fact.factId === 'health.issue.actions')).toBe(true);
+    expect(operation.pack.facts.some((fact) => /^\d{3,}$/.test(fact.value))).toBe(false);
+    const valid = {
+      message: '这是重复日期提示。',
+      citations: [{ text: '本地规则检测到重复日期', factIds: ['health.duplicateDates'] }],
+      limitations: ['不会自动决定保留哪一条'],
+      proposal: {
+        operation: 'preview-existing-action',
+        actionId: 'dedupe-history',
+        issueId: real.id,
+        rationale: '只预览当前问题对应的去重',
+        warnings: ['会移除同日期的旧记录'],
+        confidence: 'high',
+      },
+    };
+    expect(validateHealthAssistantReply(JSON.stringify(valid), operation.pack, operation).proposal?.actionId).toBe('dedupe-history');
+    expect(() => validateHealthAssistantReply(JSON.stringify({
+      ...valid,
+      citations: [{ text: '伪造', factIds: ['forged.fact'] }],
+    }), operation.pack, operation)).toThrow('未授权');
+    expect(() => validateHealthAssistantReply(JSON.stringify({
+      ...valid,
+      proposal: { ...valid.proposal, actionId: 'remove-orphans' },
+    }), operation.pack, operation)).toThrow('未提供');
   });
 });

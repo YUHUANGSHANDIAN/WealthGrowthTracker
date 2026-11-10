@@ -5,6 +5,10 @@ import { assertFactPackCurrent, buildFactPack, type ContextSelection, type FactP
 import { inferAI, type AITask, type InferenceResult } from './client';
 import type { AmountBatchProposal } from '../../features/assets/amountBatch';
 import { isDateString, todayString } from '../../utils/date';
+import type {
+  HealthAssistantProposal,
+  HealthCitation,
+} from '../../domain/healthAssistant/types';
 
 export interface Explanation { summary: string; observations: Array<{ text: string; factIds: string[] }>; limitations: string[] }
 export interface AuthorizedOperation {
@@ -16,6 +20,13 @@ export interface AuthorizedOperation {
   modelId: string;
   configRevision: number;
   question: string;
+  conversation?: Array<{ role: 'user' | 'assistant'; text: string }>;
+}
+export interface HealthAssistantReply {
+  message: string;
+  citations: HealthCitation[];
+  limitations: string[];
+  proposal?: HealthAssistantProposal;
 }
 export interface ChangeProposal {
   kind: 'amount-batch';
@@ -40,13 +51,24 @@ function profileCurrent(operation: AuthorizedOperation): void {
   if (useWorkspaceStore.getState().amountsHidden) throw new Error('金额隐私已开启，请关闭后重新选择上下文');
 }
 
-export function prepareAIOperation(task: AITask, selection: ContextSelection, question: string): AuthorizedOperation {
+export function prepareAIOperation(
+  task: AITask,
+  selection: ContextSelection,
+  question: string,
+  conversation?: AuthorizedOperation['conversation'],
+): AuthorizedOperation {
   const state = useAIConnectionStore.getState();
   const profile = state.profiles.find(p => p.profileId === state.activeProfileId);
   if (!state.enabled || !profile?.enabled || !['configured', 'tested'].includes(profile.state)) throw new Error('请先在连接中心配置可用连接');
   if (!question.trim() || question.length > 4_000) throw new Error('请输入问题，长度不超过 4000 字');
+  if (conversation !== undefined && (task !== 'data-health-assistant' || !Array.isArray(conversation)
+    || conversation.length > 6 || conversation.some((message) => !['user', 'assistant'].includes(message.role)
+      || !message.text.trim() || message.text.length > 2_000))) {
+    throw new Error('多轮会话上下文无效或超过最近 6 条限制');
+  }
   const operation: AuthorizedOperation = { requestId: crypto.randomUUID(), task, pack: buildFactPack(selection),
-    profileId: profile.profileId, providerId: profile.providerId, modelId: profile.modelId, configRevision: profile.configRevision, question: question.trim() };
+    profileId: profile.profileId, providerId: profile.providerId, modelId: profile.modelId, configRevision: profile.configRevision,
+    question: question.trim(), ...(conversation?.length ? { conversation: conversation.map((message) => ({ ...message })) } : {}) };
   profileCurrent(operation);
   operations.set(operation, JSON.stringify(operation));
   return operation;
@@ -61,11 +83,14 @@ export async function runAuthorizedAI(operation: AuthorizedOperation): Promise<I
   assertAIOperationCurrent(operation);
   const shape = operation.task === 'entry-draft'
     ? '仅返回 JSON：{"date":"YYYY-MM-DD","changes":[{"parentId":"已授权ID","childId":"可选已授权子ID","amount":非负数字}],"warnings":["歧义说明"]}。金额表示更新后的余额，不是收入/支出。无法确定的渠道不生成变更。'
+    : operation.task === 'data-health-assistant'
+      ? '仅返回 JSON：{"message":"面向用户的解释","citations":[{"text":"结论","factIds":["已提供事实ID"]}],"limitations":["限制"],"proposal":{"operation":"navigate|preview-existing-action","actionId":"navigate-issue|sanitize-amounts|remove-orphans|dedupe-history","issueId":"当前问题ID或null","rationale":"建议理由","warnings":["影响"],"confidence":"low|medium|high"}}。proposal 可省略。不得生成任意命令、SQL、脚本、文件路径或账本写入；只能使用已授权的白名单动作。'
     : '仅返回 JSON：{"summary":"简短概述","observations":[{"text":"解释","factIds":["已提供的factId"]}],"limitations":["覆盖限制"]}。每条观察至少引用一条提供的事实，不得伪造数值或引用。';
   const result = await inferAI({ requestId: operation.requestId, task: operation.task, profileId: operation.profileId, providerId: operation.providerId,
     configRevision: operation.configRevision, dataRevision: operation.pack.manifest.baseRevision,
     input: { text: `${shape}\n业务日期：${todayString()}\n用户问题：${operation.question}`,
-      facts: operation.pack.facts.map(({ factId, label, value, unit, asOf }) => ({ factId, label, value, unit, ...(asOf ? { asOf } : {}) })) } });
+      facts: operation.pack.facts.map(({ factId, label, value, unit, asOf }) => ({ factId, label, value, unit, ...(asOf ? { asOf } : {}) })),
+      ...(operation.conversation?.length ? { conversation: operation.conversation.map((message) => ({ ...message })) } : {}) } });
   if (operations.get(operation) !== JSON.stringify(operation)) throw new Error('授权请求已被修改，请重新准备');
   assertFactPackCurrent(operation.pack);
   const state = useAIConnectionStore.getState();
@@ -97,6 +122,80 @@ export function validateExplanationContent(text: string, ids: ReadonlySet<string
       || (item.factIds as string[]).length === 0 || !(item.factIds as string[]).every(id => ids.has(id))) throw new Error('AI 解读引用了未授权或不存在的事实');
   }
   return value as unknown as Explanation;
+}
+
+export function validateHealthAssistantReply(text: string, pack: FactPack, operation?: AuthorizedOperation): HealthAssistantReply {
+  assertFactPackCurrent(pack);
+  if (operation) {
+    if (operation.task !== 'data-health-assistant' || operation.pack !== pack) {
+      throw new Error('当前任务不允许健康助手回复');
+    }
+    assertAIOperationCurrent(operation);
+  }
+  const value = parse(text);
+  if (!exact(value, ['message', 'citations', 'limitations'], ['proposal'])
+    || !string(value.message, 8_000) || !Array.isArray(value.citations) || value.citations.length < 1 || value.citations.length > 12
+    || !strings(value.limitations, 12)) {
+    throw new Error('健康助手回复结构无效');
+  }
+  const authorizedFacts = new Set(pack.facts.map((fact) => fact.factId));
+  const issueFact = pack.facts.find((fact) => fact.factId === 'health.issue.fingerprint');
+  const issueIdFact = pack.facts.find((fact) => fact.factId === 'health.issue.title');
+  const issueSelection = pack.manifest.healthIssueId;
+  const citations: HealthCitation[] = value.citations.map((item) => {
+    if (!record(item) || !exact(item, ['text', 'factIds']) || !string(item.text, 2_000)
+      || !Array.isArray(item.factIds) || item.factIds.length === 0 || item.factIds.length > 12
+      || !(item.factIds as unknown[]).every((id) => typeof id === 'string' && authorizedFacts.has(id))) {
+      throw new Error('健康助手回复引用了未授权或不存在的事实');
+    }
+    return { text: item.text, factIds: item.factIds as string[] };
+  });
+  let proposal: HealthAssistantProposal | undefined;
+  if (value.proposal !== undefined) {
+    if (!record(value.proposal) || !exact(value.proposal,
+      ['operation', 'actionId', 'issueId', 'rationale', 'warnings', 'confidence'])) {
+      throw new Error('健康助手建议结构无效');
+    }
+    const proposalValue = value.proposal;
+    if (!['navigate', 'preview-existing-action'].includes(String(proposalValue.operation))
+      || !['navigate-issue', 'sanitize-amounts', 'remove-orphans', 'dedupe-history'].includes(String(proposalValue.actionId))
+      || !string(proposalValue.rationale, 2_000) || !strings(proposalValue.warnings, 8)
+      || !['low', 'medium', 'high'].includes(String(proposalValue.confidence))) {
+      throw new Error('健康助手建议包含未授权动作');
+    }
+    const requestedIssueId = proposalValue.issueId;
+    if (requestedIssueId !== null && (typeof requestedIssueId !== 'string' || requestedIssueId !== issueSelection)) {
+      throw new Error('健康助手建议绑定了未授权的问题');
+    }
+    const action = proposalValue.actionId as HealthAssistantProposal['actionId'];
+    if (proposalValue.operation === 'navigate' && (action !== 'navigate-issue' || requestedIssueId !== issueSelection)) {
+      throw new Error('健康助手导航建议无效');
+    }
+    if (proposalValue.operation === 'preview-existing-action') {
+      if (!issueSelection || !issueFact || !issueIdFact || requestedIssueId !== issueSelection
+        || !['sanitize-amounts', 'remove-orphans', 'dedupe-history'].includes(action)) {
+        throw new Error('健康助手修复建议缺少精确问题授权');
+      }
+      const actionsFact = pack.facts.find((fact) => fact.factId === 'health.issue.actions');
+      if (!actionsFact?.value.split(',').map((item) => item.trim()).includes(action)) {
+        throw new Error('健康助手建议使用了当前问题未提供的动作');
+      }
+    }
+    proposal = {
+      operation: proposalValue.operation as HealthAssistantProposal['operation'],
+      actionId: action,
+      issueId: requestedIssueId as string | null,
+      rationale: proposalValue.rationale,
+      warnings: proposalValue.warnings as string[],
+      confidence: proposalValue.confidence as HealthAssistantProposal['confidence'],
+    };
+  }
+  return {
+    message: value.message,
+    citations,
+    limitations: value.limitations as string[],
+    ...(proposal ? { proposal } : {}),
+  };
 }
 
 export function prepareAIChange(text: string, operation: AuthorizedOperation): ChangeProposal {

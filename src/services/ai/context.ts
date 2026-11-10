@@ -4,6 +4,7 @@ import type { RuntimeFact } from './client';
 import { isDateString, todayString } from '../../utils/date';
 import { analyticsKpis } from '../../features/analysis/analytics';
 import { round2 } from '../../utils/money';
+import { scanAllHealth } from '../../utils/healthScan';
 
 export interface ContextSelection {
   reportId?: string;
@@ -17,6 +18,9 @@ export interface ContextSelection {
   channelIds?: string[];
   includeGoal?: boolean;
   goalId?: string;
+  healthIssueId?: string;
+  healthIssueFingerprint?: string;
+  includeHealthEvidence?: boolean;
 }
 
 export interface ContextManifest extends ContextSelection {
@@ -35,6 +39,14 @@ function currentState() {
   if (!state.hydrated || state.recoveryError) throw new Error('当前数据尚不可用，不能创建 AI 上下文');
   if (!Number.isSafeInteger(state.dataRevision) || state.dataRevision < 0) throw new Error('当前数据版本无效');
   return state;
+}
+
+function sanitizedHealthLabel(value: string): string {
+  return value
+    .replace(/[A-Za-z]:\\[^\s，。；;]+/g, '[本地路径]')
+    .replace(/「[^」]{1,120}」/g, '「已脱敏」')
+    .replace(/\b\d{3,}(?:\.\d+)?\b/g, '[数字]')
+    .slice(0, 120);
 }
 
 /**
@@ -57,6 +69,18 @@ export function buildFactPack(selection: ContextSelection): FactPack {
   if (selection.goalId !== undefined && (typeof selection.goalId !== 'string' || !selection.goalId || selection.goalId.length > 128)) throw new Error('目标授权选择无效');
   if (selection.reportId !== undefined && (typeof selection.reportId !== 'string' || !selection.reportId)) {
     throw new Error('上下文授权选择无效');
+  }
+  if (selection.includeHealthEvidence !== undefined && typeof selection.includeHealthEvidence !== 'boolean') {
+    throw new Error('健康证据授权选择无效');
+  }
+  if ((selection.healthIssueId === undefined) !== (selection.healthIssueFingerprint === undefined)) {
+    throw new Error('健康问题授权必须同时提供标识和指纹');
+  }
+  if (selection.healthIssueId !== undefined && (typeof selection.healthIssueId !== 'string'
+    || !selection.healthIssueId || selection.healthIssueId.length > 500
+    || typeof selection.healthIssueFingerprint !== 'string' || !selection.healthIssueFingerprint
+    || selection.healthIssueFingerprint.length > 128)) {
+    throw new Error('健康问题授权选择无效');
   }
   if (selection.range) {
     if (!isDateString(selection.range.start) || !isDateString(selection.range.end) || selection.range.start > selection.range.end) {
@@ -146,6 +170,34 @@ export function buildFactPack(selection: ContextSelection): FactPack {
     add('health.duplicateDates', '重复历史日期数', state.history.length - new Set(state.history.map(h => h.date)).size, 'local:history', 'count');
     add('health.missingSnapshots', '缺少渠道快照的历史记录数', state.history.filter(h => !h.channels?.length).length, 'local:history', 'count');
   }
+  if (selection.healthIssueId) {
+    const issues = scanAllHealth(state);
+    const issue = issues.find((candidate) => candidate.id === selection.healthIssueId);
+    if (!issue) throw new Error('健康问题已变化或来自不可用的附件检查，请重新扫描');
+    if (issue.fingerprint !== selection.healthIssueFingerprint) throw new Error('健康问题证据已变化，请重新授权');
+    const source = `local:health:${issue.code}:${issue.fingerprint}`;
+    add('health.issue.title', '脱敏后的问题标题', sanitizedHealthLabel(issue.title), source, 'text');
+    add('health.issue.code', '问题规则代码', issue.code, source, 'text');
+    add('health.issue.domain', '问题领域', issue.domain, source, 'text');
+    add('health.issue.severity', '问题严重度', issue.severity, source, 'text');
+    add('health.issue.ruleVersion', '规则版本', issue.ruleVersion, source, 'count');
+    add('health.issue.fingerprint', '问题证据指纹', issue.fingerprint, source, 'text');
+    add('health.issue.evidenceCount', '可定位证据数量', issue.evidenceRefs.length, source, 'count');
+    add('health.issue.evidenceKinds', '可定位证据类型',
+      [...new Set(issue.evidenceRefs.map((reference) => reference.kind))].sort().join(', ') || 'none', source, 'text');
+    add('health.issue.actions', '可用白名单动作', issue.fix ? `${issue.fix}, navigate-issue` : 'navigate-issue', source, 'text');
+    add('health.issue.scope', '隐私与执行边界',
+      '未发送金额、业务名称、原始证据或完整财务对象。AI 只能建议白名单动作；任何写入还须本地预览和用户明确确认。',
+      source, 'text');
+    if (selection.includeHealthEvidence === true) {
+      const precise = [...(issue.evidence ?? []).map((item, index) => `evidence.${index}: ${item}`),
+        ...issue.evidenceRefs.map((reference) => `reference.${reference.kind}: ${reference.label ?? reference.id}${reference.date ? ` · ${reference.date}` : ''}`)];
+      for (const [index, value] of precise.slice(0, 24).entries()) {
+        add(`health.evidence.${index}`, `用户明确授权的证据 ${index + 1}`, value.slice(0, 500),
+          `${source}:evidence:${index}`, 'text');
+      }
+    }
+  }
   const pack: FactPack = {
     facts,
     manifest: {
@@ -161,6 +213,9 @@ export function buildFactPack(selection: ContextSelection): FactPack {
       ...(selection.channelIds ? { channelIds: [...selection.channelIds] } : {}),
       includeGoal: selection.includeGoal === true,
       ...(selection.goalId ? { goalId: selection.goalId } : {}),
+      ...(selection.healthIssueId ? { healthIssueId: selection.healthIssueId } : {}),
+      ...(selection.healthIssueFingerprint ? { healthIssueFingerprint: selection.healthIssueFingerprint } : {}),
+      includeHealthEvidence: selection.includeHealthEvidence === true,
     },
   };
   issuedPacks.set(pack, { baseRevision: state.dataRevision, content: JSON.stringify(pack) });

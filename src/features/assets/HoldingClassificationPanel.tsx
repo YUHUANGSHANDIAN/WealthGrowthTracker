@@ -183,7 +183,7 @@ export function HoldingClassificationPanel() {
                 <h3 className="font-semibold">身份与归属</h3>
                 <dl className="mt-2 grid grid-cols-[120px_1fr] gap-x-3 gap-y-2 text-xs">
                   <dt className="text-slate-500">稳定持仓 ID</dt><dd className="break-all">{holding.id}</dd>
-                  <dt className="text-slate-500">账户/渠道</dt><dd>{holding.parentChannelId}{holding.childChannelId ? ` / ${holding.childChannelId}` : ' / 未归属叶子渠道'}</dd>
+                  <dt className="text-slate-500">账户/渠道</dt><dd>{holding.parentChannelId}{holding.childChannelId ? ` / ${holding.childChannelId}` : ' / 未归属子渠道'}</dd>
                   <dt className="text-slate-500">基金代码</dt><dd>{holding.fundCode ?? '未知'}</dd>
                   <dt className="text-slate-500">份额类别</dt><dd>{holding.shareClass ?? '未记录'}</dd>
                   <dt className="text-slate-500">产品类型</dt><dd>{productKindLabel(classification?.productKind ?? holding.productType)}</dd>

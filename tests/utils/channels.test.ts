@@ -58,7 +58,7 @@ describe('channels 工具', () => {
     expect(channels[0]!.amount).toBe(200);
   });
 
-  it('leafChannels 扁平化叶子渠道', () => {
+  it('leafChannels 区分子渠道与父渠道直接金额', () => {
     const channels = [
       parent('a', [{ id: 'a1', name: 'x', emoji: '💰', amount: 1, color: '#000', parentId: 'a' }]),
       parent('b'),
@@ -67,6 +67,8 @@ describe('channels 工具', () => {
     const leaves = leafChannels(channels);
     expect(leaves).toHaveLength(2);
     expect(leaves.find((l) => l.id === 'a1')?.parentName).toBe('a');
+    expect(leaves.find((l) => l.id === 'a1')?.kind).toBe('subchannel');
+    expect(leaves.find((l) => l.id === 'b')?.kind).toBe('parent-direct');
   });
 
   it('sortChannelsByRule 按金额降序', () => {

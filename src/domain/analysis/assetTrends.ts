@@ -9,6 +9,7 @@ import { classificationForChannel } from '../assets/classification';
 import { channelAmount, leafChannels, totalAssets } from '../../utils/channels';
 import { addDays, monthStart, todayString, weekStart } from '../../utils/date';
 import { diffMoney, round2 } from '../../utils/money';
+import { parentDirectLabel } from '../../constants/channelTerms';
 
 export type TrendGranularity = 'raw' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
 export type TrendBaselineMode = 'in-range' | 'previous';
@@ -302,10 +303,14 @@ function extractComposition(
         total: channelAmount(parent),
       };
     }
-    return { items: [{ id: `leaf:${parent.id}`, recordedName: parent.name, amount: channelAmount(parent) }], total: channelAmount(parent) };
+    return { items: [{ id: `leaf:${parent.id}`, recordedName: parentDirectLabel(parent.name), amount: channelAmount(parent) }], total: channelAmount(parent) };
   }
   return {
-    items: leafChannels([...channels]).map((leaf) => ({ id: `leaf:${leaf.id}`, recordedName: leaf.name, amount: leaf.amount })),
+    items: leafChannels([...channels]).map((leaf) => ({
+      id: `leaf:${leaf.id}`,
+      recordedName: leaf.kind === 'parent-direct' ? parentDirectLabel(leaf.name) : leaf.name,
+      amount: leaf.amount,
+    })),
     total: totalAssets([...channels]),
   };
 }

@@ -97,7 +97,7 @@ export interface ReportAssetParent {
   color?: string;
   /** 占总资产比例（0-100）。 */
   percentageOfTotal: number;
-  /** 子渠道明细；无子渠道的父渠道是叶子，children 为空。 */
+  /** 子渠道明细；无子渠道的父渠道直接持有未细分金额，children 为空。 */
   children: ReportAssetChild[];
 }
 

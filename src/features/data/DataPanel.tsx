@@ -19,7 +19,8 @@ import {
 } from '../../services/monthlyPlanning/attachmentArchive';
 import { downloadCSV } from '../../components/charts/export';
 import { buildChannelsCsv, buildHistoryCsv } from '../../utils/dataCsv';
-import { checkDataHealth, checkMonthlyHealth, checkReportHealth, checkGoalHealth, checkAchievementHealth, checkLotteryHealth, checkClassificationHealth, domainLabel, type DataIssue, type HealthDomain } from '../../utils/dataHealth';
+import { domainLabel, type DataIssue, type HealthDomain } from '../../utils/dataHealth';
+import { scanAllHealth } from '../../utils/healthScan';
 import { taskKindOf } from '../../domain/portfolio/session';
 import { previewMerge } from '../../utils/mergeData';
 import { platformCapabilities } from '../../utils/platform';
@@ -39,13 +40,16 @@ import { restoreAIConnectionMetadata } from '../../store/aiConnectionStore';
 import { bytesToBase64, verifyAttachments } from '../../services/monthlyPlanning/attachments';
 import { ClassificationMigrationCard } from './ClassificationMigrationCard';
 import { ChangePreviewPanel, PageHeader } from '../../components/ui/workspace';
+import { HealthAssistantDrawer } from './HealthAssistantDrawer';
+import { prepareHealthFix, type HealthFixProposal } from './issueFix';
+import { useHealthAssistantStore } from '../../store/healthAssistantStore';
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
 export function DataPanel() {
-  const { exportData, importData, applyDataFixes, pushToast, hydrate, runMonthlyBackfill } = useAppStore();
+  const { exportData, importData, commitHealthFix, pushToast, hydrate, runMonthlyBackfill } = useAppStore();
   const channels = useAppStore((s) => s.channels);
   const history = useAppStore((s) => s.history);
   const reports = useAppStore((s) => s.reports);
@@ -89,23 +93,26 @@ export function DataPanel() {
   const [legacyDefaultRoot, setLegacyDefaultRoot] = useState(false);
   const [storageModalOpen, setStorageModalOpen] = useState(false);
   const [attachmentStatus, setAttachmentStatus] = useState<Array<{ key: string; ok: boolean; reason?: string }>>([]);
+  const [healthFix, setHealthFix] = useState<HealthFixProposal | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantIssue, setAssistantIssue] = useState<DataIssue | null>(null);
 
   const coverageByYear = useMemo(() => monthlyCoverageByYear(reports, history), [reports, history]);
   const backfillPlan = useMemo(() => planBackfill(reports, history), [reports, history]);
   const maintenanceActions = useMemo(() => buildMaintenanceActions({ reports, history, channels, hasCustomStorage: dataRootMode === 'custom' }), [reports, history, channels, dataRootMode]);
 
   const health = useMemo(() => {
-    const base = checkDataHealth(channels, history);
-    const report = checkReportHealth(reports);
-    const goal = checkGoalHealth(goals, primaryGoalId);
-    const achievement = checkAchievementHealth(levelAchievements);
-    const lotteryHealth = checkLotteryHealth(lottery);
-    const monthly = checkMonthlyHealth(monthlyPlanning, { attachmentStatus });
-    const classification = checkClassificationHealth(channels, monthlyPlanning, assetClassification);
-    const issues = [...base.issues, ...report, ...goal, ...achievement, ...lotteryHealth, ...monthly, ...classification];
-    return { ...base, issues, ok: issues.length === 0 };
+    const issues = scanAllHealth({
+      channels, history, reports, goals, primaryGoalId, levelAchievements, lottery,
+      monthlyPlanning, assetClassification, attachmentStatus,
+    });
+    return { issues, ok: issues.length === 0 };
   }, [channels, history, reports, goals, primaryGoalId, levelAchievements, lottery, monthlyPlanning, assetClassification, attachmentStatus]);
   const sortedHistory = useMemo(() => [...history].sort((a, b) => (a.date < b.date ? -1 : 1)), [history]);
+
+  useEffect(() => {
+    void useHealthAssistantStore.getState().load();
+  }, []);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -161,10 +168,12 @@ export function DataPanel() {
       release = beginLedgerMaintenance('正在生成完整备份');
       await storageService.flush();
       const state = useAppStore.getState();
+      await useHealthAssistantStore.getState().load();
       const result = await buildFullBackup({
         revision: state.dataRevision,
         monthlyPlanning: state.monthlyPlanning,
         aiMetadata: localStorage.getItem('wealth_ai_connections_v1'),
+        includeHealthAssistantConversations: useHealthAssistantStore.getState().state.includeInFullBackup,
       });
       if (isDesktop) {
         const relativePath = await saveFullBackupArchive(result.filename, bytesToBase64(result.archive), result.sha256);
@@ -257,6 +266,7 @@ export function DataPanel() {
       if (fullBackupPreview.parsed.aiMetadataText) {
         restoreAIConnectionMetadata(fullBackupPreview.parsed.aiMetadataText);
       }
+      await useHealthAssistantStore.getState().load(true);
       setDataPath(fullBackupPreview.restorePath);
       setDataRootMode('custom');
       setFullBackupPreview(null);
@@ -411,17 +421,26 @@ export function DataPanel() {
     }
   }
 
-  async function doFix(fix: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history') {
-    const labels = {
-      'sanitize-amounts': '只处理非法金额',
-      'remove-orphans': '只移除孤立子渠道',
-      'dedupe-history': '同日期只保留最新一条',
-    } as const;
-    if (!window.confirm(`确认执行“${labels[fix]}”？应用会先创建备份，并且只应用这一项修复。`)) return;
+  function openFixPreview(issue: DataIssue) {
     try {
-      const res = await applyDataFixes(useAppStore.getState().dataRevision, fix);
-      pushToast(res.fixed > 0 ? `已修复 ${res.fixed} 类问题` : '无需修复', 'success');
-    } catch (error) { pushToast(errorMessage(error, '修复失败，请检查保存状态'), 'error'); }
+      setHealthFix(prepareHealthFix({
+        channels, history, reports, goals, primaryGoalId, levelAchievements, lottery,
+        monthlyPlanning, assetClassification, attachmentStatus,
+      }, useAppStore.getState().dataRevision, issue.id, issue.fingerprint));
+    } catch (error) {
+      pushToast(errorMessage(error, '无法准备该问题的修复预览'), 'error');
+    }
+  }
+
+  async function confirmFix() {
+    if (!healthFix) return;
+    try {
+      const result = await commitHealthFix(healthFix);
+      setHealthFix(null);
+      pushToast(result.fixed ? '已应用并重新扫描该单项修复' : '无需修复', 'success');
+    } catch (error) {
+      pushToast(errorMessage(error, '修复失败，请检查保存状态'), 'error');
+    }
   }
 
   function exportCsv(kind: 'channels' | 'history') {
@@ -524,7 +543,56 @@ export function DataPanel() {
 
       {/* 数据健康与维护中心（v1.6：动态 Maintenance Action + 问题详情） */}
       <MaintenanceActions actions={maintenanceActions} />
-      <DataHealthCenter issues={health.issues} onFix={doFix} busy={busy} />
+      <DataHealthCenter
+        issues={health.issues}
+        onPreviewFix={openFixPreview}
+        onAskAI={(issue) => { setAssistantIssue(issue); setAssistantOpen(true); }}
+        onFreeQuestion={() => { setAssistantIssue(null); setAssistantOpen(true); }}
+        busy={busy}
+      />
+      <HealthAssistantDrawer
+        open={assistantOpen}
+        issue={assistantIssue}
+        onClose={() => setAssistantOpen(false)}
+        onPreviewFix={(issue) => { setAssistantOpen(false); openFixPreview(issue); }}
+      />
+      <Modal
+        open={healthFix !== null}
+        onClose={() => setHealthFix(null)}
+        title="确认单项健康修复"
+        size="md"
+        footer={<>
+          <Button variant="ghost" onClick={() => setHealthFix(null)}>取消</Button>
+          <Button onClick={() => void confirmFix()}>确认并重新扫描</Button>
+        </>}
+      >
+        {healthFix && (
+          <div className="space-y-3 text-sm">
+            <ChangePreviewPanel
+              baseRevision={healthFix.baseRevision}
+              impacts={[{
+                kind: 'financial',
+                label: '将修改财务数据',
+                description: healthFix.summary,
+                affectedIds: [...healthFix.changedChannels, ...healthFix.changedHistoryDates],
+              }]}
+            />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 p-3">
+                <div className="text-xs text-slate-500">变更前</div>
+                <div className="mt-1 font-medium">{healthFix.before.channels.length} 个父渠道 · {healthFix.before.history.length} 条历史</div>
+              </div>
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                <div className="text-xs text-emerald-700">变更后</div>
+                <div className="mt-1 font-medium">{healthFix.after.channels.length} 个父渠道 · {healthFix.after.history.length} 条历史</div>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600">精确影响：{healthFix.changedChannels.length} 个渠道项、{healthFix.changedHistoryDates.length} 个历史日期。不会执行其它同类问题或全局规范化。</p>
+            {healthFix.warnings.map((warning) => <p key={warning} className="rounded bg-amber-50 p-2 text-xs text-amber-800">{warning}</p>)}
+            <p className="text-xs text-slate-500">确认前会再次重扫问题指纹。桌面端先创建恢复点；浏览器端使用 IndexedDB 单事务中的上一快照。</p>
+          </div>
+        )}
+      </Modal>
       <ClassificationMigrationCard />
 
       {/* 活动日志 */}
@@ -969,11 +1037,15 @@ function issueNavigateTarget(i: DataIssue): { tab: import('../../store/navigatio
 
 function DataHealthCenter({
   issues,
-  onFix,
+  onPreviewFix,
+  onAskAI,
+  onFreeQuestion,
   busy,
 }: {
   issues: DataIssue[];
-  onFix: (fix: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history') => void;
+  onPreviewFix: (issue: DataIssue) => void;
+  onAskAI: (issue: DataIssue) => void;
+  onFreeQuestion: () => void;
   busy: boolean;
 }) {
   const navigate = useNavigationStore((s) => s.navigate);
@@ -1012,6 +1084,7 @@ function DataHealthCenter({
           <Badge tone="emerald">正常</Badge>
         </div>
         <p className="text-sm text-slate-500">未发现数据问题。</p>
+        <Button className="mt-3" size="sm" variant="outline" onClick={onFreeQuestion}>我有其它数据健康问题，问 AI</Button>
       </Card>
     );
   }
@@ -1021,7 +1094,10 @@ function DataHealthCenter({
     <Card className="p-4">
       <div className="flex items-center justify-between mb-2">
         <h2 className="font-semibold text-slate-800">🩺 数据健康中心</h2>
-        <Badge tone={errorCount > 0 ? 'red' : 'amber'}>{visible.length} 个问题{errorCount > 0 ? `（${errorCount} 错误）` : ''}</Badge>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={onFreeQuestion}>问 AI</Button>
+          <Badge tone={errorCount > 0 ? 'red' : 'amber'}>{visible.length} 个问题{errorCount > 0 ? `（${errorCount} 错误）` : ''}</Badge>
+        </div>
       </div>
 
       {routeIssueId && !visible.some((issue) => issue.id === routeIssueId) && (
@@ -1070,12 +1146,27 @@ function DataHealthCenter({
                         <div key={strategy.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
                           <span>{strategy.label}：{strategy.description}</span>
                           {i.fix && (
-                            <Button size="sm" variant="outline" disabled={busy} onClick={() => onFix(i.fix!)}>
-                              仅修复此项
+                            <Button size="sm" variant="outline" disabled={busy} onClick={() => onPreviewFix(i)}>
+                              预览此问题修复
                             </Button>
                           )}
                         </div>
                       ))}
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <Button size="sm" variant="outline" onClick={() => onAskAI(i)}>问 AI</Button>
+                        {issueNavigateTarget(i) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              const target = issueNavigateTarget(i)!;
+                              navigate({ tab: target.tab, ...(target.extra ?? {}) });
+                            }}
+                          >
+                            查看证据并手动处理
+                          </Button>
+                        )}
+                      </div>
                       {i.possiblyDestructive && <p className="text-red-500">此操作可能改变数据，修复前自动备份。</p>}
                       {!i.fixable && <p className="text-slate-500">此项没有通用自动修复，请先定位来源并人工核对。</p>}
                       <HealthReviewActions issue={i} />

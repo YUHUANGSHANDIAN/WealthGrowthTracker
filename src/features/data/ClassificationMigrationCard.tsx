@@ -158,7 +158,7 @@ export function ClassificationMigrationCard() {
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
             <p className="font-medium">迁移规则</p>
             <ul className="mt-2 space-y-1 text-xs leading-relaxed">
-              <li>只改变 Alipay 的产品分类、基金叶子归属和风险标签。</li>
+              <li>只改变 Alipay 的产品分类、基金子渠道归属和风险标签。</li>
               <li>A/C 与每个 holdingId 保持独立；不根据任务持仓重算当前渠道余额。</li>
               <li>积存金是 `alipay_gold` 的产品描述，金额基准为渠道总额，不会复制金额。</li>
               <li>其他平台名称不变；重复基金代码保留原记录并进入待核对。</li>
@@ -167,7 +167,7 @@ export function ClassificationMigrationCard() {
           {plan.pending.length > 0 && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               <p className="font-medium">{plan.pending.length} 条记录保留待核对</p>
-              <p className="mt-1 text-xs">包括同父级重复基金代码或分类证据不足项。本迁移不会合并、删除或覆盖它们。</p>
+              <p className="mt-1 text-xs">包括同一父渠道下重复基金代码或分类证据不足项。本迁移不会合并、删除或覆盖它们。</p>
             </div>
           )}
           {plan.blockers.length > 0 && (

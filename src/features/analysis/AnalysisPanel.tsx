@@ -3,6 +3,7 @@ import { useNavigationStore } from '../../store/navigationStore';
 import { latestPointAtOrBefore } from '../reports/generate';
 import { useAppStore } from '../../store/appStore';
 import { totalAssets, leafChannels } from '../../utils/channels';
+import { CHANNEL_TERMS } from '../../constants/channelTerms';
 import { formatCNY } from '../../utils/money';
 import { addDays, todayString } from '../../utils/date';
 import { aggregateHistory, type TimeDimension } from '../../utils/timeDimension';
@@ -168,7 +169,7 @@ export function AnalysisPanel() {
         <p className="text-xs text-slate-500 mb-3">渠道资产结构随时间变化。缺快照的日期显示为缺口（不当作 0）。</p>
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <select value={compLevel} onChange={(e) => setCompLevel(e.target.value as 'parent' | 'leaf')} className="px-2 py-1 text-xs bg-white border border-slate-300 rounded-lg" aria-label="渠道层级">
-            <option value="leaf">叶子渠道</option>
+            <option value="leaf">{CHANNEL_TERMS.detailLevel}</option>
             <option value="parent">父渠道</option>
           </select>
           <select value={compMode} onChange={(e) => setCompMode(e.target.value as 'absolute' | 'percent')} className="px-2 py-1 text-xs bg-white border border-slate-300 rounded-lg" aria-label="构成模式">

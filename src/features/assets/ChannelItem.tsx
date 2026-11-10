@@ -184,7 +184,7 @@ export function ChannelItem({
               </div>
             ))
           ) : (
-            <div className="px-4 py-3 text-sm text-slate-400">该渠道暂无子渠道，金额直接记录在渠道上。</div>
+            <div className="px-4 py-3 text-sm text-slate-400">该父渠道暂无子渠道，余额显示为父渠道直接金额（未细分）。</div>
           )}
         </div>
       )}
