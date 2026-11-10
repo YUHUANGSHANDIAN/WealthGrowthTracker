@@ -18,9 +18,8 @@ export default defineConfig({
   reporter: process.env.CI ? [['line'], ['html', { open: 'never' }]] : 'list',
   use: {
     ...devices['Desktop Chrome'],
-    // Windows uses the installed Edge WebView family for local deterministic runs.
-    // Linux CI installs the pinned Playwright Chromium build instead.
-    ...(process.platform === 'win32' ? { channel: 'msedge' as const } : {}),
+    // Visual baselines are generated and compared on Windows with Playwright's
+    // package-pinned Chromium build, not the runner's changing Edge channel.
     baseURL: 'http://127.0.0.1:4173',
     locale: 'zh-CN',
     timezoneId: 'Asia/Shanghai',

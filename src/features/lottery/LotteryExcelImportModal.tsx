@@ -59,7 +59,7 @@ export function LotteryExcelImportModal({ open, onClose }: { open: boolean; onCl
         ) : undefined
       }>
       <div className="space-y-4">
-        <p className="text-sm text-slate-500">选择《财富成长记AI系统_彩票收支统计.xlsx》，系统会识别「汇总表 / 每日统计 / 交易明细」并预览。导入幂等：同一 Excel 重复导入不会产生重复交易。</p>
+        <p className="text-sm text-slate-500">选择旧版彩票工作簿，系统会识别「汇总表 / 每日统计 / 交易明细」并预览。导入幂等：同一工作簿重复导入不会产生重复交易。</p>
         <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>{busy ? '解析中…' : '📥 选择 Excel 文件'}</Button>
         <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} className="hidden" aria-label="选择彩票 Excel" />
         {error && <p className="text-sm text-red-600">{error}</p>}

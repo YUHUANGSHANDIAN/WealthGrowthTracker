@@ -1,5 +1,36 @@
 # WealthGrowthTracker 1.11.0-preview.1
 
+## Release status
+
+This release remains blocked from publication until the private full-history
+audit is explicitly accepted or resolved and GitHub Actions billing is restored.
+The release workflow creates a verified Draft only; publication requires a
+separate manual confirmation.
+
+## Brand and packaging
+
+- The visible product name is `WealthGrowthTracker` across the application,
+  PWA, exports and release workflow.
+- npm, AI Runtime and Rust package names no longer use the retired hyphenated
+  brand.
+- The Windows main binary is generated as `WealthGrowthTracker.exe`; the
+  published Tauri identifier and existing local data schema are unchanged.
+- New installs use `Documents/WealthGrowthTracker`; the previous default folder
+  is detected in place for compatibility.
+- The local build-cache root is `DevCache/WealthGrowthTracker`.
+
+## Security and supply chain
+
+- Added current-tree, full-history and build-artifact privacy checks.
+- Added a brand contract, npm/Cargo license checks and high-severity dependency
+  audits.
+- Pinned GitHub Actions to complete commit SHAs and enabled Secret Scanning,
+  Push Protection and Dependabot.
+- Upgraded Vite, Vitest and GitHub Copilot SDK to versions that remove the
+  identified high-severity advisories.
+- Draft release verification now requires a complete platform asset matrix and
+  SHA-256 checksums. Missing assets block publication.
+
 ## Experience
 
 - Unified page hierarchy, semantic status tokens, light/dark surfaces, compact density, responsive tables and accessible dialogs across all main pages.

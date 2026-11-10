@@ -24,7 +24,7 @@
 | `tsconfig.tsbuildinfo` | 🗑 删除 | TypeScript 增量缓存，可恢复 |
 | `node_modules/` | ✅ 保留 | 默认保留当前开发环境（spec 140） |
 | `财富梦想实现家.html` + `_files/` | ✅ 保留 | 灵光旧版 production bundle，历史参考，明确不删除 |
-| 用户 Excel `财富成长记AI系统_彩票收支统计.xlsx` | ✅ 保留（不在本目录） | 位于父目录，用户数据，绝不删除 |
+| 用户旧版彩票工作簿 | ✅ 保留（不在本目录） | 属于私人数据，绝不删除，也不写入公开记录 |
 | Secrets（.env / keystore / 签名） | ✅ 保留 | 无此类文件存在于本目录 |
 
 ## 清理动作（执行）

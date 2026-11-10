@@ -1,8 +1,8 @@
 {
-  "name": "wealth-growth-tracker",
+  "name": "wealthgrowthtracker",
   "private": true,
   "version": "1.11.0-preview.1",
-  "description": "财富成长记 / 财富梦想实现家 —— 本地个人财富管理 Web + Windows 桌面应用（React + TypeScript + Vite + Tauri）",
+  "description": "WealthGrowthTracker — 本地优先的个人财富管理 Web 与桌面应用",
   "type": "module",
   "engines": {
     "node": "24.21.x"
@@ -18,7 +18,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --incremental false",
     "lint": "eslint src --ext .ts,.tsx --report-unused-disable-directives --max-warnings 0",
     "privacy:check": "node scripts/privacy-check.mjs",
-    "privacy:test": "node --test scripts/privacy-check.test.mjs",
+    "privacy:history": "node scripts/privacy-history-check.mjs",
+    "privacy:test": "node --test scripts/privacy-check.test.mjs scripts/privacy-history-check.test.mjs",
+    "brand:check": "node scripts/brand-check.mjs",
+    "license:check": "node scripts/license-check.mjs",
+    "cargo-license:check": "node scripts/cargo-license-check.mjs",
+    "artifact:check": "node scripts/artifact-privacy-check.mjs",
+    "audit:high": "npm audit --audit-level=high",
     "tauri": "tauri",
     "tauri:build": "tauri build"
   },
@@ -54,7 +60,7 @@
     "postcss": "^8.4.47",
     "tailwindcss": "4.3.3",
     "typescript": "~5.6.3",
-    "vite": "6.4.3",
-    "vitest": "4.1.11"
+    "vite": "6.4.6",
+    "vitest": "4.1.12"
   }
 }

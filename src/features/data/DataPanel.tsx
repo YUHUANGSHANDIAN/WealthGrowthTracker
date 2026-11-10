@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { beginLedgerMaintenance, useAppStore } from '../../store/appStore';
 import { Card, Button, Badge } from '../../components/ui/primitives';
 import { Modal, ConfirmDialog } from '../../components/ui/Modal';
-import { storageService, getDocumentsDir, getDefaultDataDir, openPathInSystem } from '../../services/storage';
+import { storageService, getDocumentsDir, getDefaultDataDir, dataRootIsLegacy, openPathInSystem } from '../../services/storage';
 import {
   readStorageConfig, writeStorageConfig, migrateDataRoot, writeFullRestoreRoot, saveFullBackupArchive,
   readFullBackupArchive,
@@ -86,6 +86,7 @@ export function DataPanel() {
   const [backfillPreviewOpen, setBackfillPreviewOpen] = useState(false);
   const [backfillBaseRevision, setBackfillBaseRevision] = useState<number | null>(null);
   const [dataRootMode, setDataRootMode] = useState<'default' | 'custom'>('default');
+  const [legacyDefaultRoot, setLegacyDefaultRoot] = useState(false);
   const [storageModalOpen, setStorageModalOpen] = useState(false);
   const [attachmentStatus, setAttachmentStatus] = useState<Array<{ key: string; ok: boolean; reason?: string }>>([]);
 
@@ -115,6 +116,8 @@ export function DataPanel() {
         if (active && dir) setDataPath(dir);
         const cfg = await readStorageConfig();
         if (active && cfg) setDataRootMode(cfg.dataRootMode);
+        const legacy = await dataRootIsLegacy();
+        if (active) setLegacyDefaultRoot(legacy);
       } catch {
         if (active) pushToast('无法读取存储位置，请检查配置与权限', 'error');
       }
@@ -595,7 +598,8 @@ export function DataPanel() {
         <Card className="p-4">
           <h2 className="font-semibold text-slate-800 mb-2">📁 数据存放位置</h2>
           <p className="text-sm text-slate-500 mb-1 break-all">当前：<span className="font-mono text-xs text-slate-700">{dataPath || '—'}</span></p>
-          <p className="text-xs text-slate-400 mb-3">模式：{dataRootMode === 'custom' ? '自定义目录' : '默认目录'} · Storage Backend：{adapterName}</p>
+          <p className="text-xs text-slate-400 mb-3">模式：{dataRootMode === 'custom' ? '自定义目录' : legacyDefaultRoot ? '默认目录（兼容旧版）' : '默认目录'} · Storage Backend：{adapterName}</p>
+          {legacyDefaultRoot && <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">检测到升级前的默认数据目录。应用会继续原地读取；只有你主动更改位置时才会迁移。</p>}
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={() => setStorageModalOpen(true)}>📁 更改位置</Button>
             {dataRootMode === 'custom' && (

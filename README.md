@@ -1,4 +1,4 @@
-# WealthGrowthTracker（财富成长记）
+# WealthGrowthTracker
 
 一个**本地优先**的个人财富管理应用：通过可视化资产、成长等级、目标倒计时和游戏化反馈（金币雨），让个人财富积累过程更有动力、更有仪式感。
 
@@ -37,7 +37,7 @@
   - 百万财富目标、**时区感知倒计时**（起始/目标日期时间、多种显示格式、时间+金额双进度）
   - 达成目标自动触发金币雨 + 升级庆祝（遵循 `prefers-reduced-motion`）
 - **数据管理**
-  - **自定义数据目录**：桌面端可更改数据根目录（跨磁盘安全迁移，失败自动回滚），配置保存在系统 App Config 目录，默认仍用「文档\财富成长记」
+  - **自定义数据目录**：桌面端可更改数据根目录（跨磁盘安全迁移，失败自动回滚），配置保存在系统 App Config 目录；新安装默认使用「文档\WealthGrowthTracker」，旧默认目录只做兼容读取
   - JSON 全量导出 / 导入（**合并/覆盖两种模式** + 预览），**兼容灵光旧版备份 JSON**
   - **数据健康检查**（可安全修复，含周报 ISO 周期完整性检查）、渠道/历史 CSV 导出、自动备份 + 从备份恢复
   - **报告覆盖情况** + 缺失月报补生成（使用当月最后有效记录，绝不重复生成、绝不虚构月末值）
@@ -118,7 +118,7 @@ Windows 开发与桌面打包请优先使用 `scripts/dev-local.ps1` 和
 
 所有资产数据**默认只保存在你自己的电脑本地**，不会上传到任何服务器：
 
-- **Windows 桌面版**：`C:\Users\<用户名>\Documents\财富成长记\`（即「我的文档」下的 `财富成长记` 文件夹）
+- **Windows 桌面版**：`C:\Users\<用户名>\Documents\WealthGrowthTracker\`（即「我的文档」下的 `WealthGrowthTracker` 文件夹）
   - `data/app-state.json` —— 全部业务数据
   - `backups/` —— 自动/手动备份
   - `reports/{weekly,monthly,yearly}/` —— 报告（JSON + HTML）
@@ -128,7 +128,7 @@ Windows 开发与桌面打包请优先使用 `scripts/dev-local.ps1` 和
 
 存储键与灵光旧版逐字对齐（`wealth_tracker_data`、`financial_reports`、`countdown_data` 等），是数据兼容的核心契约。
 
-> 提示：复制整个 `财富成长记` 文件夹即可完成完整人工备份。桌面版每天首次保存时自动备份一次。
+> 提示：复制整个 `WealthGrowthTracker` 文件夹即可完成完整人工备份。桌面版每天首次保存时自动备份一次。
 
 ---
 
@@ -206,7 +206,7 @@ npm run build        # 产物在 dist/
 
 - `WealthGrowthTracker_*_x64-setup.exe`（NSIS，按用户安装、无需管理员权限，推荐）
 - `WealthGrowthTracker_*_x64.msi`
-- 数据目录：`文档\财富成长记\`。卸载**不会**删除该目录。
+- 数据目录：新安装为 `文档\WealthGrowthTracker\`；旧版默认目录仅作为兼容根继续读取。卸载**不会**删除该目录。
 - 首次安装 SmartScreen 可能提示「未知发布者」：点击「更多信息 → 仍要运行」即可（当前未商业代码签名）。
 
 ### macOS（Stable build，未签名）
@@ -282,4 +282,5 @@ npm run build        # 产物在 dist/
 
 ## 📄 License
 
-MIT（可自行补充许可信息）。
+项目源码采用 [MIT License](LICENSE)。随应用分发的第三方组件和 Node.js sidecar
+见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

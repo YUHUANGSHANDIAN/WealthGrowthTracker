@@ -3,7 +3,7 @@ import { round2 } from '../../utils/money';
 import { lotteryTxFingerprint, lotteryTxIdFromFingerprint } from './lotteryTx';
 
 /**
- * 旧彩票 Excel 导入（v1.4）：解析《财富成长记AI系统_彩票收支统计.xlsx》三个 Sheet：
+ * 旧彩票工作簿导入：解析「汇总表 / 每日统计 / 交易明细」三个 Sheet：
  * - 汇总表：项目 + 总收入/总支出/净盈利（summary-only 项目，不伪造明细）
  * - *每日统计：跳过（全部从交易动态推导）
  * - *交易明细：真实交易（收入→prize、支出→stake、其他→adjustment）

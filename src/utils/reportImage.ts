@@ -107,7 +107,7 @@ export function buildReportSvg(
   // —— 头部 ——
   const header = `
   <rect x="0" y="0" width="${W}" height="6" fill="${pal.primary}"/>
-  <text x="40" y="64" font-size="22" font-weight="700" fill="${pal.ink}">财富成长记</text>
+  <text x="40" y="64" font-size="22" font-weight="700" fill="${pal.ink}">WealthGrowthTracker</text>
   <text x="40" y="88" font-size="13" fill="${pal.muted}">个人财富成长 · 本地隐私优先</text>`;
 
   const badge = `<g><rect x="${W - 40 - 150}" y="34" width="150" height="34" rx="17" fill="${pal.surface}"/><rect x="${W - 40 - 150}" y="34" width="150" height="34" rx="17" fill="none" stroke="${pal.border}"/><text x="${W - 40 - 75}" y="56" font-size="14" font-weight="600" text-anchor="middle" fill="${pal.primary}">🏆 ${esc(levelText)}</text></g>`;
@@ -228,7 +228,7 @@ export function buildReportSvg(
   const footerY = H - 40;
   const footnote = privacyFootnote(privacy);
   const footer = `
-  <text x="40" y="${footerY - 24}" font-size="12" fill="#94a3b8">由「财富成长记」生成 · ${esc(footnote)} · 仅供个人参考，不构成投资建议</text>
+  <text x="40" y="${footerY - 24}" font-size="12" fill="#94a3b8">由 WealthGrowthTracker 生成 · ${esc(footnote)} · 仅供个人参考，不构成投资建议</text>
   <text x="40" y="${footerY}" font-size="12" fill="#94a3b8">${esc(new Date(report.createdAt).toLocaleString('zh-CN'))}</text>`;
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif">

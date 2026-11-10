@@ -21,7 +21,7 @@ const ROUTES = [
 async function openRoute(page: import('@playwright/test').Page, hash: string) {
   await page.goto(`/${hash}`);
   await expect(page.locator('.workspace-content')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('正在加载财富成长记…')).toHaveCount(0);
+  await expect(page.getByText('正在加载 WealthGrowthTracker…')).toHaveCount(0);
   await page.evaluate(() => document.fonts.ready);
 }
 

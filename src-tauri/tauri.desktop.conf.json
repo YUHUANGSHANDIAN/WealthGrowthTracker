@@ -3,7 +3,9 @@
   "bundle": {
     "externalBin": ["binaries/node"],
     "resources": {
-      "../.ai-runtime-build/resources": "ai-runtime"
+      "../.ai-runtime-build/resources": "ai-runtime",
+      "../LICENSE": "LICENSE",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
     }
   }
 }

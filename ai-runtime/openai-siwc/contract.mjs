@@ -2,7 +2,7 @@ import { AuthorizationError } from "./security.mjs";
 
 // Verified against the official open-source token-sharing flow on 2026-10-13.
 // This contract does not assert app eligibility, account authorization or subscription entitlement.
-export function createOpenAISiwcContract({ installationId, applicationName = "Wealth Growth Tracker" } = {}) {
+export function createOpenAISiwcContract({ installationId, applicationName = "WealthGrowthTracker" } = {}) {
   if (typeof installationId !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(installationId) ||
       typeof applicationName !== "string" || !applicationName.trim() || applicationName.length > 100 ||

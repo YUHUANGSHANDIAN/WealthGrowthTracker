@@ -86,6 +86,6 @@ td.child{padding-left:26px;color:#475569;font-size:13px}
 <table><thead><tr><th>渠道</th><th>金额</th><th>占总资产</th><th>占父渠道</th></tr></thead><tbody>${rows}</tbody></table>
 ${report.channelSnapshotMissing ? '<p class="note">注：旧版历史记录仅保存总资产，无法还原该日期的渠道构成。</p>' : ''}
 ${report.compositionWarnings?.length ? `<p class="note">${report.compositionWarnings.map((w) => esc(w)).join('；')}</p>` : ''}
-<p class="note">由「财富成长记」生成 · ${esc(new Date(report.createdAt).toLocaleString('zh-CN'))}。预测/报告仅供个人参考，不构成投资建议。</p>
+<p class="note">由 WealthGrowthTracker 生成 · ${esc(new Date(report.createdAt).toLocaleString('zh-CN'))}。预测/报告仅供个人参考，不构成投资建议。</p>
 </body></html>`;
 }

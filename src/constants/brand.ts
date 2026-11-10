@@ -1,10 +1,8 @@
 /**
- * 品牌单一来源：用户可见名称与仓库 slug 从这里派生，避免继续到处硬编码旧 slug。
- * 内部标识（identifier、存储键、IndexedDB 库名、SW 缓存前缀、npm/Cargo 包名）保持不变，
- * 见 docs/BRANDING.md 的兼容白名单。
+ * 品牌单一来源：当前用户可见产品名只能是 WealthGrowthTracker。
+ * 历史 identifier、存储键、IndexedDB 名和备份格式属于兼容标识，见 docs/BRANDING.md。
  */
 export const APP_BRAND = 'WealthGrowthTracker';
-export const APP_BRAND_ZH = '财富成长记';
 export const APP_DESCRIPTION = '本地优先的个人财富管理与月度理财工作台';
 
 /** 当前仓库 slug（改名后） */
@@ -18,9 +16,9 @@ export const UPDATE_CHECK_REPOSITORIES = [APP_REPOSITORY, ...LEGACY_REPOSITORIES
 export const PLANNER = {
   id: 'monthly',
   label: '月度理财',
-  productName: 'WealthGrowthPlanner',
+  productName: APP_BRAND,
 } as const;
 
 export function brandTitle(): string {
-  return `${APP_BRAND} · ${APP_BRAND_ZH}`;
+  return APP_BRAND;
 }

@@ -1,6 +1,22 @@
 # Changelog
 
-本文件记录「财富成长记 / 财富梦想实现家」各版本的变更。
+本文件记录 WealthGrowthTracker 各版本的变更。旧名称只可能出现在兼容说明和历史记录中。
+
+## [1.11.0-preview.1] - 2026-11-10
+
+### 品牌与 Windows 交付
+- npm、AI Runtime 和 Rust 包名统一为合法的无横线形式；用户可见品牌统一为 `WealthGrowthTracker`。
+- Tauri `mainBinaryName` 固定为 `WealthGrowthTracker`，Windows 实际生成 `WealthGrowthTracker.exe`，同时保留已发布 identifier。
+- 新安装默认使用 `Documents/WealthGrowthTracker`；升级前默认目录只做原地兼容读取。
+- 本地 DevCache 活跃根迁移到 `DevCache/WealthGrowthTracker`，私人备份和 Release bundle 保持完整。
+- NSIS 覆盖安装精确清理旧主程序文件名并修复已有快捷方式，用户诊断备份保持不变。
+
+### 隐私与供应链
+- 当前树隐私门增加私人路径、财务容器、账户尾号、凭据和构建产物扫描。
+- 新增独立全历史隐私审计；已发现的公开历史残余作为 Release 阻断项处理，不重写历史。
+- Release 流程拆分为 Draft 构建、人工确认和 Pre-release 发布，缺少任一平台资产即阻断。
+- Actions 固定完整 commit SHA；启用 Secret Scanning、Push Protection 和 Dependabot。
+- Vite、Vitest 与 GitHub Copilot SDK 升级到安全修复版；新增许可证和 Cargo 依赖审计门。
 
 ## [1.10.0-preview.1] - 2026-11-04
 
@@ -76,7 +92,7 @@
 - 用户可见名称统一为 **WealthGrowthTracker**（窗口标题、HTML 标题、PWA manifest、关于页、锁屏、导出与备份元数据、README）；`identifier`、旧 storage key、IndexedDB 库名与 Service Worker 缓存前缀保持不变，旧安装与旧数据可原地升级。
 - 品牌字符串收敛到单一来源 `src/constants/brand.ts`；更新检查先请求新仓库名，失败后回退旧仓库名，迁移期间两条路径都可用。
 
-### 月度理财工作台（WealthGrowthPlanner）
+### 月度理财工作台
 - 新增独立域 `src/domain/portfolio/`：金额按分、份额与净值用十进制字符串、比例在域内统一为 0–1；四类总额口径、现金流语义、对账、止盈与再平衡候选、目标情景。
 - 结转可追溯：每个跨月项目携带来源会话、revision、条目与快照日期；只从已确认或已归档会话结转，来源 revision 变化后标记为过期且不自动解决。
 - 文档入库：DOCX/XLSX/图片按 SHA256 幂等入库，解析在本地完成；附件按内容寻址单独存放，状态只保存哈希引用，读取时逐次校验哈希。

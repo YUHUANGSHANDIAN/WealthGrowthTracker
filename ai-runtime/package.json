@@ -1,5 +1,5 @@
 {
-  "name": "wealth-growth-tracker-ai-runtime",
+  "name": "wealthgrowthtrackerairuntime",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -7,10 +7,11 @@
     "node": "24.21.x"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "audit:high": "npm audit --audit-level=high"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "1.2.0",
-    "@github/copilot-sdk": "1.0.20"
+    "@github/copilot-sdk": "1.0.30"
   }
 }

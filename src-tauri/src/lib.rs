@@ -10,6 +10,8 @@ pub mod ai;
 mod durable;
 
 static NEXT_CONFIG_BACKUP: AtomicU64 = AtomicU64::new(0);
+const DEFAULT_DATA_DIR_NAME: &str = "WealthGrowthTracker";
+const LEGACY_DATA_DIR_NAME: &str = "财富成长记";
 
 /// 数据根目录配置（保存在 OS App Config Directory，而非数据根目录自身，
 /// 否则一移动目录就找不到配置）。
@@ -64,14 +66,20 @@ fn validate_config(cfg: &StorageConfig) -> Result<(), String> {
 
 /// 数据根目录：
 /// - 移动端（Android/iOS）：App-specific 数据目录（scoped storage）。
-/// - 桌面端：优先读取 storage-config.json 的 customDataRoot，否则 `Documents/财富成长记`。
+/// - 桌面端：优先读取 storage-config.json 的 customDataRoot，否则
+///   `Documents/WealthGrowthTracker`；新目录尚不存在但旧目录存在时兼容旧目录。
 fn base_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         return app
             .path()
             .app_data_dir()
-            .map(|p| p.join("财富成长记"))
+            .map(|p| {
+                select_default_data_root(
+                    p.join(DEFAULT_DATA_DIR_NAME),
+                    p.join(LEGACY_DATA_DIR_NAME),
+                )
+            })
             .map_err(|e| e.to_string());
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -86,7 +94,18 @@ fn base_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
             }
         }
         let doc = dirs::document_dir().ok_or("无法获取系统「文档」目录")?;
-        Ok(doc.join("财富成长记"))
+        Ok(select_default_data_root(
+            doc.join(DEFAULT_DATA_DIR_NAME),
+            doc.join(LEGACY_DATA_DIR_NAME),
+        ))
+    }
+}
+
+fn select_default_data_root(preferred: PathBuf, legacy: PathBuf) -> PathBuf {
+    if preferred.exists() || !legacy.exists() {
+        preferred
+    } else {
+        legacy
     }
 }
 
@@ -429,8 +448,20 @@ fn default_data_dir() -> Result<String, String> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let doc = dirs::document_dir().ok_or("无法获取系统「文档」目录")?;
-        Ok(doc.join("财富成长记").to_string_lossy().to_string())
+        Ok(select_default_data_root(
+            doc.join(DEFAULT_DATA_DIR_NAME),
+            doc.join(LEGACY_DATA_DIR_NAME),
+        )
+        .to_string_lossy()
+        .to_string())
     }
+}
+
+#[tauri::command]
+fn data_root_is_legacy(app: tauri::AppHandle) -> Result<bool, String> {
+    Ok(base_dir(&app)?
+        .file_name()
+        .is_some_and(|name| name == LEGACY_DATA_DIR_NAME))
 }
 
 #[tauri::command]
@@ -1201,7 +1232,7 @@ fn open_path(app: tauri::AppHandle, rel_path: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // 无界面自检：`wealth-growth-tracker.exe --ai-selftest` 会用与 Broker 相同的环境
+    // 无界面自检：`WealthGrowthTracker.exe --ai-selftest` 会用与 Broker 相同的环境
     // 拉起随包运行时并打印三帧结果，便于在没有 GUI 的情况下定位 AI 运行时问题。
     if std::env::args().any(|arg| arg == "--ai-selftest-persist") {
         println!("{}", ai::run_broker_selftest_persist());
@@ -1242,6 +1273,7 @@ pub fn run() {
             fs_rename,
             document_dir,
             default_data_dir,
+            data_root_is_legacy,
             storage_config_read,
             storage_config_write,
             config_dir,
@@ -1263,6 +1295,47 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod data_root_name_tests {
+    use super::*;
+
+    #[test]
+    fn prefers_new_default_when_it_exists() {
+        let root = std::env::temp_dir().join(format!(
+            "wgt-root-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let preferred = root.join(DEFAULT_DATA_DIR_NAME);
+        let legacy = root.join(LEGACY_DATA_DIR_NAME);
+        fs::create_dir_all(&preferred).unwrap();
+        fs::create_dir_all(&legacy).unwrap();
+        assert_eq!(
+            select_default_data_root(preferred.clone(), legacy),
+            preferred
+        );
+    }
+
+    #[test]
+    fn falls_back_to_legacy_only_when_new_is_absent() {
+        let root = std::env::temp_dir().join(format!(
+            "wgt-legacy-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let preferred = root.join(DEFAULT_DATA_DIR_NAME);
+        let legacy = root.join(LEGACY_DATA_DIR_NAME);
+        fs::create_dir_all(&legacy).unwrap();
+        assert_eq!(select_default_data_root(preferred, legacy.clone()), legacy);
+    }
 }
 
 #[cfg(test)]

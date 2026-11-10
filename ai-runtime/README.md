@@ -1,4 +1,4 @@
-# Wealth Growth Tracker AI Runtime
+# WealthGrowthTracker AI Runtime
 
 This private Node process boundary is not a provider integration. It implements a bounded JSONL protocol and reports every provider as unsupported until authentication, secure credential storage, provider rights, and packaging have been implemented and verified.
 

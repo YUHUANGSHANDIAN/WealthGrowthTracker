@@ -198,7 +198,7 @@ interface AppState {
   lottery: LotteryState;
   activityLog: ActivityLogEntry[];
 
-  // ---- 月度理财（WealthGrowthPlanner） ----
+  // ---- 月度理财 ----
   monthlyPlanning: MonthlyPlanningState;
   assetClassification: AssetClassificationState;
   ledgerIdentity: LedgerIdentityState;

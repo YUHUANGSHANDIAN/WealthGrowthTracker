@@ -20,7 +20,7 @@
 
 ## 数据目录迁移
 
-- 当前数据目录固定为 `文档\财富成长记\`（Android 用 app-specific 目录）。
+- 新安装默认数据目录为 `文档\WealthGrowthTracker\`（Android 用 app-specific 目录）；升级前目录只做兼容读取。
 - 未来可通过原生目录选择器实现「更改数据文件夹」。
 
 ## 深色模式（Dark Mode）

@@ -1,4 +1,4 @@
-name: Release
+name: Release Draft
 
 on:
   push:
@@ -7,36 +7,49 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   WGT_BUILD_COMMIT: ${{ github.sha }}
   WGT_BUILD_ID: ${{ github.sha }}-release
 
-# 附件直接上传到 GitHub Release，不再经过 Actions artifact 中转：
-# 私有仓库的 artifact 存储配额会随多次发布累积并阻塞上传，Release 附件不受该配额影响。
-# 因此每个平台构建完成后立即上传，最后的 Finalize 步骤只负责校验、校验值和发布。
+concurrency:
+  group: release-draft-${{ github.ref }}
+  cancel-in-progress: false
+
+# Attachments go directly into the Draft Release and do not consume Actions
+# artifact storage. This workflow never performs the final publication.
 
 jobs:
   quality:
     name: Quality Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
           node-version: 24.21.0
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - run: rustup default stable
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
       - name: Install frontend dependencies
         run: npm ci
+      - name: Brand contract
+        run: npm run brand:check
+      - name: Third-party license metadata
+        run: npm run license:check
+      - name: Cargo license metadata
+        run: npm run cargo-license:check
+      - name: High-severity dependency audit
+        run: npm run audit:high
       - name: Lint
         run: npm run lint
       - name: Typecheck
@@ -47,14 +60,14 @@ jobs:
         run: npm run privacy:test
       - name: Web build
         run: npm run build
-      - name: Install visual test browser
-        run: npx playwright install --with-deps chromium
-      - name: Experience accessibility and responsive tests
-        run: npm run test:e2e
+      - name: Web artifact privacy
+        run: npm run artifact:check -- dist
       - name: AI runtime dependencies
         run: npm ci --prefix ai-runtime
       - name: AI runtime tests
         run: npm test --prefix ai-runtime
+      - name: AI runtime high-severity audit
+        run: npm run audit:high --prefix ai-runtime
       - name: Privacy check
         run: npm run privacy:check
       - name: Rust format check
@@ -70,38 +83,44 @@ jobs:
   prepare:
     name: Prepare draft release
     needs: quality
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Create the draft prerelease that build jobs upload into
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "$GITHUB_REF_NAME")"
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME already exists; reusing it as the upload target."
-          else
-            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --title "财富成长记 $GITHUB_REF_NAME" \
-              --prerelease --draft \
-              --notes "构建进行中：附件与校验值将在全部平台构建完成后补齐。"
+            echo "::error::Release $GITHUB_REF_NAME already exists; refusing to reuse it."
+            exit 1
           fi
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "WealthGrowthTracker $GITHUB_REF_NAME" \
+            --prerelease --draft \
+            --notes "Draft 构建中：附件和 SHA-256 尚待全部平台完成。"
 
   build-windows:
     name: Build Windows x64
-    needs: quality
+    needs: [quality, prepare]
     runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
           node-version: 24.21.0
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
+      - run: rustup default stable
       - run: npm ci
       - name: Install AI runtime dependencies
         run: npm ci --prefix ai-runtime
@@ -109,8 +128,18 @@ jobs:
         run: node scripts/fetch-node-sidecar.mjs
       - name: Prepare AI runtime resources
         run: node scripts/prepare-ai-runtime-resources.mjs
+      - name: AI runtime artifact privacy
+        run: npm run artifact:check -- .ai-runtime-build/resources
       - name: Build Tauri (NSIS)
         run: npx tauri build --ci --config src-tauri/tauri.desktop.conf.json --bundles nsis
+      - name: Verify isolated legacy installation upgrade
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $candidate = Get-ChildItem -LiteralPath 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' | Select-Object -First 1
+          if (-not $candidate) { throw '未生成 Windows 安装包' }
+          ./scripts/verify-windows-install.ps1 -CandidateInstaller $candidate.FullName
       - name: Upload bundles to the release
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         shell: bash
@@ -119,25 +148,25 @@ jobs:
         run: |
           shopt -s nullglob
           files=(src-tauri/target/release/bundle/nsis/*.exe)
-          if [ ${#files[@]} -eq 0 ]; then echo "::warning::本次未产出 Windows 安装包。"; exit 0; fi
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
+          test ${#files[@]} -gt 0
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "${files[@]}"
 
   build-macos:
     name: Build macOS Universal
-    needs: quality
+    needs: [quality, prepare]
     runs-on: macos-latest
+    timeout-minutes: 70
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
           node-version: 24.21.0
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --target aarch64-apple-darwin,x86_64-apple-darwin
+      - run: rustup default stable
       - run: npm ci
       - name: Install AI runtime dependencies
         run: npm ci --prefix ai-runtime
@@ -145,6 +174,8 @@ jobs:
         run: node scripts/fetch-node-sidecar.mjs --universal-darwin
       - name: Prepare AI runtime resources
         run: node scripts/prepare-ai-runtime-resources.mjs
+      - name: AI runtime artifact privacy
+        run: npm run artifact:check -- .ai-runtime-build/resources
       - name: Build Tauri (universal DMG)
         run: npx tauri build --ci --config src-tauri/tauri.desktop.conf.json --target universal-apple-darwin
       - name: Upload bundles to the release
@@ -155,23 +186,25 @@ jobs:
         run: |
           shopt -s nullglob
           files=(src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz)
-          if [ ${#files[@]} -eq 0 ]; then echo "::warning::本次未产出 macOS 安装包。"; exit 0; fi
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
+          test ${#files[@]} -ge 1
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "${files[@]}"
 
   build-linux:
     name: Build Linux x86_64
-    needs: quality
+    needs: [quality, prepare]
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
           node-version: 24.21.0
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - run: rustup default stable
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
@@ -192,10 +225,11 @@ jobs:
         run: node scripts/fetch-node-sidecar.mjs
       - name: Prepare AI runtime resources
         run: node scripts/prepare-ai-runtime-resources.mjs
+      - name: AI runtime artifact privacy
+        run: npm run artifact:check -- .ai-runtime-build/resources
       - name: Build Tauri (DEB + RPM)
         run: npx tauri build --ci --config src-tauri/tauri.desktop.conf.json --bundles deb,rpm
-      - name: Build Tauri (AppImage, best effort)
-        continue-on-error: true
+      - name: Build Tauri (AppImage)
         env:
           # 让 linuxdeploy 自解压执行，绕开 FUSE；NO_STRIP 规避大二进制 strip 失败。
           APPIMAGE_EXTRACT_AND_RUN: '1'
@@ -209,29 +243,29 @@ jobs:
         run: |
           shopt -s nullglob
           files=(src-tauri/target/release/bundle/appimage/*.AppImage src-tauri/target/release/bundle/deb/*.deb src-tauri/target/release/bundle/rpm/*.rpm)
-          if [ ${#files[@]} -eq 0 ]; then echo "::warning::本次未产出 Linux 包。"; exit 0; fi
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
+          test ${#files[@]} -ge 3
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "${files[@]}"
 
   build-android:
     name: Build Android
-    needs: quality
+    needs: [quality, prepare]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
           node-version: 24.21.0
           cache: npm
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: temurin
           java-version: '17'
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --target aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - run: rustup default stable
       - name: Configure Android SDK
         run: |
           SDK="/usr/local/lib/android/sdk"
@@ -243,6 +277,7 @@ jobs:
           "$SDKM" "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
       - run: npm ci
       - run: npm run build
+      - run: npm run artifact:check -- dist
       - name: Init Android project
         run: npx tauri android init
       - name: Build Android APK (debug-signed preview)
@@ -255,22 +290,26 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           mapfile -t apks < <(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' 2>/dev/null | sort)
-          if [ ${#apks[@]} -eq 0 ]; then echo "::warning::本次未产出 Android APK。"; exit 0; fi
+          test ${#apks[@]} -gt 0
           cp "${apks[0]}" "WealthGrowthTracker_${VERSION}_android-preview.apk"
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "WealthGrowthTracker_${VERSION}_android-preview.apk"
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "WealthGrowthTracker_${VERSION}_android-preview.apk"
 
   build-web:
     name: Build Web / PWA
-    needs: quality
+    needs: [quality, prepare]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
           node-version: 24.21.0
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: npm run artifact:check -- dist
       - name: Package and upload the Web/PWA build
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         shell: bash
@@ -280,48 +319,57 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           test -f dist/index.html
           (cd dist && zip -r "../WealthGrowthTracker_${VERSION}_web.zip" .)
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "WealthGrowthTracker_${VERSION}_web.zip"
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "WealthGrowthTracker_${VERSION}_web.zip"
 
   publish:
-    name: Verify and publish the release
-    # 任一平台构建失败时仍然发布已成功的附件；缺失平台在 notes 中如实列出。
-    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') }}
+    name: Verify and finalize the Draft
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     needs: [prepare, build-windows, build-macos, build-linux, build-android, build-web]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Download the uploaded assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          rm -rf release-assets
-          mkdir -p release-assets
-          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir release-assets --pattern '*' || true
-          ls -la release-assets
-      - name: Require the Web/PWA package before publishing
+          asset_dir="$RUNNER_TEMP/release-assets-${GITHUB_RUN_ID}"
+          mkdir -p "$asset_dir"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir "$asset_dir" --pattern '*'
+          echo "ASSET_DIR=$asset_dir" >> "$GITHUB_ENV"
+      - name: Require the complete asset matrix
         run: |
-          if ls release-assets/*_web.zip > /dev/null 2>&1; then
-            echo "Web/PWA 包已附带。"
-          else
-            echo "::error::Web/PWA 包未附到 Release，不予发布。"
-            exit 1
-          fi
+          for pattern in \
+            'WealthGrowthTracker_*_x64-setup.exe' \
+            'WealthGrowthTracker_*_universal.dmg' \
+            'WealthGrowthTracker_*_amd64.AppImage' \
+            'WealthGrowthTracker_*_amd64.deb' \
+            'WealthGrowthTracker-*.x86_64.rpm' \
+            'WealthGrowthTracker_*_android-preview.apk' \
+            'WealthGrowthTracker_*_web.zip'; do
+            if ! compgen -G "$ASSET_DIR/$pattern" > /dev/null; then
+              echo "::error::Draft 缺少必需资产：$pattern"
+              exit 1
+            fi
+          done
       - name: Rebuild SHA256SUMS from the actual assets
         run: |
-          cd release-assets
-          rm -f SHA256SUMS.txt
-          sha256sum * > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          checksum_tmp="$RUNNER_TEMP/SHA256SUMS-${GITHUB_RUN_ID}.txt"
+          (cd "$ASSET_DIR" && find . -maxdepth 1 -type f -printf '%f\n' | sort | xargs sha256sum) > "$checksum_tmp"
+          mv "$checksum_tmp" "$ASSET_DIR/SHA256SUMS.txt"
+          (cd "$ASSET_DIR" && sha256sum -c --strict SHA256SUMS.txt)
       - name: Upload SHA256SUMS
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber release-assets/SHA256SUMS.txt
-      - name: Generate release notes with actual asset coverage
+        run: gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "$ASSET_DIR/SHA256SUMS.txt"
+      - name: Generate Draft release notes
         run: |
           {
-            echo "## 财富成长记 ${GITHUB_REF_NAME}（预发布 Preview）"
+            echo "## WealthGrowthTracker ${GITHUB_REF_NAME}（预发布 Draft）"
             echo ""
-            echo "Local-First / Privacy-First 的个人财富管理工具。本版本为 **预发布（prerelease）**，不是正式版：功能可用，但订阅发布门与签名尚未满足，详见下方「未完成事项」。"
+            echo "Local-First / Privacy-First 的个人财富管理工具。本版本是等待人工验签、Windows 安装验收和安全放行确认的 **Draft Pre-release**。"
             echo ""
             echo "### 本版主要变化"
             echo "- **统一理财工作台**：初始对账、月度复盘、临时调仓、基金分析、止盈审查、市场情报、专项研究七类任务；正式月记录与独立临时任务分离，confirm/review/archive 可追溯。"
@@ -329,20 +377,20 @@ jobs:
             echo "- **AI 连接治理**：每条连接独立启停，当前连接持久化；切换不影响其他连接的在途任务，停用只取消目标连接，迟到结果不落库。"
             echo "- **完整备份**：新增可独立恢复的 \`.wgtbackup.zip\`，包含主状态、任务、证据引用与原始附件；结构备份和附件导出保持独立。"
             echo "- **二进制附件与逐项健康修复**：旧 Base64 附件在哈希验证后迁移；不再提供盲目的“一键修复全部”。"
-            echo "- **构建路径与身份**：本地使用新 DevCache，脚本拒绝退役根；关于页显示构建身份与短提交。"
+            echo "- **构建路径与身份**：本地使用 WealthGrowthTracker DevCache，脚本拒绝退役根；关于页显示构建身份与短提交。"
             echo "- **AI 默认关闭**，关闭时不启动运行时、不联网、不读取凭据。"
             echo ""
             echo "### 本次构建实际包含的附件"
             for check in "*.exe|Windows 安装包（NSIS）" "*.dmg|macOS DMG" "*.AppImage|Linux AppImage" "*.deb|Linux DEB" "*.rpm|Linux RPM" "*android-preview.apk|Android APK（debug 签名预览）" "*_web.zip|Web/PWA 静态包"; do
               pattern="${check%%|*}"
               label="${check##*|}"
-              if ls release-assets/$pattern >/dev/null 2>&1; then echo "- ✅ ${label}"; else echo "- ⚠️ 本次未包含：${label}（该平台构建失败或被跳过）"; fi
+              if ls "$ASSET_DIR"/$pattern >/dev/null 2>&1; then echo "- ✅ ${label}"; else echo "- ⚠️ 本次未包含：${label}"; fi
             done
             echo ""
             echo "### 签名状态（如实说明）"
             echo "- Windows：未代码签名，SmartScreen 会提示「未知发布者」。"
             echo "- macOS：未签名、未公证（ad-hoc），首次打开需在「系统设置 → 隐私与安全性」允许。"
-            echo "- Linux：AppImage 未签名；DEB/RPM 为本地构建产物。"
+            echo "- Linux：AppImage、DEB/RPM 来自标准 GitHub CI，均未签名。"
             echo "- Android：APK 为 **debug 签名的预览版**，不是正式签名，请勿用于分发。"
             echo ""
             echo "### AI 状态（如实说明）"
@@ -369,13 +417,13 @@ jobs:
             echo "> 预测/报告仅供个人参考，不构成投资建议。"
           } > release-notes.md
           cat release-notes.md
-      - name: Publish the prerelease
+      - name: Keep the verified release in Draft
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-            --title "财富成长记 $GITHUB_REF_NAME" \
+            --title "WealthGrowthTracker $GITHUB_REF_NAME" \
             --notes-file release-notes.md \
-            --prerelease --draft=false
+            --prerelease --draft=true
           gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,url,assets \
             --jq '{draft:.isDraft,prerelease:.isPrerelease,url:.url,assets:[.assets[].name]}'

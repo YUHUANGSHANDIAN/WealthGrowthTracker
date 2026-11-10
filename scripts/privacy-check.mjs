@@ -6,21 +6,42 @@ import { pathToFileURL } from 'node:url';
 
 const forbiddenPaths = [
   /(^|\/)(历史财务报告|private-data|local-imports|migration-backups|legacy-reports?|legacy-lottery)(\/|$)/,
+  /(^|\/)(WealthData|\.env)(\/|\.|$)/i,
   /(^|\/)app-state\.json(?:\.|$)/,
   /(^|\/)wealth-backup[^/]*\.json$/,
-  /\.(xlsx|xls)$/i,
+  /\.(xlsx|xls|docx|doc|pdf|wgtbackup|zip|7z|rar|pem|pfx|p12|key|keystore|jks|exe|dll|msi|pdb)$/i,
+  /(^|\/)\.env\.(?:local|production|development|test)$/i,
 ];
 const forbiddenContents = [
-  /浦发银行\s*\(\d{4}\)/, /FIFA20\d{2}/, /卡塔尔世界杯/, /美加墨世界杯/,
+  // Detect sensitive shapes without publishing a specific bank, account or transaction example.
+  /(?:银行卡?|账户|账号|卡号|尾号)[^\r\n]{0,24}\b\d{4,}\b/,
+  /(?:彩票|投注)[^\r\n]{0,32}收支[^\r\n]{0,32}\.xlsx/i,
   /\bgh[pousr]_[A-Za-z0-9]{30,}\b/,
   /\bgithub_pat_[A-Za-z0-9_]{40,}\b/,
   /\bsk-(?:proj-|ant-api\d+-)?[A-Za-z0-9_-]{32,}\b/,
   /https?:\/\/[^\s"'<>]+[?&](?:access_token|refresh_token|id_token|code)=[^\s"'&<>]+/i,
-  // 本机个人工作区路径与已退役的仓库目录名：文档必须去标识化，规则很窄以免误报。
-  /Desktop[\\/]80 生活/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\bASIA[0-9A-Z]{16}\b/,
+  /BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY/,
+  // Personal absolute paths and the retired project directory must remain out of current files.
+  /D:\\Desktop\\[^\\\r\n]+\\(?:[^\\\r\n]+)/i,
+  /D:\\AI-Workspace\\ChatGPT/i,
+  /C:\\Users\\(?!<用户名>|x(?:\\|$))[A-Za-z0-9._-]+/i,
   /财富成长记AI主应用/,
 ];
-const textPath = /\.(ts|tsx|js|mjs|cjs|json|md|txt|html|css|yml|yaml|toml|rs|svg)$/i;
+const textPath = /\.(ts|tsx|js|mjs|cjs|json|md|txt|html|css|yml|yaml|toml|rs|svg|webmanifest|nsh|ps1|xml|lock)$/i;
+const auditToolPath = /^scripts\/(?:privacy|artifact-privacy).*(?:check|test)\.mjs$/i;
+const allowedBinaryPath = [
+  /^assets\/app-icon\.png$/i,
+  /^public\/icons\/[^/]+\.png$/i,
+  /^src-tauri\/icons\/[^/]+\.(?:png|ico|icns)$/i,
+  /^src-tauri\/icons\/(?:android|ios)\/.+\.png$/i,
+  /^tests\/e2e\/experience\.spec\.ts-snapshots\/[^/]+\.png$/i,
+];
+
+function isAllowedBinary(path) {
+  return allowedBinaryPath.some((pattern) => pattern.test(path));
+}
 
 export function parseIndexRecords(output) {
   return output.split('\0').filter(Boolean).map(record => {
@@ -41,7 +62,10 @@ export function checkPrivacy(cwd = process.cwd()) {
   const violations = [];
   for (const { oid, path } of records) {
     if (forbiddenPaths.some((re) => re.test(path))) violations.push(`禁止路径：${JSON.stringify(path)}`);
-    if (!textPath.test(path) || path === 'scripts/privacy-check.mjs') continue;
+    if (/\.(?:png|jpe?g|webp|gif|bmp|ico|icns)$/i.test(path) && !isAllowedBinary(path)) {
+      violations.push(`未获准的非文本文件：${JSON.stringify(path)}`);
+    }
+    if (!textPath.test(path) || auditToolPath.test(path)) continue;
     const staged = git('cat-file', 'blob', oid);
     let working;
     try { working = readFileSync(resolve(cwd, path), 'utf8'); }
@@ -58,7 +82,10 @@ export function checkPrivacy(cwd = process.cwd()) {
   // New source and documentation must be reviewed before they enter the index, too.
   for (const path of git('ls-files', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean)) {
     if (forbiddenPaths.some((re) => re.test(path))) violations.push(`禁止路径：${JSON.stringify(path)}`);
-    if (textPath.test(path) && path !== 'scripts/privacy-check.mjs') {
+    if (/\.(?:png|jpe?g|webp|gif|bmp|ico|icns)$/i.test(path) && !isAllowedBinary(path)) {
+      violations.push(`未获准的未跟踪二进制文件：${JSON.stringify(path)}`);
+    }
+    if (textPath.test(path) && !auditToolPath.test(path)) {
       const content = readFileSync(resolve(cwd, path), 'utf8');
       if (forbiddenContents.some((re) => re.test(content))) violations.push(`untracked 敏感内容：${JSON.stringify(path)}`);
     }
