@@ -75,6 +75,9 @@ function contentGroup(blob) {
 }
 
 export function scanHistory(cwd = process.cwd()) {
+  if (git(cwd, 'rev-parse', '--is-shallow-repository').trim() === 'true') {
+    throw new Error('Git 历史是 shallow clone，无法完成全历史审计；请先取得完整历史');
+  }
   const commits = git(cwd, 'rev-list', '--all').trim().split(/\s+/).filter(Boolean);
   if (!commits.length) throw new Error('Git 历史为空，无法完成历史审计');
   const findings = [];

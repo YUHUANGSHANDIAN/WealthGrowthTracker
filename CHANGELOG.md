@@ -2,7 +2,7 @@
 
 本文件记录 WealthGrowthTracker 各版本的变更。旧名称只可能出现在兼容说明和历史记录中。
 
-## [1.11.0-preview.1] - 2026-11-10
+## [1.11.0-preview.1] - 2026-11-11
 
 ### 品牌与 Windows 交付
 - npm、AI Runtime 和 Rust 包名统一为合法的无横线形式；用户可见品牌统一为 `WealthGrowthTracker`。
@@ -11,12 +11,26 @@
 - 本地 DevCache 活跃根迁移到 `DevCache/WealthGrowthTracker`，私人备份和 Release bundle 保持完整。
 - NSIS 覆盖安装精确清理旧主程序文件名并修复已有快捷方式，用户诊断备份保持不变。
 
+### 渠道术语与 AI 数据健康助手
+- 用户可见“叶子渠道”统一为“子渠道”，并区分“父渠道汇总金额”和“父渠道直接金额（未细分）”。
+- 渠道 CSV 保留原机器列，新增 `channelPath` 和 `channelKind`；历史报告与财务 schema 不重写。
+- 数据健康中心支持从具体问题或自由提问开始的多轮 AI 对话；默认不发送金额、业务名称或原始证据。
+- AI 回复必须引用授权事实，只能提出导航或白名单修复草案；真实写入仍须本地重扫、差异预览、用户确认、备份、审计和再次扫描。
+- 健康助手会话默认本地保存 30 天，默认不进入完整备份，不增加财务数据 revision。
+
 ### 隐私与供应链
 - 当前树隐私门增加私人路径、财务容器、账户尾号、凭据和构建产物扫描。
-- 新增独立全历史隐私审计；已发现的公开历史残余作为 Release 阻断项处理，不重写历史。
+- 全历史隐私门改为 291 条精确指纹、8 个唯一内容组的限定接受；历史公开残余保持可见，不重写历史。
+- 新增凭据永远阻断、旧内容在新提交复用仍阻断、规则变化和 shallow clone 失败关闭。
 - Release 流程拆分为 Draft 构建、人工确认和 Pre-release 发布，缺少任一平台资产即阻断。
-- Actions 固定完整 commit SHA；启用 Secret Scanning、Push Protection 和 Dependabot。
+- Actions 固定完整 commit SHA；权限默认只读；启用 Secret Scanning、Push Protection 和 Dependabot。
 - Vite、Vitest 与 GitHub Copilot SDK 升级到安全修复版；新增许可证和 Cargo 依赖审计门。
+- 发布质量门增加全历史审计和 Playwright；只使用标准 GitHub-hosted Runner。
+
+### 已知边界
+- 历史公开残余仍可从 Git 历史访问；本次接受不代表内容已删除。
+- Windows、macOS、Linux、Android 包未代码签名；macOS/Linux/Android 仅记录 GitHub CI 构建与验收证据。
+- 两类 AI 订阅路径的真实认证、推理和撤销仍需用合法授权连接单独验收。
 
 ## [1.10.0-preview.1] - 2026-11-04
 

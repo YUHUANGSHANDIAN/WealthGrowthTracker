@@ -24,11 +24,13 @@ jobs:
   quality:
     name: Quality Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
           node-version: 24.21.0
@@ -58,10 +60,16 @@ jobs:
         run: npm test
       - name: Privacy scanner regression tests
         run: npm run privacy:test
+      - name: Full-history privacy audit
+        run: npm run privacy:history
       - name: Web build
         run: npm run build
       - name: Web artifact privacy
         run: npm run artifact:check -- dist
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser, accessibility and responsive tests
+        run: npm run test:e2e
       - name: AI runtime dependencies
         run: npm ci --prefix ai-runtime
       - name: AI runtime tests

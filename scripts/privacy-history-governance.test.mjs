@@ -64,3 +64,11 @@ test('credential material can never be accepted into the baseline', () => {
   };
   assert.throws(() => createHistoryBaseline(report), /凭据/);
 });
+
+test('shallow repositories fail closed instead of reporting a partial history pass', () => {
+  const repo = repository();
+  commit(repo, 'synthetic clean history');
+  const head = repo.git('rev-parse', 'HEAD').trim();
+  writeFileSync(join(repo.cwd, '.git', 'shallow'), `${head}\n`);
+  assert.throws(() => scanHistory(repo.cwd), /shallow clone|完整历史/);
+});
