@@ -74,11 +74,11 @@ function contentGroup(blob) {
   return digest(`privacy-history-content-v1\0${blob}`);
 }
 
-export function scanHistory(cwd = process.cwd()) {
+export function scanHistory(cwd = process.cwd(), revision = 'HEAD') {
   if (git(cwd, 'rev-parse', '--is-shallow-repository').trim() === 'true') {
     throw new Error('Git 历史是 shallow clone，无法完成全历史审计；请先取得完整历史');
   }
-  const commits = git(cwd, 'rev-list', '--all').trim().split(/\s+/).filter(Boolean);
+  const commits = git(cwd, 'rev-list', revision).trim().split(/\s+/).filter(Boolean);
   if (!commits.length) throw new Error('Git 历史为空，无法完成历史审计');
   const findings = [];
   for (const rule of HISTORY_RULES) {
@@ -200,13 +200,15 @@ function redactedLocation(path) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
-    const report = scanHistory();
+    const allRefs = process.argv.includes('--all-refs');
+    const report = scanHistory(process.cwd(), allRefs ? '--all' : 'HEAD');
     const baseline = loadHistoryBaseline();
     const classified = classifyHistoryFindings(report, baseline);
     const outputIndex = process.argv.indexOf('--output');
     const outputPath = outputIndex >= 0 ? process.argv[outputIndex + 1] : null;
     const sanitized = {
       generatedAt: new Date().toISOString(),
+      scope: allRefs ? 'all-reachable-refs' : 'release-head-ancestors',
       commitsScanned: report.commits,
       knownAccepted: {
         count: classified.known.length,
@@ -232,7 +234,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       console.error(`历史审计发现 ${classified.unexpected.length} 个新增或未接受的敏感项；已阻止通过。`);
       process.exitCode = 1;
     } else {
-      console.log(`历史审计通过：${classified.known.length} 个精确既有指纹属于本人已知残余风险；未发现新增命中。`);
+      console.log(`历史审计通过（${allRefs ? '全部引用' : '当前发布 HEAD 祖先'}）：${classified.known.length} 个精确既有指纹属于本人已知残余风险；未发现新增命中。`);
     }
   } catch (error) {
     console.error(`历史审计无法完成，已阻止通过：${error.message}`);

@@ -22,6 +22,7 @@
 - 当前树隐私门增加私人路径、财务容器、账户尾号、凭据和构建产物扫描。
 - 全历史隐私门改为 291 条精确指纹、8 个唯一内容组的限定接受；历史公开残余保持可见，不重写历史。
 - 新增凭据永远阻断、旧内容在新提交复用仍阻断、规则变化和 shallow clone 失败关闭。
+- PR 与 Release 按待构建 HEAD 的祖先历史审计；无关开放分支单独审计，不混入当前 Release。
 - Release 流程拆分为 Draft 构建、人工确认和 Pre-release 发布，缺少任一平台资产即阻断。
 - Actions 固定完整 commit SHA；权限默认只读；启用 Secret Scanning、Push Protection 和 Dependabot。
 - Vite、Vitest 与 GitHub Copilot SDK 升级到安全修复版；新增许可证和 Cargo 依赖审计门。

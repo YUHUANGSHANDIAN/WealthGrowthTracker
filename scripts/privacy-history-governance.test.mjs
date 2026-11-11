@@ -72,3 +72,13 @@ test('shallow repositories fail closed instead of reporting a partial history pa
   writeFileSync(join(repo.cwd, '.git', 'shallow'), `${head}\n`);
   assert.throws(() => scanHistory(repo.cwd), /shallow clone|完整历史/);
 });
+
+test('release scope excludes unrelated branches while full-reference audit still detects them', () => {
+  const repo = repository();
+  commit(repo, 'synthetic clean release history');
+  const cleanHead = repo.git('rev-parse', 'HEAD').trim();
+  repo.git('switch', '-c', 'unrelated-dependabot-like-branch');
+  commit(repo, String.raw`path=D:\Desktop\synthetic\unrelated`);
+  assert.equal(scanHistory(repo.cwd, cleanHead).findings.length, 0);
+  assert.ok(scanHistory(repo.cwd, '--all').findings.some((finding) => finding.category === 'personal_absolute_path'));
+});

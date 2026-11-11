@@ -47,5 +47,10 @@ export default defineConfig({
     url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
+    env: {
+      WGT_BUILD_ID: 'playwright-visual-fixture',
+      WGT_BUILD_COMMIT: 'playwright-visual-fixture',
+      WGT_BUILD_TIME: '2026-01-01T00:00:00.000Z',
+    },
   },
 });

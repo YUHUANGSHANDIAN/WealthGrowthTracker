@@ -23,6 +23,13 @@ async function openRoute(page: import('@playwright/test').Page, hash: string) {
   await expect(page.locator('.workspace-content')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('正在加载 WealthGrowthTracker…')).toHaveCount(0);
   await page.evaluate(() => document.fonts.ready);
+  const notifications = page.getByRole('region', { name: '通知' });
+  await notifications.waitFor({ state: 'visible', timeout: 2_000 }).catch(() => {});
+  const toastClose = page.getByRole('button', { name: '关闭通知' });
+  while (await toastClose.count()) {
+    await toastClose.first().click();
+  }
+  await expect(notifications).toHaveCount(0);
 }
 
 test.beforeEach(async ({ page }) => {

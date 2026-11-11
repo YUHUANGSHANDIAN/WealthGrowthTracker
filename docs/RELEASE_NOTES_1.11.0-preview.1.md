@@ -30,6 +30,9 @@ isolated Windows upgrade validation and a separate manual publish workflow.
 - The historical gate accepts only the exact audited 291 fingerprints; reused
   content in a new commit, changed rules, shallow clones and credential matches
   still block.
+- PR and release checks audit the ancestors of the exact commit being built.
+  Unrelated open branches are audited separately so they cannot mask or block
+  the release commit; each branch must still pass the same gate when updated.
 - Added a brand contract, npm/Cargo license checks and high-severity dependency
   audits.
 - Pinned GitHub Actions to complete commit SHAs and enabled Secret Scanning,
