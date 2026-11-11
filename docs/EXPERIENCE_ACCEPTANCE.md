@@ -75,6 +75,6 @@ Browser mocks, Tauri IPC tests, the installed Windows GUI and real paid AI reque
 - Rust: 23 tests passed; format and Clippy gates passed.
 - Playwright on Windows: six light/dark desktop, accessibility and 390px tests passed; representative pages have zero serious/critical axe findings.
 - Production web build completed with 537 modules.
-- Local NSIS package built, SHA-256 verified, upgraded over 1.10, launched, and showed version `1.11.0-preview.1`.
+- Local NSIS package built, SHA-256 verified, upgraded over 1.10, launched, and showed version `1.11.0-preview.2`.
 - A complete backup was created from the migrated formal ledger and restored into a brand-new isolated root. Record counts, task revisions, classification events, attachment files and new workspace metadata matched; storage configuration was then switched back to the original root.
 - The Windows installer and executable remain unsigned. Real AI credentials and requests were not used.

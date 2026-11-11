@@ -1,6 +1,12 @@
-# WealthGrowthTracker 1.11.0-preview.1
+# WealthGrowthTracker 1.11.0-preview.2
 
 ## Release status
+
+This patch preview supersedes the protected `v1.11.0-preview.1` tag, which did
+not produce a Release because Playwright 1.56.1 could not install Chromium on
+the Ubuntu 26.04 image selected by `ubuntu-latest`. The release quality gate is
+now pinned to the standard `ubuntu-24.04` runner. The preview.1 tag remains
+unchanged; no tag was moved or reused.
 
 The full-history audit is now governed by an exact public baseline of 291
 fingerprints and 8 content groups. The repository owner explicitly accepted
