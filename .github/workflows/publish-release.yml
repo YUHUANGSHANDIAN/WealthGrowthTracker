@@ -56,8 +56,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,assets \
-            --jq 'select(.isDraft == true and .isPrerelease == true) | .assets[].name' > "$RUNNER_TEMP/assets.txt"
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          jq --arg tag "$TAG" '.[] | select(.tag_name == $tag)' "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/release.json"
+          jq -e '.draft == true and .prerelease == true' "$RUNNER_TEMP/release.json" > /dev/null
+          release_id="$(jq -r '.id' "$RUNNER_TEMP/release.json")"
+          test -n "$release_id" && test "$release_id" != "null"
+          echo "RELEASE_ID=$release_id" >> "$GITHUB_ENV"
+          jq -r '.assets[].name' "$RUNNER_TEMP/release.json" > "$RUNNER_TEMP/assets.txt"
           for pattern in \
             'WealthGrowthTracker_*_x64-setup.exe' \
             'WealthGrowthTracker_*_universal.dmg' \
@@ -79,15 +84,19 @@ jobs:
         run: |
           verify_dir="$RUNNER_TEMP/publish-assets-${GITHUB_RUN_ID}"
           mkdir -p "$verify_dir"
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$verify_dir" --pattern '*'
+          jq -r '.assets[] | [.id, .name] | @tsv' "$RUNNER_TEMP/release.json" |
+            while IFS=$'\t' read -r asset_id asset_name; do
+              test -n "$asset_id" && test -n "$asset_name"
+              gh api -H "Accept: application/octet-stream" \
+                "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" > "$verify_dir/$asset_name"
+            done
           (cd "$verify_dir" && sha256sum -c --strict SHA256SUMS.txt)
       - name: Publish the already verified Draft
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
         run: |
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --title "WealthGrowthTracker $TAG" \
-            --prerelease --draft=false
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName,url,assets \
-            --jq '{draft:.isDraft,prerelease:.isPrerelease,tagName,url,assets:[.assets[].name]}'
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false -F prerelease=true > /dev/null
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            --jq '{draft:.draft,prerelease:.prerelease,tagName:.tag_name,url:.html_url,assets:[.assets[].name]}'
