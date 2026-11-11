@@ -2,7 +2,13 @@
 
 本文件记录 WealthGrowthTracker 各版本的变更。旧名称只可能出现在兼容说明和历史记录中。
 
-## [1.11.0-preview.1] - 2026-11-11
+## [1.11.0-preview.2] - 2026-11-11
+
+### Release recovery
+- `v1.11.0-preview.1` created a protected Tag but no Release: GitHub's
+  `ubuntu-latest` moved to Ubuntu 26.04 before Playwright 1.56.1 supported it.
+- Release Quality Gate is pinned to standard `ubuntu-24.04`; the protected
+  preview.1 Tag remains unchanged and this patch preview supersedes it.
 
 ### 品牌与 Windows 交付
 - npm、AI Runtime 和 Rust 包名统一为合法的无横线形式；用户可见品牌统一为 `WealthGrowthTracker`。
@@ -27,6 +33,8 @@
 - Actions 固定完整 commit SHA；权限默认只读；启用 Secret Scanning、Push Protection 和 Dependabot。
 - Vite、Vitest 与 GitHub Copilot SDK 升级到安全修复版；新增许可证和 Cargo 依赖审计门。
 - 发布质量门增加全历史审计和 Playwright；只使用标准 GitHub-hosted Runner。
+- Release Quality Gate 固定到 Playwright 支持的 `ubuntu-24.04` 标准 Runner，
+  避免 `ubuntu-latest` 迁移到 26.04 后无法安装 Chromium。
 
 ### 已知边界
 - 历史公开残余仍可从 Git 历史访问；本次接受不代表内容已删除。

@@ -1,6 +1,6 @@
 /* WealthGrowthTracker service worker. It owns only versioned app-shell caches. */
 const CACHE_PREFIX = 'wealth-growth-tracker-shell-';
-const CACHE = `${CACHE_PREFIX}v1.11.0-preview.1`;
+const CACHE = `${CACHE_PREFIX}v1.11.0-preview.2`;
 const OWNED = (name) => name.startsWith(CACHE_PREFIX);
 
 self.addEventListener('install', (event) => {
