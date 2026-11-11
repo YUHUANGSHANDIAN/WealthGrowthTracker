@@ -4576,7 +4576,7 @@ dependencies = [
 name = "wealthgrowthtracker"
 version = "1.11.0-preview.2"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "dirs 5.0.1",
  "fs2",
  "keyring",
