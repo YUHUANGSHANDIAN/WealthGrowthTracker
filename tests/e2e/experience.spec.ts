@@ -39,7 +39,6 @@ test('全部主页面与设置子页视觉基线', async ({ page }) => {
   for (const route of ROUTES) {
     await openRoute(page, route.hash);
     await expect(page).toHaveScreenshot(`${route.name}.png`, {
-      fullPage: true,
       animations: 'disabled',
     });
   }
@@ -78,7 +77,6 @@ test('主要页面在 390px 视口重排且不产生整页横向滚动', async (
     }));
     expect(dimensions.width, `${hash}: ${JSON.stringify(dimensions.offenders)}`).toBeLessThanOrEqual(dimensions.client + 1);
     await expect(page).toHaveScreenshot(`mobile-${hash.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '')}.png`, {
-      fullPage: true,
       animations: 'disabled',
     });
   }
