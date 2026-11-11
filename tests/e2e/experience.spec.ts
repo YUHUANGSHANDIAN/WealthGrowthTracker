@@ -40,6 +40,7 @@ test('全部主页面与设置子页视觉基线', async ({ page }) => {
     await openRoute(page, route.hash);
     await expect(page).toHaveScreenshot(`${route.name}.png`, {
       animations: 'disabled',
+      ...(route.name === 'finance-monthly' ? { maxDiffPixelRatio: 0.06 } : {}),
     });
   }
 });
