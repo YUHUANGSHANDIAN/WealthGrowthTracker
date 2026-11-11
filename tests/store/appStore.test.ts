@@ -15,6 +15,8 @@ describe('appStore', () => {
       sortRules: [],
       countdown: defaultCountdownData(),
       goalAchieved: { hasAchievedGoal: false },
+      dataRevision: 0,
+      ledgerIdentity: { schemaVersion: 1, ledgerId: 'test-ledger', createdAt: '2026-01-01T00:00:00.000Z' },
       toasts: [],
       coinRainActive: false,
     });
@@ -28,6 +30,27 @@ describe('appStore', () => {
     const before = useAppStore.getState().channels.length;
     useAppStore.getState().addParentChannel('测试渠道', '💰', '#000000');
     expect(useAppStore.getState().channels.length).toBe(before + 1);
+  });
+
+  it('受保护数据变化推进持久化 revision', () => {
+    const before = useAppStore.getState().dataRevision;
+    useAppStore.getState().addParentChannel('revision 测试', '💰', '#111111');
+    expect(useAppStore.getState().dataRevision).toBe(before + 1);
+  });
+
+  it('旧数据根的草稿不会写入当前账本', async () => {
+    await expect(useAppStore.getState().saveWorkspaceDraft({
+      draftId: 'finance-task:task-1',
+      kind: 'finance-task',
+      targetId: 'task-1',
+      ledgerId: 'other-ledger',
+      baseRevision: 1,
+      baseEntityRevision: 2,
+      baseFingerprint: 'a'.repeat(64),
+      payloadVersion: 1,
+      updatedAt: '2026-11-07T00:00:00.000Z',
+      payload: { title: 'old' },
+    })).rejects.toThrow('另一份账本');
   });
 
   it('setAmount 更新子渠道金额并同步今天的历史点', () => {

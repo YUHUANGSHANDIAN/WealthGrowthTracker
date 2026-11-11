@@ -1,4 +1,4 @@
-import type { Channel, FinancialReport, HistoryPoint, HistorySource } from '../../types';
+import type { Channel, FinancialReport, HistoryPoint, HistorySource, Money } from '../../types';
 import type { FinanceTaskKind, MonthlyPlanningState } from '../portfolio/types';
 import type {
   AssetClassificationEvent,
@@ -9,6 +9,7 @@ import { classificationForChannel } from '../assets/classification';
 import { channelAmount, leafChannels, totalAssets } from '../../utils/channels';
 import { addDays, monthStart, todayString, weekStart } from '../../utils/date';
 import { diffMoney, round2 } from '../../utils/money';
+import { parentDirectLabel } from '../../constants/channelTerms';
 
 export type TrendGranularity = 'raw' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
 export type TrendBaselineMode = 'in-range' | 'previous';
@@ -302,10 +303,14 @@ function extractComposition(
         total: channelAmount(parent),
       };
     }
-    return { items: [{ id: `leaf:${parent.id}`, recordedName: parent.name, amount: channelAmount(parent) }], total: channelAmount(parent) };
+    return { items: [{ id: `leaf:${parent.id}`, recordedName: parentDirectLabel(parent.name), amount: channelAmount(parent) }], total: channelAmount(parent) };
   }
   return {
-    items: leafChannels([...channels]).map((leaf) => ({ id: `leaf:${leaf.id}`, recordedName: leaf.name, amount: leaf.amount })),
+    items: leafChannels([...channels]).map((leaf) => ({
+      id: `leaf:${leaf.id}`,
+      recordedName: leaf.kind === 'parent-direct' ? parentDirectLabel(leaf.name) : leaf.name,
+      amount: leaf.amount,
+    })),
     total: totalAssets([...channels]),
   };
 }
@@ -459,6 +464,74 @@ export function buildChangeExplanation(input: {
     interpretation: cashFlows.length
       ? '存在有凭据的现金流记录；资产变化仍需结合估值和交易证据解释。'
       : '仅能确认历史资产余额变化；没有足够的现金流或交易证据，不能解释为净投入或投资收益。',
+  };
+}
+
+export interface ObservationComparison {
+  fromDate: string;
+  toDate: string;
+  fromValue: Money;
+  toValue: Money;
+  change: Money;
+  changeRate: number | null;
+  channels: Array<{
+    id: string;
+    name: string;
+    from: Money | null;
+    to: Money | null;
+    change: Money | null;
+    comparable: boolean;
+  }>;
+  comparable: boolean;
+  warnings: string[];
+}
+
+/** Compare two exact, user-selected observations. Missing dates are never replaced by nearest points. */
+export function compareHistoryObservations(
+  history: readonly HistoryPoint[],
+  fromDate: string,
+  toDate: string,
+): ObservationComparison {
+  if (!fromDate || !toDate || fromDate >= toDate) throw new Error('请选择两个不同日期，并先选较早观察点');
+  const byDate = new Map(validHistory(history).map((point) => [point.date, point]));
+  const from = byDate.get(fromDate);
+  const to = byDate.get(toDate);
+  if (!from) throw new Error(`${fromDate} 没有真实观察点，不能补点比较`);
+  if (!to) throw new Error(`${toDate} 没有真实观察点，不能补点比较`);
+  const fromMap = from.channels?.length ? extractComposition(from.channels, 'parent', null)?.items ?? [] : [];
+  const toMap = to.channels?.length ? extractComposition(to.channels, 'parent', null)?.items ?? [] : [];
+  const fromById = new Map(fromMap.map((item) => [item.id, item]));
+  const toById = new Map(toMap.map((item) => [item.id, item]));
+  const ids = new Set([...fromById.keys(), ...toById.keys()]);
+  const channels = [...ids].map((id) => {
+    const before = fromById.get(id);
+    const after = toById.get(id);
+    const comparable = before !== undefined && after !== undefined;
+    return {
+      id,
+      name: after?.recordedName ?? before?.recordedName ?? id,
+      from: before?.amount ?? null,
+      to: after?.amount ?? null,
+      change: comparable ? diffMoney(after!.amount, before!.amount) : null,
+      comparable,
+    };
+  }).sort((a, b) => Number(b.comparable) - Number(a.comparable)
+    || Math.abs(b.change ?? 0) - Math.abs(a.change ?? 0));
+  const warnings: string[] = [];
+  if (!from.channels?.length) warnings.push(`${from.date} 缺少渠道快照，只能比较总资产`);
+  if (!to.channels?.length) warnings.push(`${to.date} 缺少渠道快照，只能比较总资产`);
+  if (channels.some((channel) => !channel.comparable)) warnings.push('部分渠道在任一日期缺少快照，渠道差额标为不可比较');
+  const change = diffMoney(to.totalAmount, from.totalAmount);
+  return {
+    fromDate: from.date,
+    toDate: to.date,
+    fromValue: from.totalAmount,
+    toValue: to.totalAmount,
+    change,
+    changeRate: from.totalAmount === 0 ? null : round2((change / Math.abs(from.totalAmount)) * 100),
+    channels,
+    comparable: Boolean(from.channels?.length && to.channels?.length && !channels.some((channel) => !channel.comparable)),
+    warnings,
   };
 }
 

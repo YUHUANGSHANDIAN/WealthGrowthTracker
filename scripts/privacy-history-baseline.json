@@ -1,0 +1,1464 @@
+{
+  "schemaVersion": 1,
+  "generatedFromCommitCount": 116,
+  "acceptedFindingCount": 291,
+  "acceptedContentGroupCount": 8,
+  "digest": "5b63b3be7959e5d594752eccb946bc1e80c5c41eb9941943049952cd642aa636",
+  "entries": [
+    {
+      "fingerprint": "005aee3155fa474713fc2072617fa18a56c46cb20ee9904bb6fdbb2202a133df",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "00eabf0efd269d8ba40910c2b9ea76833e31e5ba7543c23729ce6410b25b7fb7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "0313871de624371d82b91adacf42dee34a3e821cae66094583f586e0dcc6d751",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "03b494cc4b78fb230b0bc03e098b75e877993bed391b8bbc2ec0a402a4ca590c",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "0677df3ca69f452aaa3f7554386e1c95faf2b8c60c1b493da392f947c940dc88",
+      "category": "historical_financial_fixture",
+      "contentGroup": "c29eb21a50847c2460c9314e518232ff305153e33a6411ca82bb2cc261eaa239"
+    },
+    {
+      "fingerprint": "07c0d779f23c620682b6f41932ebd108c3e84cb015ce965b8575ca033b4716f7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "07e2aafbaf0052f4856562222c308ab70df322beaf3352b21c2cb265a36f9692",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "0cee95536069b1c455f733df15d1a5b272ae409bfb2d7716e5e851c4c64d468b",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "0ec4d3ddaa070b2de40582edf6b99c27c620b7078a2a7e1d7d5a412e420bd53a",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "0ecb842fc38f6e5614f1ec59f27d4beb3a34e0ffe3be63e8f106d61d4fd8db07",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "0f6d5569e8fca5e52463a20d451e8e3794caa8d4f04cc963e1896c82e33cb429",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "0f8039b4323e4348040d9461cb26b235c29a3a2d5de5b3034f0601def160a003",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "10406f9f64b0bf6c02ed83ff216bf10652da08ae7445ab9c0f87ad1235e4d3c4",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "10506a23775a8d82225c09d6ef4f84f62cd13a7f42130466418e126292ac624c",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "10db4b0bb450a88474b18e5147940f732ae3a6b5c3ff00df8fbe27512ec3368f",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "10eb158862130427e1de134fb92348b07e0aa96ff97096960381c0e4807f6876",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "13fd642b4eccede335531317494322702240b2afcb246bbc20be3f0fd9fe479a",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "14387f16064aa3a6f1ec927eea11acb4d9ce7ce46f8b21fce94d05be5b1aff5b",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "14c67c0c06ac498396132bae205c514c49923c4e5f73159f9f689467f5cdfa0e",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "1688d9979c7e3bfb832b51d37f8e98a4ba5c6bda4726539c4e7e1478ee579cfb",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "16d7afb45c0574747a55f14e4529c7523a5d24aa810df29aafb20bce99bb0505",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "170ee7aeb2375b9051bf1c2583a24d9075b3f3f7a637b714309bc423caed7006",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "17b6374cf7d4bc107649993d7dbb5e36191c1a9a7af88a65e88eaa4d4da18a61",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "1b9ecd3286f7aedc0667731c006b8f5e1b153d0c5f860a0529bfdd56986aa17a",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "1c1c1711a161271b6d88c7c869560492a693a1e4a01cf72c448c0e9bf8d87b6d",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "1c37ea5442c10fae8dcb047dd2736c13ddc613d2f79953ad9fee673c95de73a4",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "1c562a973893095d24cadd0a0440174ef46c1b527d21d1010b8ff2cf27338607",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "1d17856e51293baa22d6834cb72cfcddf22651539c840c9d707eeb01c77bd246",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "20fc26e41197183814218d9a727b9f8e2db2e8e426390c2414ecc8307bdc34c5",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "2242a1bb0ddad8e5cc309c6df8c56f0223f08ca4b4bfded485f9414625845d94",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "24834d39fc434f339aa4ccaa3c2a4ea93adb30e54950b2157ed05eb19b15f3c4",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "25488ca17ca931f9ce45c0ff37e587138702cc4b7de8504d6e4ad971d7a44c17",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "255a03785b0408b644a71e99d55a49322a5f2d88c65d36b42d308508d8af1c7e",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "2597752ad51d5d1b210439b03ee4308747d85f8e07a3314e111652f3d01974a5",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "26c9449bccedf093a46e67a4c87b35b244ad44b762c8aecb0279e57d66453b30",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "271434139ae749dc6e177d515f4f6b8540d9eb03fdf7ae9b55d1585452419022",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "277a4af246888d58adbb32680adfd29acdaea4f05cb30d3e2168287c0ac1085b",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "27a0f7bc03609a9b01ae263c5180fe0bb40d54fbbfa123bf5440bdec7345c273",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "2833307d364cfe0ba93ca46feb97848b7faa7f11669d9493ee86a81ffa0de7e4",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "29e2198eb547659a06eede032a4c380b35bb4fecd56dfe1fa5a6dda008d19dc8",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "2a4bcdc8f4266f0072fba8eefef44d16d8e62e1f03e72f0e8526749a068beb08",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "2a7ffe4356e15c93fa980f9256002146bb08bcbac183955962fc3b7c26872f0a",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "2aef8e04b4203a69304514cf24a2edfc0b050f661aff87903156e7329ad564ef",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "2b98547e4ed0728944002c2496132d478cda7abffdacc915e7937c6e2341f117",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "2c07f958c0ad214e7e96935a44dbe5be0b8b076adb191f3418f561081e5a93d3",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "2cfdba9fba295f34dfeddd20ba958595471f01941d8e7ab464f6092d958022df",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "2df5f1ef75be3c6a9096a673de0f6c9011250b567b198b046d6f08bb5877ecfb",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "2e30730935df5f7a8fcc88b39e87c82215b806ef441ab98f842083c9b9ef8dc6",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "2e8d26d1cd5b50b716201a153029cc013fd7eea76794230fc926d0999afdd97a",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "2ff53c2c97355542c7ed6b3fb0615c05a374311a64d9319147adcd68ea2e38be",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "31bb9551327e1a9a73b9079d77bea9862ce8a434a8979d66e5a07608ac6b6a0e",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "339c2caa829ba70f2e6eba51c5102fbdfda792c899faa78bbfaa53f1110baf57",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "339db60b542f92760d87e02556134ae0c4ad99945b2cd231cdda6d443fa0b9f0",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "351faa5b777845934566f917dbb4d663461fa46cf3c0edb81145b9d85a20ad72",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "35f18d5ecb481d77564014589dd2f32ea6b8f242a09563f54104f957085f7f8f",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "36e411a169cced5323f981f2b77c04746e340a6d5cb5808c76ed5e0e17382575",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "380d8f12a93270f2591685ca59af8376edc73bc39aaeda9e52165fa85d34a07e",
+      "category": "historical_financial_fixture",
+      "contentGroup": "c29eb21a50847c2460c9314e518232ff305153e33a6411ca82bb2cc261eaa239"
+    },
+    {
+      "fingerprint": "390773ead72f41fe055de7d7db5c998e8439aab20bf439387991b041d3035667",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "39476a4f019578a8ef5782a44ee1a2bcf43727065be47a7c1dded73187afece0",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "39b7948435b58a7439012aee19b629799ea20ced2e90f0314a3dd6f18d401634",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "39e2811c2be36be044380b3ff96ae3ba437caa4a8f558108069c5f61e9d11b0c",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "3a203361a1e57f7ec8fcf9780a02b3b8eb20b91891267e7b646eb9e13849ed88",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "3a2a98cf8b5c5e098b9d17d949de1fc161d2495047c80b04358269a85fc68667",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "3a41144582d5037cc5e4d3674a67bb235a1cfb93c9e8a82d712e9793e14af777",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "3a96c48940c5809914136d1801e86871cc3302041aa97a50c62d968e9c9c25dc",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "3b99a4674f4f4e2095b5661f117343042267473d05f7d40bd71292b5c5206028",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "3d3cc831bfedcebfba6b7ce553656e0421af8e8cdb5621f130db99eff24ff2a6",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "3d9749ca3cacc31fb2f2f49e0c1cf595918af87962a1cba9ede9b9e369b360d6",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "3ff4d292a447f6b0728fd6ca29bc49b295ec1a71dfe349f76d08c00487f99b92",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "403cc081515c4de63ff3aa1b7906ed2f5b13a5949e466433b1b983977990fa47",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "419cef0a1690dfdc46bc038a25306fcb2c89232345762e9391a8a0728576888a",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "41b165cb2e05328b7bb72e80961c4ebb65f18705941d3d539c6d67225f0c39df",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "44b60cce340646188fd94bfb4df8eb935b78c3b6d6503ce2d72cd2e4239c51f1",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "462aa54c3630826accfaed97af3edb048fc107ad5b8ae1c02c17817fdfcfa044",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "47789c0c264c13e025767b5869886d0a99bb0254a0938534ef3e7ac0d1b66aa7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "47dbb6b86d433e4cea62ea7d6856e9949161962e7d7efb605a1c70ef9c5ffd60",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "496f121ec78083912492eb46900295a56657ee968308eae61a02b9a25ddde289",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "4af30c5cf4c76e3173f4dee08ad34336dda5a646de26020b8aeb37bf56e3190c",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "4af9e3383b56891849435581631f1379c494cdb5e2943b1b0562563609a266ff",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "4baeb780b5fe146689c0cd83bdafd121263121d74e6f989c5012cdffeca2ed39",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "4bd0aa07c94b6d3bb0873ee9d9628ac3ba58399785aa16839261641663c20190",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "4c103baed6dbbe034dfa3272a3b5e7e5494a838771c5c139a469239b67430bef",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "4d6d3a5ddb9c34bc62e90e3ddf687154b7f7c300526909a73081a756eb074e23",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "4da136c85208555151b3167ec3799101292f18bdde59623077a420e379b82416",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "4ebf48146cc7996f29753708168c87c83ad887f4f95354f1977a8ede407ea935",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "4f3b7e4290099c7637715fdc3cef56394b41a670338f1aa5a40f439969730f1b",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "4fc15202a8a779058125b2bb73da42d05abf552156ed569daf3ea275841a5891",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "50b755f1c562a99c53812c66bc0b862dab7bbae392377f01ef474ff21f01dca4",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "5218cb1fa52ed340a3844920293707d896cc710deeeffe30181d5ca733d46eec",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "52b89ff2d053dc23c6d78b77b5117eff89f97780c4db0475b4a9cde39632219b",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "52bf407b55e323823fec9df8423ffeb7c0f0f20c49cdcd88d036b3bba1a11167",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "52c40852414bd5f513504af7884cf135b54a5eae37f33c498f0373480bebc7ea",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "5512b940256d20685fb7d367a64b0348a6880ec83d06f098c567fa05d5bedd40",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "5530b7d81395d2ff2d8c0767d341e7b04826fec98a8ba6828f59cf5672abd60c",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "55924cbb9dfdcd1bff01c52c0a97e9b003e4f22f38475951d80958ab14aeca9e",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "56871866d0227477f858784855602a54ea5bf54a72f65abe17a35aaa38520d33",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "57216c76a01e6236b71883435d99aad5b22f61d90eb86c587fc97f238dbf103c",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "57352bb69572247d75f121c146cd0e511b6595cb113eb93a144f0f7582d07d1b",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "5761de940c86687bc2961ddc6230176e2191e048abf88cb314abe185d532f41b",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "5765d28adf7806ef86ba7fdd96889e919df90c9c7d21ea4c7db875a96c1e322b",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "586e9b69c7ab1b5d28a878f970d017d781811e52a3ee23c7457d4a53678e0a97",
+      "category": "personal_absolute_path",
+      "contentGroup": "3fc99643a2309b410bb6dac742404b657ca187c8b1672a5e3152f7f443990392"
+    },
+    {
+      "fingerprint": "58a991ec6f4f6a8022a7d3e5fd88a5676bab9f2e99ad6a74734484339fb6b7f6",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "5956efa1b5590efb3afc285019dfd87ef336314617f5de0750f18d4be5ef2153",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "59bcba255b7ddfd4acb50048de690cb317d7bbed207fff7b2eb16ecec4a06442",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "59bcc6354649bf9e29b5898f3018739ecf70f2d6d7eb2c4d505d532b22fc5c85",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "5a6c49b8e6c017d23df876c1d5b2e9d74506b8f8cc6337da62e656744f33147c",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "5a9a2b16a730b6a11772a7df39054f630a35b928b77f530f121291cc8fa56fe7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "5b8c9fd894a9998faca6f9cd10722c6fdf0c7b3b1a1648b5af56b93365791af1",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "5bdf456f1182f2ce611cd58ffc79d6935f8d4b6492ec4daae303f7c396579b01",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "5cad7c7fd4a3cb819b0ac08d12fc0b4f86bbfc2fa3ebc07a62b1f12af110c73e",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "5ce4e00aa550d32dcbe296edac134b8288cb69f2beb1035bc06e4cbf37576d0d",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "5e4e2e61a7f3c148dec0691a60cc3d6a4fc5e0437e9b0a52734183be8d00fc94",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "5f2b9e998af91615052f6bd051942b1cd0c20f74e172edbec2a405515ad30cb8",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "5f9f6852f728cda6684b04f0b2a878f9ed50e71cbe2b088efab4629325a02caf",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "5fe35c8e75f2facdb7f3474bfb7cd38945e0662905195d0cdf8d20dedafd1d40",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "60abbf4891e86a65fbe592e6bdd7c26f012d26d467b3e68df085b3963f9ca790",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "61bfee805ba0d2e8712a3a21f55dcf57293dddc434f51f2a24ef79ef0d69b679",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "61fe136729ce487f475f26cd3a9f5d12a91e755e86a96358696f4646e37277aa",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "629d09a490414302d57ef32dabf4942595eb526dda050f165b4fc89423f6c0b3",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "640abab756914de2d59bd1921b74b224bd263f98a5575a4792640a0ca03c5a7a",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "645d5a888332d7f416c0c0d26c16ba43d3e261bb982f845a0a2f845a1edc84d7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "64a3a3f8a89cc256916c337f96c624fcdf222ce470665882fd8d19bbcf284293",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "66eefff82d791af69f4f7093305472dcb5d79af5ffe6594eae60d737993b5323",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "681813bdcd6763172fc04bb68b3b5d8a6b023b91609cb17fe7f8e782235bb07c",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "68bc671f2cea80e62e82183150dd88c2211302c8e1b5608eb194d915da0ca8ad",
+      "category": "historical_financial_fixture",
+      "contentGroup": "c29eb21a50847c2460c9314e518232ff305153e33a6411ca82bb2cc261eaa239"
+    },
+    {
+      "fingerprint": "68d711a239a5baf4666d06ae20f7d28842f58c0c9911c81dc33e850434a16d27",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "69b2356e79e439c55354eb0cc1b4cba5972f7ec9ae5e8e2bf986383917b71e97",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "6b5ac3b3cd05f1d1e3da5a6ba8744271fff17f15d47bd0bf8b63665cf67fe843",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "6ba13e083191aa3e687f980e48a979a5d131df164d36a671b4a75d51e34a17f5",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "6dc4a3e30d85032ae4beb78256566233ad81e6f3b44818df18f39ec80df3bec1",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "6dd93d270a423d318b6a75220eb419be5aff3694b97a826cd9a95425f1d49808",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "6f2e8fc4f7603c4d4c406fed44ee6505cd8b807da1903e0142238a5d8d989368",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "7058f8cb46ea99396b9c468421dd313774270ceb709f8e7a0fe627afd6d7cdd7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "71c7a21f306e11e52a13fc27e379e901406b57fb2381c9d41bf40e9b60bf3ecf",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "7231985acfa50bb35377a5ea7757709ffef940327c001e619f37b4cb56146c34",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "729acdce5cbce91c7434a2ce64ca631538e4994c362683b4533720cc7721554f",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "747ae6616905819e417820f7d01d51cbaee32c8186e03440aed7552c8e67f6d1",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "7533845169d337a3fc0f0a85bb3e8fef921f436214b92676c24836b71ca34f76",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "757f789bca3772846e441fb3d070309913217e018ded522d1bdf304e84515778",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "759d1352f7afa39f4b6aa30ba578e14c7c47719ab55ef66141f2e5393f0dd37b",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "75fe0f08fd5472cec6497640a23e1b0992a61e4170dc5fc0d9bf26742ad43d5d",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "7a51550f5ff5e4178abc2d28cca2d9298ae7118089fa6cc29ea4b123b49ad792",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "7aa52bd91edb1f261d66f2b9c4ae275522f896d585f1548c0ec480603b61ce58",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "7aac1abe0005f08ab93c9990a7c73886a1904e7643f2c58b73312a0800cd9540",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "7b6646c71c7a99e3fde0dfeae77024573434f4500748be6ab3010ac25e94ac17",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "7b6911178c04db1dd62e2fce4eba9afc5ef843cf8a61fc9798b36782b4fde3c1",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "7c647b0300275428258a5605efbcae11e9223accf4612d29cbf0af9a09201215",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "7f2a49e6075b041afbb5c6c0c77cac212eb7eda1d40b5a0f823f05a5f26a0424",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "805ce05a3fcfb75b20641d4c74c992b388a0b11a114a11e370381c674beb7b68",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "8075dae403d1d82e704b341a80a12294fab53a44dc2ee44ce9b9b6c701f29118",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "80cac73838dfb407dfa30d80e5dc1643edc076def3d668991fe721d637f92051",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "80ff1e6cb37eb5a6dffa50a49387c4f25c5c6735f83faa1172469241f23c48b5",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "823ee74517a88d7eb3b9f023d120831ffda36035fb1562c5a5ccf4ba63ee9c27",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "82f9d89945232f50746389f24a613df3c248c915a450fb5e45eb49c8a17166fe",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "82ff6ee5a10da1e92e454998555a45a1d7d9293e5e7b6c44be28598cddbf41ef",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "8497d9e724f7b968df95a8621a816baa25c30ef92e153d93c2fabeea398cdde5",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "857cc8364bd5b8a23bd9b8cd1cc7736df3b5f5ce25edb58f07f1bf3c53ad8800",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "85c5b5d7b120e5048c42db08e650894aa37c24077b71d878168b703461f09b56",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "874e92386149a4780ba3c7f99ed61d13e10dc5811df1c026253fa0542ff966d2",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "87d9a48d06e0da51e1297b6c47aaf7121959836198c5752c783bf330314423a3",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "88b9e2cb10fc07fc55168c138912bc3865b6e23c69db7de60591953f5371937e",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "891dec489ba8c2b5fc07a1cc3c307dcfe198c98f33b297b15b8080e3b1a691c7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "898d4b5db57e2d9d926c3aff6c6657702823e410d3f2490af3071586d26f58b8",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "8b69cab35839fe8748ad28dd6191b6ffceb3a95463187664791913e130dd31e6",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "8c9b0452a1d01842fe1263b6e1751d35d64db85212b263d10aa6d4993d0e069d",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "8dd39c6c80daa1344542b41141c99860e608d1f811fe1b05099335e6f9cdb7e9",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "93a5b2be79e62b7d587f65f99b683585fb061a076a0a4b35c10bbcb05f59c1d7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "94d92bf82a064074d2a6f420ddec30efaa478beb02dc3a0a5f69d109507afa1f",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "9809b8d09ea2a0d75e14b18180fe139975160ccf09c1866bb1fe5b4957cadb06",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "995465dc445dac95c7d112c5d176febb2d0021ace497daa44d4417cfe559e2a3",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "996cea30658fa363dc789de7abae6b93f809ab5a3cdfb3a2d70d057015bee9e2",
+      "category": "historical_financial_fixture",
+      "contentGroup": "c29eb21a50847c2460c9314e518232ff305153e33a6411ca82bb2cc261eaa239"
+    },
+    {
+      "fingerprint": "9b55588b420845ba3cfac8655219a9ec72e2af7201a1a0f3a820cdba2df51c26",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "9b855a6c39be9bb278c42adf84c2901885ee211609242c2c4b5a964186435bb1",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "9d0d80c4cd5094379c29a46b0d8816e5f5189a416a46df4da715c8af54fa99de",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "9d997bc9dfb00c97a4d2405f4a6095840d1f0faa9fe77e0599dda6432397d608",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "9f6efaacc389ad96ec32527a23afaf44d889abc87da550b375a00203a4d6dfd6",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "a06c6421d21c2054f665356c1e59076dd46b76a21c5b106bc8f2db76f322fbb8",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "a0b06c7779ac5c19e482c11baee930a5143a10d3950c3137cdee3a77eeb837a7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "a176183a90a5e0c7eda2868d988e7db0d581b6508499245da71275d70b7acaa7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "a2cb14cef51b1a2bfa587315040654b0ed540cfd8ef66f8b6df979a3f1173d2a",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "a449aab636d722d04d2cc6f783ade678070ad15515a47609001eb43a045119f9",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "a4e3b6982ec388adf12626e5cc1c7265a27b9608f55e5c59833806d530fda0c7",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "a51b54d9f1039141b4b61c08a97be6290305f25e0f3599528d48f073bd180a50",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "a5680f378b9705c21b450ce2ce351188807b611b9afe44b519be1268dab55ddb",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "a58a9110514638241bbfbdfdb84b5b8e6110ec988dadc30153b5cf147d414f39",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "a68c4de0009eec66885c0c864ae54068b05cc0000096fd69adfb51ef9d84a1db",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "a6b6ed4abdb5dd10aa0741dbf5e52427ae1acb16f2c0e8f74390febfe5f5ee44",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "a71a7414b32b56ae469941c9351103bc29959a488e0a15a21c4a080002a657c0",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "a79d239d83695a08b14b826612cae1617fbaeb263d62bc35550d6b6c351d66b4",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "a7de228be02b1439cf82539e405dccc27e83d487c3158995a0b147376fff974b",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "aafe0bf91d81a7e527e91490bf81731f5c8890b68e3c334760136d441a6243a9",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "ab20f9ead7d7308ab95964bfc9606a7a625193112fcd86bffaf3cad19d350fef",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "ab5660a1d87a0eb3043f397157f2eb8e533356d666e155b5ee0c8a3da2ae7b3f",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "ab8c955c55f00fe55bd23d2ae8fe8f047e4b06724b255db40f186a713882a5fa",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "acfdb0665ae02d3ef7344ea8d8a12056384bdc5d6a2053dbb54bb89e73dce655",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "adc5f70d33fe49aa45d3af45bb198811328c9e28cf99586a2cae9083a58d7792",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "add34e0c66e220d112b28ba1c6cd6c3b6cb53b96561f1f11ede3e9b0b4a6e4d7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "ae84dfd860240b6118fbbfa15563d7a87730511d03a0dd5d60dde431f6628971",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "af9216f35e54d66240b7296e406e1f145de84fd6a62b32945f7ec729e2602990",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "afbec217f82d5a12978b83328b1bbc47d81745747792ccd7adc9c320e1fb23ba",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "affc3a5a1ed8dc5463c340ca014bdf5fdd8607926928328c352b9ec129525c03",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "b0dc200edc78eb44ed109eac66b4a7fe136623baed5d3c8ba1f7753c2e6c78e6",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "b116d11cbf95ac8682127eef97dc68d725ea0983ff09294ae93e448792d3171d",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "b1624855847a3e535f20db196e52fa0c6a6b36c390d0f29caa0a52c831417232",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "b24c484516a591651f5fd13c69ec9bfdf377ed27dd0a7c0a7431ba8fc3e7a2ac",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "b29e0819c2e23347da4bfc889f14219753ceecafea0d42a50318b310de8f6968",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "b2af39dbcf19b71f3ce053124c48072f1c91e511022b6c4cc6b5b470fd6d84a5",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "b34e4a205ce0d31a32ff37e98d756a79b40f18fa1bc8a0a2260ec674cdca2a51",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "b50f2f36a4ad901d0d9c070c53d5470d24e791f95167e50af45eca9f28297396",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "b679ec4a7ef3b08d71f1565083609e56bd407e0451ff820dfd6b2e61b049afcf",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "b74bc4222078cbde3431bccd7173a75ea5e6b6703be27fb191537e5523543a32",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "b8fad77417416ab8d3c9f1c0fdf65dfd0b8c681f4efbeb60b83cb0da1caed80c",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "b946060b2ccb8d1ce1fb0e4114c615cc1292f19fe580b919630e0a8887b8912d",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "bab5b09c783e99f8a1f670f35d3c75d4cd6c8369085c310b6f3408785c25bca3",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "bad13d12dedbdf562471b05d8d63f1947614d450b8c090c8ac1d6136349dd468",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "bc8fd97863f147b2853c48834daf4169947140614f48141506bec637d6465e18",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "bcf6c9dc1cd97f823f32cda416cb1421169d0fc3dede11936e514bd7332b817e",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "bd76d3c27184e8caed907bd0d95209ccc1f667dc519c1c269f7e2a072b5d4386",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "bde26a8d2c5e00c7218a0512fe895a20561bf1bb57ec875fea628ab3f4972f79",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "be1d0e4e3c2e3a3de0258f7b86a594ab8b1fd545a5f80f54a06c7b2640cfda30",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "bebfa6c0f0dc829251fe7b1c6bf049dcc52d17ce099e05a88a3803a95caa5fa3",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "c14eed31ea4155673aa6e35b4e3128a350b9dbabcddcc5fa7c7dd85802ff1d60",
+      "category": "historical_financial_fixture",
+      "contentGroup": "c29eb21a50847c2460c9314e518232ff305153e33a6411ca82bb2cc261eaa239"
+    },
+    {
+      "fingerprint": "c2352646291e927ec534cae0c10cb3c9ca143c946908bfc93b6531decfc05b34",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "c2c0898432433feb27b624e4a2d0a95b29180150e7320af720ab88de098cfbbf",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "c4947689fdcd1a72294d58ed7fc490fa60d0f0edb19d9edbf038e276941a19ee",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "c4db301b641ebed82b7b4a4c5deace50325d6b14983e0dd8fbbd7b775e189d85",
+      "category": "personal_absolute_path",
+      "contentGroup": "3fc99643a2309b410bb6dac742404b657ca187c8b1672a5e3152f7f443990392"
+    },
+    {
+      "fingerprint": "c589ecde82224b4a12e7aa3b253a1a1e204933afdcf269235da69bb4b6a80999",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "c6dc1bf8dcd7ca33776ffc5fdca86971b5d80bfb777b8c4dd9bef430f6fe891e",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "c780474ba04ae55a0519aae504774febd578ea3377c4c7a33e27f0cbbc988105",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "c839fd209ec68aa1d805b442b02ad08357f249adaef48a54879622cbd5b3ca36",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "c8f93ce01dc49ee23ac8f88a12efa6b78d6a85f4dbec5ccdcf3769e039de3306",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "c9af9f51629d9871ca8146d80bf9eb02f1c70d79a31863edef4ee2baa93b0c60",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "c9ca8a2c6048a1f6669b910312469a23b37fd05f04c9e6d18f951b062c83cdd9",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "ca575cf36e58e174029da3cf0852c311f958608e6acda6161fa0b0895e2f3fba",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "ca8427722071b011c09ae9e38d1b2c4a8c4278b56132e4f21de3fa1f499871b5",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "ca84da3c2436fbd4ba885885a0f65654f231fb652e09882785c739de9ab83c66",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "cb0945981f77a734882fa11fde29ef6507f82a0f6ab66fa992d387b0d2d86bf1",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "cb72a555bcc7f9dd3011cb5b710cb962b4cb31cc3542af6c3982048a0f4bfa67",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "d1ca32eecf8cc9d65ba54b1bf2d3d0096622c62c41de03b30569f2d9fc9595c2",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "d4a16c837091d03f87bdd2849a3cbcce23d76ae16a2398d439f74b49cc6a0705",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "d57f0b64d9f3cee1d2a03180bbc43b4a10a02e21d284716b625fe37cf6d32c7a",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "d7afb18596508a6a60391304c1265aae7b0ed6c383c5fd70c5b6405f009abfda",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "d85a2c80ceb9f28bf2ae4eafe87852eeeaa43bec086aa1d9f98bf4d353f06796",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "d8c7ecd038c7431ebd49145658c5d59e3ee2ee06182a3931bbeca054d4d115aa",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "d9128a35fa24f56a354a9542ec9d8e45875a756967d4c01a623eea519904c659",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "d98173c615d1541e0f8b7de1405b083fe9d7b59946146b1f1dc601859b045152",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "ddc8802ba5972613a789378af1cf81b1082576b59257bc3fbc9e948d3666c693",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "de4d1bdd573fe060d1afaf4a98caf3f3bcb444c72e66f9cef39d9236f41abe68",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "de54339090103e7fc4841cff6062c5e68b43644101c0ea21b4cefe0c6d74b6be",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "dedd1ac6da554ca77702c7db0b6534a5de7ed4879bfed12a1e0477818be98008",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "df44932fc23a89d58c0a634aac133a3ed26494c0a30123f69d0dc0093565cc7e",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "e05de86880602d9f1b0ae856762ebb2a4168e5b1bc0975635b27a1533977c550",
+      "category": "historical_financial_fixture",
+      "contentGroup": "c29eb21a50847c2460c9314e518232ff305153e33a6411ca82bb2cc261eaa239"
+    },
+    {
+      "fingerprint": "e08608174cf3a768f0e67aff0c3bb4ddce51c8ca02a39046ede0bb4cb7b7b019",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "e08caf92fbb2d876fe62be1e2e756b530e495de93450cac5d24720fed19bfc3d",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "e1b12aaf5e1bd6132812ad2433531dabaaf77ebdbbe69be853139e7d7b3d2b24",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "e29e56f7ff867be33c55444b9dee3a8d9acaf4db7314e286157f61ed285f1921",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "e48a769424c48f6c72996d6e585a700f2fb8ab5f5d514e24ab4aaa8ea164074a",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "e53b9eb70e04f561f12724d008768b5f46896eb32c069007df40db4937c97678",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "e7545dba80a609d74d03b66ede73bee3195110a410652f55320abc8934b1a934",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "e89033f332f40eb0d8fe3db27ede1aa9a7601bfd5a296ac1e5a753f3df77bcb7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "e8917500c778277f6ae8b81c2633505dd63d5f03a4cfe3e68991670ed4ecd795",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "e8ab00b19f6232210e90616bd3fdfce944b2d4f894161d3781122064cf16bf4c",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "e8f8d216157cfa6545f7dd3b774e1f299887a144be2d6788b2a87103f2254bb2",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "e9509897dcd072f5314cc492df07ea8ad81db086f04bb7bc77baf99220838213",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "e9a4fd9ef76249e4129c00380f1b68ac154cb338ead488ea266ff16ac5926c2f",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "e9f7406e76d71315203ef4a8aafedc09cb5ef122e65f90a2ac58df2005b1f48a",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "e9fb74a894c9a968eb2a555a8b23c419597e6cb1578ee2f02772a62d4c3ea6d0",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "ea89adb823fde2ea6b32cfa88535b2d395a51d9ab46eb6964875e4e165545d34",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "ea901482670a15cafc6d9cfb8c1239d8e957e77ce1292c2c85351c10e1a868b8",
+      "category": "personal_absolute_path",
+      "contentGroup": "3fc99643a2309b410bb6dac742404b657ca187c8b1672a5e3152f7f443990392"
+    },
+    {
+      "fingerprint": "eacedb9f1cf581b3cbee3f986dd1caa72d1b32130e404e012e4f671ad6f36347",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "ebef51fb30b0851847180b77bc5fbbec31671e991eb43e8fca52afa7cf9db377",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "ec065f91216693ca169540da84798c2c5f43bc933a7e4c16a26be16d643efad4",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "eca011702db1d8e84f4af051c6e0824af77d1d6139c73e6c47ca00789ac6eba7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "d310369bd846bfbebdc0fc3db5af4700e26132053539ef2e4d083288b3be140f"
+    },
+    {
+      "fingerprint": "f0bd804806b1c3588ada9356a7dc3abfc1eed062846cf5cddc049f0f29aeaa9c",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "f1db838f586f541b5882d8569aa7096dde7004e80a8154a3a2a7281295731e75",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "f21ad8b2d0032ec7316f280f7782500929be59af0d30e34cef2f974628618021",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "f35bf6f5193be6570a753c41167aafe0efd28ea568cae0d1100c2f2f55c96392",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "f42fe4b3187c27de1edb87eef7b55d5f1c1a4e15605c93b46e92d3a10b8fe0a8",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "f4358aa7663192961c915094308341bcc0421183d58ae9139097fba500b42ca0",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "f5eaa5aff3949a0db95a3d873e4842923fe28c12b72de792568968a7fc741fb0",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "f9ead5d05666b641268e953c3d2cfb44a4d5a0a9232e141481e3e0ebd81dd82e",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "fb74d1880a0daa2778a8c55bdf7ff944291938c031ea37e29cc9f1f0d9bebd84",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ab3049e318b90e11e3e344049669e3be2b45a88fe24bc88bb47157b0116ee1bc"
+    },
+    {
+      "fingerprint": "fb773e4bf2cbf6ff13e07607166818216995db1e400f01ca23aabbe12be6df95",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "fbcd0ab3e16d37976d825d1541e8a1977683f6bc34c453dd71f3c7f8ea9d34c7",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "fc90df1f938a04930a5520398190ec48c7875aa08c5f071297a42029d976a4e6",
+      "category": "personal_absolute_path",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "fcc873fbae56892055c361794aebbf3d846afafcfeb23646099ddf5bc86112ca",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "8258cfc4262ad0e270dad97f0109a4b9e38cf6adc274e02b1885fdb0edfa4b63"
+    },
+    {
+      "fingerprint": "fda516e24ba06475164bcb0cfdd952826113629dc1a4ffa06710ecd4c92ed6f7",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "fbab0f6920192b9179c2ed982a5c9a0e28468533409b7399018e52250a0c46bc"
+    },
+    {
+      "fingerprint": "fdfad4885825cf6b1bd35b1fd299fb034da0e1ac2fa3b7ad0e0d8a334defa2e0",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "e7288ff29d8c8e5a9799aa70ab9308f21364c0e49cebbe6136560de361994a0f"
+    },
+    {
+      "fingerprint": "fee5c2512fc954c4dcb5f8e65e86a28c23eeaef4c3c1c7220c57cd9b4309a0ce",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "ff394a62aa408a426545991921adc4de9a17f9494c4bf8a6bb4c4b987a93c48d",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    },
+    {
+      "fingerprint": "ff66adae162807003041488116f44301dd87441bf986bfc55b72a1ead23c112f",
+      "category": "private_financial_workbook_reference",
+      "contentGroup": "ed9d11c380c9cf207d6f6108f503cc235a30e1d1a933a110b7d93dd59a48626f"
+    }
+  ]
+}

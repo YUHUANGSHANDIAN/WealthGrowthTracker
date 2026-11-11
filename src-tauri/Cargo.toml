@@ -1,13 +1,13 @@
 [package]
-name = "wealth-growth-tracker"
-version = "1.10.0-preview.1"
-description = "财富成长记 / Wealth Growth Tracker —— 本地个人财富管理桌面应用"
+name = "wealthgrowthtracker"
+version = "1.11.0-preview.1"
+description = "WealthGrowthTracker — 本地优先的个人财富管理桌面应用"
 authors = ["YUHUANGSHANDIAN"]
 edition = "2021"
 rust-version = "1.88"
 
 [lib]
-name = "wealth_growth_tracker_lib"
+name = "wealthgrowthtracker_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

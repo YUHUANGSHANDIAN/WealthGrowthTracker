@@ -13,6 +13,7 @@ import { DiagnosticsModal } from './DiagnosticsModal';
 import { aggregateHistory, filterHistoryRange, filterTrainingWindow } from '../../utils/timeDimension';
 import { ChartControls } from './ChartControls';
 import { goalRequiredPath, modelDisagreement, type IntervalLevel } from './diagnostics';
+import { PageHeader } from '../../components/ui/workspace';
 
 export function PredictionPanel() {
   const history = useAppStore((s) => s.history);
@@ -182,6 +183,12 @@ export function PredictionPanel() {
 
   return (
     <div className="space-y-4">
+      <PageHeader
+        eyebrow="情景预测"
+        title="数学外推与目标路径"
+        description="预测只使用本地历史总资产轨迹；资产变化可能来自收入、储蓄或转账，不代表投资收益承诺。"
+        context={<><span>{result.dataQuality.pointCount} 个训练点</span><span>·</span><span>不联网</span><span>·</span><span>假设与事实分离</span></>}
+      />
       {/* 智能推荐 */}
       <Card className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-100">
         <div className="flex items-center justify-between flex-wrap gap-2">

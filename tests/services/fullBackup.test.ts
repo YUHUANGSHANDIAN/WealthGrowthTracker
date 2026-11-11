@@ -17,6 +17,11 @@ import {
   parseFullBackup,
   parseStoredZip,
 } from '../../src/services/export/fullBackup';
+import {
+  HEALTH_ASSISTANT_STORAGE_KEY,
+  emptyHealthAssistantState,
+  upsertHealthConversation,
+} from '../../src/domain/healthAssistant/state';
 
 const encoder = new TextEncoder();
 
@@ -79,6 +84,7 @@ describe('完整备份 ZIP', () => {
     expect(built.filename).toMatch(/\.wgtbackup\.zip$/);
     expect(built.manifest.kind).toBe(FULL_BACKUP_FORMAT);
     expect(built.manifest.classificationSchemaVersion).toBe(1);
+    expect(built.manifest.workspaceSchemaVersion).toBe(1);
     const parsed = await parseFullBackup(built.archive);
     expect(parsed.manifest.fileCount).toBe(3);
     expect(parsed.aiMetadataText).toContain('schemaVersion');
@@ -101,6 +107,7 @@ describe('完整备份 ZIP', () => {
       createdAt: '2026-11-01T08:00:00.000Z',
       storageSchemaVersion: 1,
       monthlySchemaVersion: 3,
+      healthAssistantSchemaVersion: 2,
       fileCount: 1,
       totalBytes: encoder.encode(payload).length,
       files: [{ relativePath: 'data/app-state.json', bytes: encoder.encode(payload).length, sha256: '0'.repeat(64) }],
@@ -144,5 +151,90 @@ describe('完整备份 ZIP', () => {
     );
     expect(parsedClassification.events).toHaveLength(1);
     await expect(verifyAssetClassificationIntegrity(parsedClassification)).resolves.toMatchObject({ changed: false });
+  });
+
+  it('完整备份包含 1.11 工作区草稿、核对决定、修订、情景与命名视图', async () => {
+    await Promise.all([
+      storageService.setRaw(STORAGE_KEYS.dataRevision, '7'),
+      storageService.setRaw(STORAGE_KEYS.ledgerIdentity, JSON.stringify({ schemaVersion: 1, ledgerId: 'ledger-backup', createdAt: '2026-11-01T08:00:00.000Z' })),
+      storageService.setRaw(STORAGE_KEYS.workspaceDrafts, JSON.stringify({ schemaVersion: 1, drafts: [] })),
+      storageService.setRaw(STORAGE_KEYS.healthReviews, JSON.stringify({ schemaVersion: 1, records: [] })),
+      storageService.setRaw(STORAGE_KEYS.reportRevisions, JSON.stringify({ schemaVersion: 1, revisions: [] })),
+      storageService.setRaw(STORAGE_KEYS.goalScenarios, JSON.stringify({ schemaVersion: 1, scenarios: [], comparisonIds: [] })),
+      storageService.setRaw(STORAGE_KEYS.workspaceUi, JSON.stringify({ schemaVersion: 1, namedViews: [] })),
+    ]);
+    const built = await buildFullBackup({
+      revision: 7,
+      monthlyPlanning: emptyMonthlyPlanningState(),
+      now: new Date('2026-11-01T08:00:00.000Z'),
+    });
+    const parsed = await parseFullBackup(built.archive);
+    for (const key of [
+      STORAGE_KEYS.dataRevision,
+      STORAGE_KEYS.ledgerIdentity,
+      STORAGE_KEYS.workspaceDrafts,
+      STORAGE_KEYS.healthReviews,
+      STORAGE_KEYS.reportRevisions,
+      STORAGE_KEYS.goalScenarios,
+      STORAGE_KEYS.workspaceUi,
+    ]) {
+      expect(parsed.stateText).toContain(key);
+    }
+  });
+
+  it('完整备份中的无效工作区草稿会在恢复预览阶段失败关闭', async () => {
+    await storageService.setRaw(STORAGE_KEYS.workspaceDrafts, JSON.stringify({ schemaVersion: 99, drafts: [] }));
+    const built = await buildFullBackup({
+      revision: 8,
+      monthlyPlanning: emptyMonthlyPlanningState(),
+    });
+    await expect(parseFullBackup(built.archive)).rejects.toThrow('草稿状态无效');
+  });
+
+  it('健康助手会话默认排除，只有显式选择时才进入完整备份', async () => {
+    await storageService.setRaw(STORAGE_KEYS.workspaceDrafts, JSON.stringify({ schemaVersion: 1, drafts: [] }));
+    const state = upsertHealthConversation(emptyHealthAssistantState(), {
+      schemaVersion: 1,
+      id: 'conversation-1',
+      ledgerId: 'ledger-backup',
+      issueId: null,
+      issueFingerprint: null,
+      task: 'data-health-assistant',
+      providerId: 'gateway',
+      profileId: 'profile-1',
+      modelId: 'model-1',
+      authorization: {
+        issueId: null,
+        issueFingerprint: null,
+        domain: null,
+        includeEvidence: false,
+        includeAmounts: false,
+      },
+      baseRevision: 2,
+      messages: [{
+        id: 'message-1',
+        role: 'user',
+        text: '合成健康问题',
+        createdAt: '2026-11-01T08:00:00.000Z',
+      }],
+      createdAt: '2026-11-01T08:00:00.000Z',
+      updatedAt: '2026-11-01T08:00:00.000Z',
+    });
+    await storageService.setRaw(HEALTH_ASSISTANT_STORAGE_KEY, JSON.stringify(state));
+    const excluded = await buildFullBackup({
+      revision: 2,
+      monthlyPlanning: emptyMonthlyPlanningState(),
+      now: new Date('2026-11-01T08:00:00.000Z'),
+    });
+    expect(excluded.manifest.healthAssistantSchemaVersion).toBeUndefined();
+    expect((await parseFullBackup(excluded.archive)).stateText).not.toContain(HEALTH_ASSISTANT_STORAGE_KEY);
+    const included = await buildFullBackup({
+      revision: 2,
+      monthlyPlanning: emptyMonthlyPlanningState(),
+      includeHealthAssistantConversations: true,
+      now: new Date('2026-11-01T08:00:00.000Z'),
+    });
+    expect(included.manifest.healthAssistantSchemaVersion).toBe(1);
+    expect((await parseFullBackup(included.archive)).stateText).toContain(HEALTH_ASSISTANT_STORAGE_KEY);
   });
 });

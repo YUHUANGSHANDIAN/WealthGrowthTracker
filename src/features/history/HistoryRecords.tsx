@@ -13,6 +13,7 @@ interface HistoryRecordsProps {
   onToggleSelect: (date: string) => void;
   onEdit: (date: string, amount: number) => void;
   onDelete: (date: string) => void;
+  highlightDate?: string;
 }
 
 function RecordTime({ point }: { point: HistoryPoint }) {
@@ -43,13 +44,21 @@ function EventNote({ point, hidden }: { point: HistoryPoint; hidden: boolean }) 
     : <span className="text-xs text-slate-500">暂无事件备注</span>;
 }
 
-export function HistoryRecords({ rows, selected, onToggleSelect, onEdit, onDelete }: HistoryRecordsProps) {
+export function HistoryRecords({ rows, selected, onToggleSelect, onEdit, onDelete, highlightDate }: HistoryRecordsProps) {
   const [view, setView] = useState<'timeline' | 'table'>('timeline');
   const [noteTarget, setNoteTarget] = useState<{ date: string; initialNote: string; baseRevision: number } | null>(null);
   const hidden = useWorkspaceStore(state => state.amountsHidden);
   const setHistoryEventNote = useAppStore(state => state.setHistoryEventNote);
 
   useEffect(() => { if (hidden) setNoteTarget(null); }, [hidden]);
+  useEffect(() => {
+    if (!highlightDate) return;
+    const id = `history-record-${highlightDate.replace(/[^0-9A-Za-z_-]/g, '_')}`;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(id)?.scrollIntoView({ block: 'center' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [highlightDate, view]);
 
   function editNote(date: string) {
     if (hidden) return;
@@ -95,7 +104,11 @@ export function HistoryRecords({ rows, selected, onToggleSelect, onEdit, onDelet
       {view === 'timeline' ? (
         <ol aria-label="按日历史记录" className="divide-y divide-slate-100">
           {rows.map((row, index) => (
-            <li key={`${row.point.date}-${index}`} className="p-4 sm:p-5">
+            <li
+              id={`history-record-${row.point.date.replace(/[^0-9A-Za-z_-]/g, '_')}`}
+              key={`${row.point.date}-${index}`}
+              className={`p-4 sm:p-5 ${highlightDate === row.point.date ? 'bg-emerald-50/70 ring-2 ring-inset ring-emerald-300' : ''}`}
+            >
               <article aria-label={`${row.point.date} 历史记录`} className="min-w-0 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                   <label className="flex min-h-[44px] items-center gap-3 font-semibold text-slate-800">
@@ -136,7 +149,11 @@ export function HistoryRecords({ rows, selected, onToggleSelect, onEdit, onDelet
               {['选择', '日期 / 总资产', '前一有效记录变化', '来源 / 覆盖', '事件备注', '记录时间 / 操作'].map(label => <th scope="col" className="px-4 py-3 font-medium" key={label}>{label}</th>)}
             </tr></thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.map((row, index) => <tr key={`${row.point.date}-${index}`}>
+              {rows.map((row, index) => <tr
+                id={view === 'table' ? `history-record-${row.point.date.replace(/[^0-9A-Za-z_-]/g, '_')}` : undefined}
+                key={`${row.point.date}-${index}`}
+                className={highlightDate === row.point.date ? 'bg-emerald-50/70' : undefined}
+              >
                 <td className="px-4 py-3 align-top"><label className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center"><input type="checkbox" checked={selected.has(row.point.date)} onChange={() => onToggleSelect(row.point.date)} className="h-5 w-5 rounded text-emerald-600" aria-label={`选择 ${row.point.date}`} /></label></td>
                 <th scope="row" className="px-4 py-4 align-top font-normal"><time dateTime={row.validDate ? row.point.date : undefined}>{row.point.date}</time><p className="mt-2 font-semibold tabular">{formatCNY(row.point.totalAmount)}</p>{row.point.name && <p className="mt-1 max-w-48 break-words text-xs text-slate-500">{row.point.name}</p>}</th>
                 <td className="px-4 py-4 align-top"><Difference row={row} hidden={hidden} /></td>

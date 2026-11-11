@@ -26,6 +26,8 @@ export interface Channel {
   children?: SubChannel[];
   createdAt?: string;
   updatedAt?: string;
+  /** Archived channels stay in totals and history; they are only hidden from the default work list. */
+  archived?: boolean;
 }
 
 /** 历史数据点（按天记录总资产）。额外字段用于兼容旧版更丰富的快照数据。 */
@@ -95,7 +97,7 @@ export interface ReportAssetParent {
   color?: string;
   /** 占总资产比例（0-100）。 */
   percentageOfTotal: number;
-  /** 子渠道明细；无子渠道的父渠道是叶子，children 为空。 */
+  /** 子渠道明细；无子渠道的父渠道直接持有未细分金额，children 为空。 */
   children: ReportAssetChild[];
 }
 
@@ -460,6 +462,8 @@ export interface UserProfile {
 export interface AppearanceSettings {
   themeMode: 'light' | 'system' | 'dark';
   followWealthTheme: boolean;
+  /** Content density. Missing values from older backups mean comfortable. */
+  density?: 'comfortable' | 'compact';
   animationIntensity: 'off' | 'low' | 'normal' | 'high';
   backgroundOpacity: number; // 0-100
   reduceMotion: 'system' | 'always';

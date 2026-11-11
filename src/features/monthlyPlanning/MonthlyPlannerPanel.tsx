@@ -27,6 +27,8 @@ import { scopeSummary } from './scope';
 import { researchLookupAI, visionExtractAI, type ResearchSource } from '../../services/ai/client';
 import { useAIConnectionStore } from '../../store/aiConnectionStore';
 import { buildVisionRequest, existingResearchUrls, parseUrlLines, researchEvidenceFrom, visionMimeFor } from './aiEntry';
+import { useWorkspaceDraft } from '../../hooks/useWorkspaceDraft';
+import { DraftStatusBar } from '../../components/ui/DraftStatusBar';
 import type {
   CashFlowEvent, InvestmentPolicy, MonthlyReview, ProposedAction, ResearchEvidence, SourceDocument,
 } from '../../domain/portfolio/types';
@@ -136,6 +138,28 @@ export function MonthlyPlannerPanel() {
   const policy = latestPolicy(planning.policies, session?.policyId);
   const sessionKey = session?.key;
   const [policyDraft, setPolicyDraft] = useState<InvestmentPolicy | null>(policy);
+  const policyBaseline = useMemo(
+    () => ({ policy: policy ?? defaultPolicy(session?.snapshotAsOf ?? todayString()) }),
+    [policy, session?.snapshotAsOf],
+  );
+  const policyPayload = useMemo(
+    () => ({ policy: policyDraft ?? policyBaseline.policy }),
+    [policyBaseline.policy, policyDraft],
+  );
+  const policyWorkspaceDraft = useWorkspaceDraft({
+    kind: 'finance-policy',
+    targetId: `${session?.key ?? month}:${policy?.id ?? 'policy-default'}`,
+    baseRevision: dataRevision,
+    baseEntityRevision: policy?.version ?? 0,
+    baseline: policyBaseline,
+    payload: policyPayload,
+    enabled: Boolean(session && policyDraft),
+    onRestore: (restored) => {
+      if (restored.policy && typeof restored.policy === 'object') {
+        setPolicyDraft(restored.policy as unknown as InvestmentPolicy);
+      }
+    },
+  });
 
   useEffect(() => {
     setPolicyDraft(policy);
@@ -243,7 +267,11 @@ export function MonthlyPlannerPanel() {
       effectiveFrom: todayString(),
     };
     setBusy(true); setError(null);
-    try { await saveMonthlyPolicy(next); }
+    try {
+      await saveMonthlyPolicy(next);
+      await policyWorkspaceDraft.clear();
+      pushToast(`已保存策略 v${next.version}`, 'success');
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : '策略保存失败'); }
     finally { setBusy(false); }
   }
@@ -794,6 +822,17 @@ export function MonthlyPlannerPanel() {
         <div className="space-y-4">
           <Card className="p-4">
             <h3 className="font-semibold mb-2">策略（用户政策，可版本化修改）</h3>
+            <DraftStatusBar
+              status={policyWorkspaceDraft.status}
+              error={policyWorkspaceDraft.error}
+              staleDraft={policyWorkspaceDraft.staleDraft}
+              onSave={() => void policyWorkspaceDraft.saveNow()}
+              onDiscard={() => {
+                void policyWorkspaceDraft.discard();
+                setPolicyDraft(policy);
+              }}
+              onRebase={() => policyWorkspaceDraft.applyStaleDraft(policyWorkspaceDraft.staleDraft?.payload as typeof policyPayload)}
+            />
             <div className="flex flex-wrap items-end gap-3">
               <MoneyField label="最小交易额" value={editablePolicy.minTradeAmount ?? ''} onChange={(value) => setPolicyDraft({ ...editablePolicy, minTradeAmount: value === '' ? null : Number(value) })} />
               <MoneyField label="流动性底线" value={editablePolicy.liquidityFloor ?? ''} onChange={(value) => setPolicyDraft({ ...editablePolicy, liquidityFloor: value === '' ? null : Number(value) })} />

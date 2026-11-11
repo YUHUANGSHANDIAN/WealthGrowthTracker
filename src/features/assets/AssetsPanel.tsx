@@ -15,6 +15,11 @@ import { AIActionButton } from '../ai/AIActionButton';
 import type { FirstChildStrategy, LastChildStrategy } from '../../utils/channels';
 import type { ChannelGrowth } from '../../types';
 import { HoldingClassificationPanel } from './HoldingClassificationPanel';
+import { useNavigationStore } from '../../store/navigationStore';
+import { FilterBar, MetricCard, PageHeader, SavedViewBar } from '../../components/ui/workspace';
+import { projectMonthlyPlanningClassification, type AssetClassificationState } from '../../domain/assets/classification';
+import type { MonthlyPlanningState } from '../../domain/portfolio/types';
+import { formatCNY } from '../../utils/money';
 
 type SortConfig =
   | { mode: 'default' }
@@ -56,6 +61,7 @@ function sortSubChildren(children: SubChannel[], sort: SubSort, growths: Map<str
 export function AssetsPanel() {
   const channels = useAppStore((s) => s.channels);
   const assetClassification = useAppStore((s) => s.assetClassification);
+  const monthlyPlanning = useAppStore((s) => s.monthlyPlanning);
   const history = useAppStore((s) => s.history);
   const sortRules = useAppStore((s) => s.sortRules);
   const pinnedChannelIds = useAppStore((s) => s.pinnedChannelIds);
@@ -64,6 +70,7 @@ export function AssetsPanel() {
   const {
     addParentChannel,
     updateParentChannel,
+    setChannelArchived,
     deleteParentChannel,
     toggleChannel,
     addSubChannel,
@@ -79,6 +86,11 @@ export function AssetsPanel() {
     togglePinChannel,
     setSmartSortConfig,
   } = useAppStore();
+  const navigate = useNavigationStore((state) => state.navigate);
+  const routeChannelId = useNavigationStore((state) => state.channelId);
+  const routeAssetView = useNavigationStore((state) => state.assetView);
+  const [query, setQuery] = useState('');
+  const [showArchived, setShowArchived] = useState(true);
 
   const [sortConfig, setSortConfig] = useState<SortConfig>(
     activeSortKey === 'smart' ? { mode: 'smart' } : activeSortKey === 'default' ? { mode: 'default' } : { mode: 'single', ruleId: activeSortKey },
@@ -103,6 +115,7 @@ export function AssetsPanel() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; title: string; message: string; onConfirm: () => void }>({ open: false, title: '', message: '', onConfirm: () => {} });
 
   const total = totalAssets(channels);
+  const assetView = routeAssetView ?? 'balances';
 
   const growths = useMemo(() => computeChannelGrowths(history, channels), [history, channels]);
   const growthByChannel = useMemo(() => {
@@ -114,20 +127,26 @@ export function AssetsPanel() {
 
   const sortedChannels = useMemo(() => {
     let base: Channel[];
+    const source = channels.filter((channel) => {
+      if (!showArchived && channel.archived) return false;
+      const needle = query.trim().toLowerCase();
+      if (!needle) return true;
+      return `${channel.name} ${channel.emoji} ${(channel.children ?? []).map((child) => child.name).join(' ')}`.toLowerCase().includes(needle);
+    });
     if (sortConfig.mode === 'single') {
       const rule = sortRules.find((r) => r.id === sortConfig.ruleId);
-      base = rule ? sortChannelsByRule(channels, rule, { totalAmount: total, growthByChannel }) : sortChannels(channels);
+      base = rule ? sortChannelsByRule(source, rule, { totalAmount: total, growthByChannel }) : sortChannels(source);
     } else if (sortConfig.mode === 'multi') {
       const rules = sortConfig.ruleIds
         .map((id) => sortRules.find((r) => r.id === id))
         .filter((r): r is CustomSortRule => !!r);
-      base = rules.length ? sortChannelsMulti(channels, rules, { totalAmount: total, growthByChannel }) : sortChannels(channels);
+      base = rules.length ? sortChannelsMulti(source, rules, { totalAmount: total, growthByChannel }) : sortChannels(source);
     } else if (sortConfig.mode === 'smart') {
-      const order = sortChannelsSmart(channels, growths, total, new Set(), smartSortConfig);
+      const order = sortChannelsSmart(source, growths, total, new Set(), smartSortConfig);
       const orderMap = new Map(order.map((o, i) => [o.id, i]));
-      base = [...channels].sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
+      base = [...source].sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
     } else {
-      base = sortChannels(channels);
+      base = sortChannels(source);
     }
     // 子渠道排序
     const withSortedChildren = base.map((c) =>
@@ -135,7 +154,7 @@ export function AssetsPanel() {
     );
     if (pinned.size === 0) return withSortedChildren;
     return [...withSortedChildren].sort((a, b) => (pinned.has(a.id) ? 0 : 1) - (pinned.has(b.id) ? 0 : 1));
-  }, [channels, sortConfig, sortRules, total, growthByChannel, growths, pinned, smartSortConfig, subSort]);
+  }, [channels, query, showArchived, sortConfig, sortRules, total, growthByChannel, growths, pinned, smartSortConfig, subSort]);
 
   function applySingle(ruleId: string) {
     if (ruleId === 'smart') {
@@ -201,12 +220,63 @@ export function AssetsPanel() {
     onEditAmount: (target, current, label) =>
       setAmountForm({ open: true, target, current, label }),
     onTogglePin: togglePinChannel,
+    onToggleArchive: (channel) => {
+      setChannelArchived(channel.id, !channel.archived);
+    },
   };
 
   return (
     <div className="space-y-4">
+      <PageHeader
+        eyebrow="权威资产账本"
+        title="渠道余额与持仓证据"
+        description="渠道余额决定总资产；任务中的持仓观察用于产品、风险与证据治理，不会被当作实时余额二次汇总。"
+        context={<><span>{channels.length} 个父渠道</span><span>·</span><span>{channels.reduce((sum, channel) => sum + (channel.children?.length ?? 0), 0)} 个子渠道</span></>}
+        primaryAction={<Button onClick={() => setAmountBatchOpen(true)}>批量更新金额</Button>}
+        secondaryActions={<Button variant="outline" onClick={() => setChannelForm({ open: true, editing: null })}>添加渠道</Button>}
+      />
       {/* 财富 Dashboard */}
       <WealthHeroCard onOpenLevels={() => setLevelExplorerOpen(true)} />
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <MetricCard
+          label="当前权威总资产"
+          value={formatCNY(total)}
+          detail="父渠道余额汇总，归档渠道仍计入"
+          tone="accent"
+          context={{ basis: '当前渠道余额', status: 'confirmed', scope: '全部父渠道，含归档余额' }}
+        />
+        <MetricCard label="当前渠道" value={`${channels.filter((channel) => !channel.archived).length} 个`} detail={`${channels.filter((channel) => channel.archived).length} 个已归档`} context={{ basis: '渠道结构', status: 'confirmed' }} />
+        <MetricCard label="金额口径" value="当前余额" detail="不是任务观察值，也不是投资收益" tone="unknown" context={{ basis: '余额与观察值分离', status: 'confirmed' }} />
+      </div>
+
+      <div className="flex flex-wrap gap-1" role="tablist" aria-label="资产视图">
+        {([['balances', '渠道余额'], ['holdings', '历史持仓观察'], ['risk', '产品与风险敞口']] as const).map(([view, label]) => (
+          <button key={view} type="button" role="tab" aria-selected={assetView === view} className="trend-view-tab" onClick={() => navigate({ tab: 'assets', assetView: view, channelId: routeChannelId })}>{label}</button>
+        ))}
+      </div>
+      <SavedViewBar
+        page="assets"
+        tab="assets"
+        filters={{ query, showArchived, assetView }}
+        onApply={(filters) => {
+          setQuery(typeof filters.query === 'string' ? filters.query : '');
+          setShowArchived(typeof filters.showArchived === 'boolean' ? filters.showArchived : true);
+        }}
+        routeForFilters={(filters) => ({
+          assetView: filters.assetView === 'holdings' || filters.assetView === 'risk' ? filters.assetView : 'balances',
+        })}
+      />
+
+      {assetView === 'balances' && <>
+      <FilterBar
+        resultCount={sortedChannels.length}
+      >
+        <label className="text-xs text-slate-500">搜索渠道
+          <input value={query} onChange={(event) => setQuery(event.target.value)} type="search" placeholder="名称、Emoji 或子渠道" aria-label="搜索资产渠道" />
+        </label>
+        <label className="trend-check"><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />显示已归档</label>
+      </FilterBar>
 
       {/* 工具栏 */}
       <div className="flex flex-wrap items-center gap-2">
@@ -229,9 +299,6 @@ export function AssetsPanel() {
         </div>
         <Button variant="outline" size="sm" onClick={() => setMultiOpen(true)}>
           ⇶ 多维排序
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => setAmountBatchOpen(true)}>
-          批量更新金额
         </Button>
         <AIActionButton task="entry-draft">AI 余额录入草稿</AIActionButton>
         {sortConfig.mode === 'smart' && (
@@ -282,11 +349,13 @@ export function AssetsPanel() {
       ) : (
         <div className="space-y-3">
           {sortedChannels.map((c) => (
-            <ChannelItem key={c.id} channel={c} handlers={handlers} isPinned={pinned.has(c.id)} classifications={assetClassification} />
+            <ChannelItem key={c.id} channel={c} handlers={handlers} isPinned={pinned.has(c.id)} isHighlighted={routeChannelId === c.id || (c.children ?? []).some((child) => child.id === routeChannelId)} classifications={assetClassification} />
           ))}
         </div>
       )}
-      <HoldingClassificationPanel />
+      </>}
+      {assetView === 'holdings' && <HoldingClassificationPanel />}
+      {assetView === 'risk' && <AssetRiskOverview planning={monthlyPlanning} classifications={assetClassification} />}
 
       {/* 表单弹窗 */}
       <ChannelFormModal
@@ -510,5 +579,57 @@ function RulesModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+function AssetRiskOverview({
+  planning,
+  classifications,
+}: {
+  planning: MonthlyPlanningState;
+  classifications: AssetClassificationState;
+}) {
+  const projected = useMemo(
+    () => projectMonthlyPlanningClassification(planning, classifications),
+    [classifications, planning],
+  );
+  const exposures = useMemo(() => {
+    const totals = new Map<string, number>();
+    const unmapped: string[] = [];
+    for (const task of projected.sessions) {
+      const values = new Map(task.observations.map((observation) => [observation.holdingId, observation.marketValue]));
+      for (const holding of task.holdings) {
+        const value = values.get(holding.id);
+        if (value === null || value === undefined) {
+          unmapped.push(holding.originalName);
+          continue;
+        }
+        for (const tag of holding.exposureTags) totals.set(tag, (totals.get(tag) ?? 0) + value);
+      }
+    }
+    return {
+      rows: [...totals.entries()].sort((a, b) => b[1] - a[1]),
+      unmapped,
+    };
+  }, [projected.sessions]);
+
+  if (exposures.rows.length === 0 && exposures.unmapped.length === 0) {
+    return <Card><EmptyState title="暂无历史持仓观察" description="导入或建立理财任务后，这里显示产品与风险敞口；不会用渠道余额推算持仓。" /></Card>;
+  }
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
+        风险敞口来自任务观察值，可能存在重叠，不构成互斥的 100% 构成图；观察日不同的数据不会直接合并成实时持仓。
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {exposures.rows.map(([tag, value]) => <MetricCard key={tag} label={`${tag} 敞口`} value={formatCNY(value)} detail="任务观察值合计；可能与其他标签重叠" tone={tag === 'gold' ? 'warning' : 'neutral'} />)}
+      </div>
+      {exposures.unmapped.length > 0 && (
+        <Card className="p-4">
+          <h3 className="font-semibold">金额未知的观察</h3>
+          <p className="mt-1 text-sm text-slate-500">{exposures.unmapped.length} 条持仓没有可用市值，未按 0 处理。</p>
+        </Card>
+      )}
+    </div>
   );
 }

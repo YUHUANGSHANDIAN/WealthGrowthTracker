@@ -9,6 +9,8 @@ import { monthStart, monthEnd, yearStart, yearEnd, pad2 } from '../../utils/date
 import { buildAssetComposition, buildChannelDetails } from './normalize';
 import { diffReportFields, buildManualEditAudit } from '../../utils/reportEdit';
 import { useAppStore } from '../../store/appStore';
+import { useWorkspaceDraft } from '../../hooks/useWorkspaceDraft';
+import { DraftStatusBar } from '../../components/ui/DraftStatusBar';
 
 type Tab = 'basic' | 'assets' | 'stats' | 'source';
 
@@ -44,7 +46,14 @@ export function ReportEditorModal({ report, onClose, onSave }: {
   const [channels, setChannels] = useState<Channel[]>(() => JSON.parse(JSON.stringify(report.channels ?? [])));
 
   // 统计
-  const ext = (report.reportType === 'weekly' ? [report.weeklyMax, report.weeklyMin, report.weeklyAvg] : report.reportType === 'monthly' ? [report.monthlyMax, report.monthlyMin, report.monthlyAvg] : [report.yearlyMax, report.yearlyMin, report.yearlyAvg]);
+  const ext = useMemo(
+    () => report.reportType === 'weekly'
+      ? [report.weeklyMax, report.weeklyMin, report.weeklyAvg]
+      : report.reportType === 'monthly'
+        ? [report.monthlyMax, report.monthlyMin, report.monthlyAvg]
+        : [report.yearlyMax, report.yearlyMin, report.yearlyAvg],
+    [report],
+  );
   const [statMax, setStatMax] = useState(ext[0] ?? report.totalAmount);
   const [statMin, setStatMin] = useState(ext[1] ?? report.totalAmount);
   const [statAvg, setStatAvg] = useState(ext[2] ?? report.totalAmount);
@@ -122,6 +131,52 @@ export function ReportEditorModal({ report, onClose, onSave }: {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [discardOpen, setDiscardOpen] = useState(false);
+  const draftBaseline = useMemo(() => ({
+    titleMode: report.titleMode ?? 'auto',
+    customTitle: report.customTitle ?? '',
+    dataAsOf: report.dataAsOf ?? report.endDate,
+    tags: (report.tags ?? []).join(', '),
+    summary: report.customSummary ?? '',
+    periodYear: report.isoWeekYear ?? report.year ?? new Date(report.endDate).getFullYear(),
+    periodWeek: report.isoWeek ?? report.weekNumber ?? 1,
+    periodMonth: report.monthNumber ?? new Date(report.endDate).getMonth() + 1,
+    totalAmount: report.totalAmount,
+    previousTotalAmount: report.previousTotalAmount ?? null,
+    channels: report.channels ?? [],
+    statMax: ext[0] ?? report.totalAmount,
+    statMin: ext[1] ?? report.totalAmount,
+    statAvg: ext[2] ?? report.totalAmount,
+  }), [ext, report]);
+  const draftPayload = useMemo(() => ({
+    titleMode, customTitle, dataAsOf, tags, summary,
+    periodYear, periodWeek, periodMonth, totalAmount,
+    previousTotalAmount: previousTotalAmount ?? null,
+    channels, statMax, statMin, statAvg,
+  }), [channels, customTitle, dataAsOf, periodMonth, periodWeek, periodYear, previousTotalAmount, statAvg, statMax, statMin, summary, tags, titleMode, totalAmount]);
+  const draft = useWorkspaceDraft({
+    kind: 'report-edit',
+    targetId: report.id,
+    baseRevision,
+    baseEntityRevision: report.revision ?? 1,
+    baseline: draftBaseline,
+    payload: draftPayload,
+    onRestore: (restored) => {
+      if (typeof restored.titleMode === 'string') setTitleMode(restored.titleMode as FinancialReport['titleMode']);
+      if (typeof restored.customTitle === 'string') setCustomTitle(restored.customTitle);
+      if (typeof restored.dataAsOf === 'string') setDataAsOf(restored.dataAsOf);
+      if (typeof restored.tags === 'string') setTags(restored.tags);
+      if (typeof restored.summary === 'string') setSummary(restored.summary);
+      if (typeof restored.periodYear === 'number') setPeriodYear(restored.periodYear);
+      if (typeof restored.periodWeek === 'number') setPeriodWeek(restored.periodWeek);
+      if (typeof restored.periodMonth === 'number') setPeriodMonth(restored.periodMonth);
+      if (typeof restored.totalAmount === 'number') setTotalAmount(restored.totalAmount);
+      setPreviousTotalAmount(typeof restored.previousTotalAmount === 'number' ? restored.previousTotalAmount : undefined);
+      if (Array.isArray(restored.channels)) setChannels(restored.channels as unknown as Channel[]);
+      if (typeof restored.statMax === 'number') setStatMax(restored.statMax);
+      if (typeof restored.statMin === 'number') setStatMin(restored.statMin);
+      if (typeof restored.statAvg === 'number') setStatAvg(restored.statAvg);
+    },
+  });
 
   function requestClose() {
     if (saving) return;
@@ -142,6 +197,7 @@ export function ReportEditorModal({ report, onClose, onSave }: {
     setSaveError('');
     try {
       await onSave(edited, finalAudit, { syncHistory, baseRevision });
+      await draft.clear();
       setConfirmDiff(false);
       onClose();
     } catch (error) {
@@ -165,6 +221,14 @@ export function ReportEditorModal({ report, onClose, onSave }: {
         <Button disabled={saving} onClick={save}>预览修改</Button>
       </>}>
       <div className="space-y-4">
+        <DraftStatusBar
+          status={draft.status}
+          error={draft.error}
+          staleDraft={draft.staleDraft}
+          onSave={() => void draft.saveNow()}
+          onDiscard={() => void draft.discard()}
+          onRebase={() => draft.applyStaleDraft(draft.staleDraft?.payload as typeof draftPayload)}
+        />
         <div className="flex gap-1 flex-wrap">
           {TABS.map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)} className={`px-3 py-1.5 text-sm rounded-lg ${tab === t.id ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-slate-500 hover:bg-slate-50'}`}>{t.label}</button>
@@ -283,9 +347,13 @@ export function ReportEditorModal({ report, onClose, onSave }: {
           </div>
         </Modal>
       )}
-      {discardOpen && <Modal open title="放弃未保存的报告编辑？" onClose={() => setDiscardOpen(false)}
-        footer={<><Button variant="ghost" onClick={() => setDiscardOpen(false)}>继续编辑</Button><Button variant="danger" onClick={onClose}>放弃编辑</Button></>}>
-        <p className="text-sm text-slate-500">当前修改尚未保存。</p>
+      {discardOpen && <Modal open title="离开报告编辑？" onClose={() => setDiscardOpen(false)}
+        footer={<>
+          <Button variant="ghost" onClick={() => setDiscardOpen(false)}>继续编辑</Button>
+          <Button variant="danger" onClick={() => { void draft.discard().finally(onClose); }}>丢弃草稿并关闭</Button>
+          <Button onClick={onClose}>保留草稿并关闭</Button>
+        </>}>
+        <p className="text-sm text-slate-500">当前修改已作为本地草稿保护，不视为已提交。源数据变化后恢复时会先展示冲突。</p>
       </Modal>}
     </Modal>
   );

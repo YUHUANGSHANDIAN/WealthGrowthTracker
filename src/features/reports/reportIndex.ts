@@ -70,7 +70,7 @@ body{font-family:system-ui,-apple-system,'Segoe UI','PingFang SC','Microsoft YaH
 .report{border:1px solid #e2e8f0;border-radius:14px;padding:20px;margin-bottom:24px;}
 </style></head><body>
 <h1 style="font-size:22px">财务报告合集（${reports.length} 份）</h1>
-<p style="color:#64748b;font-size:13px">由「财富成长记」导出 · ${new Date().toLocaleString('zh-CN')}</p>
+<p style="color:#64748b;font-size:13px">由 WealthGrowthTracker 导出 · ${new Date().toLocaleString('zh-CN')}</p>
 ${sections.join('\n')}
 </body></html>`;
 }

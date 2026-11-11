@@ -3,6 +3,7 @@ import { Badge, Button, Card, EmptyState } from '../../components/ui/primitives'
 import { TextField, SelectField } from '../../components/ui/form';
 import { useAIConnectionStore, type AIConnection } from '../../store/aiConnectionStore';
 import { useAppStore } from '../../store/appStore';
+import { PageHeader } from '../../components/ui/workspace';
 import { isTauri } from '../../services/storage/fs';
 import {
   inferAI, listAIModels, VISION_PROVIDERS,
@@ -154,13 +155,17 @@ export function AIConnectionCenter() {
 
   return (
     <div className="space-y-5">
-      <div className="workspace-intro">
-        <div>
-          <h2>AI 连接中心</h2>
-          <p>AI 默认关闭，核心功能完全离线。启用后，每次业务请求仍会在工作区中逐次授权数据范围。</p>
-        </div>
-        {enabled ? <Badge tone="emerald">AI 已启用</Badge> : <Badge tone="slate">AI 未启用</Badge>}
-      </div>
+      <PageHeader
+        eyebrow="模型连接"
+        title="AI 连接中心"
+        description="AI 默认关闭，核心功能完全离线。启用后，每次业务请求仍会在工作区中逐次授权数据范围。"
+        context={<>
+          <Badge tone={enabled ? 'emerald' : 'slate'}>{enabled ? 'AI 已启用' : 'AI 未启用'}</Badge>
+          <span>{profiles.length} 个已保存连接</span>
+          <span>·</span>
+          <span>认证、文本、视觉与研究能力分别核验</span>
+        </>}
+      />
 
       <Card className="p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -244,6 +249,11 @@ export function AIConnectionCenter() {
                       <div className="mt-1 text-xs text-slate-500">
                         {connection.enabled ? '连接已启用' : '连接已停用'} · 健康状态 {connection.health} · 配置 rev {connection.configRevision}
                         {connection.lastError ? ` · ${connection.lastError}` : ''}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                        <Badge tone={connection.capabilities.text ? 'blue' : 'slate'}>文本 {connection.capabilities.text ? '声明可用' : '未声明'}</Badge>
+                        <Badge tone={connection.capabilities.vision ? 'purple' : 'slate'}>视觉 {connection.capabilities.vision ? '声明可用' : '未声明'}</Badge>
+                        <Badge tone={connection.capabilities.research ? 'emerald' : 'slate'}>研究 {connection.capabilities.research ? '配置可用' : '未验证'}</Badge>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">

@@ -18,6 +18,7 @@ export interface ChannelHandlers {
   onDeleteSub: (parentId: string, sub: SubChannel) => void;
   onEditAmount: (target: AmountTarget, current: number, label: string) => void;
   onTogglePin: (id: string) => void;
+  onToggleArchive: (channel: Channel) => void;
 }
 
 function ActionButton({
@@ -64,11 +65,13 @@ export function ChannelItem({
   channel,
   handlers,
   isPinned = false,
+  isHighlighted = false,
   classifications,
 }: {
   channel: Channel;
   handlers: ChannelHandlers;
   isPinned?: boolean;
+  isHighlighted?: boolean;
   classifications: AssetClassificationState;
 }) {
   const amount = channelAmount(channel);
@@ -76,7 +79,7 @@ export function ChannelItem({
   const hasChildren = children.length > 0;
 
   return (
-    <div className="border border-slate-200 rounded-xl bg-white overflow-hidden">
+    <div className={`border rounded-xl bg-white overflow-hidden ${isHighlighted ? 'ring-2 ring-emerald-500 ring-offset-2' : ''} ${channel.archived ? 'border-slate-300 opacity-80' : 'border-slate-200'}`}>
       {/* 父渠道行 */}
       <div
         className="flex items-center gap-2 px-3 py-3 cursor-pointer hover:bg-slate-50/70 transition-colors"
@@ -94,6 +97,7 @@ export function ChannelItem({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="font-medium text-slate-800 truncate">{channel.name}</span>
+            {channel.archived && <span className="text-[11px] text-slate-500 shrink-0">已归档，余额仍计入</span>}
             {hasChildren && (
               <span className="text-[11px] text-slate-500 shrink-0">{children.length} 个子渠道</span>
             )}
@@ -126,6 +130,9 @@ export function ChannelItem({
         </ActionButton>
         <ActionButton label={isPinned ? '取消置顶' : '置顶'} onClick={() => handlers.onTogglePin(channel.id)}>
           {isPinned ? '📌 已置顶' : '📍 置顶'}
+        </ActionButton>
+        <ActionButton label={channel.archived ? '恢复渠道' : '归档渠道'} onClick={() => handlers.onToggleArchive(channel)}>
+          {channel.archived ? '↩ 恢复' : '🗃 归档'}
         </ActionButton>
         <div className="flex-1" />
         <ActionButton label="删除渠道" onClick={() => handlers.onDeleteChannel(channel)} tone="red">
@@ -177,7 +184,7 @@ export function ChannelItem({
               </div>
             ))
           ) : (
-            <div className="px-4 py-3 text-sm text-slate-400">该渠道暂无子渠道，金额直接记录在渠道上。</div>
+            <div className="px-4 py-3 text-sm text-slate-400">该父渠道暂无子渠道，余额显示为父渠道直接金额（未细分）。</div>
           )}
         </div>
       )}

@@ -1,6 +1,7 @@
 /**
  * 文件系统抽象层：把「相对 Documents 目录的路径」映射到真实文件系统。
- * - Tauri 环境：通过自定义 Rust 命令（invoke）读写，根目录为 `<Documents>/财富成长记`。
+ * - Tauri 环境：通过自定义 Rust 命令（invoke）读写，根目录为
+ *   `<Documents>/WealthGrowthTracker`，旧默认目录仅用于兼容。
  * - 测试环境：注入内存/临时目录实现。
  * 桌面存储逻辑因此可在纯 Node/Vitest 中单测，而 Web 版不加载任何 Tauri 代码。
  */
@@ -62,6 +63,13 @@ export async function getDefaultDataDir(): Promise<string | null> {
   if (!isTauri()) return null;
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<string>('default_data_dir');
+}
+
+/** 当前默认目录是否为升级前留下的兼容目录（自定义数据根始终为 false）。 */
+export async function dataRootIsLegacy(): Promise<boolean> {
+  if (!isTauri()) return false;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<boolean>('data_root_is_legacy');
 }
 
 /** 数据根目录配置（与 Rust storage-config.json 对应）。 */

@@ -12,6 +12,7 @@ import {
   buildAssetTrend,
   buildChangeExplanation,
   buildChannelComposition,
+  compareHistoryObservations,
   downsamplePreservingExtremes,
   type AssetTrendPoint,
   type ClassificationLabelMode,
@@ -19,6 +20,8 @@ import {
   type TrendGranularity,
 } from '../../domain/analysis/assetTrends';
 import { projectMonthlyPlanningClassification } from '../../domain/assets/classification';
+import { SavedViewBar } from '../../components/ui/workspace';
+import { CHANNEL_TERMS } from '../../constants/channelTerms';
 
 const RANGES = [
   { value: '30', label: '30天' },
@@ -77,6 +80,8 @@ export function AssetTrendsPanel() {
   const navigate = useNavigationStore((state) => state.navigate);
   const routeStart = useNavigationStore((state) => state.startDate);
   const routeEnd = useNavigationStore((state) => state.endDate);
+  const routeCompareFrom = useNavigationStore((state) => state.trendCompareFrom ?? '');
+  const routeCompareTo = useNavigationStore((state) => state.trendCompareTo ?? '');
   const amountsHidden = useWorkspaceStore((state) => state.amountsHidden);
   const [preset, setPreset] = useState<RangePreset>('90');
   const [customStart, setCustomStart] = useState('');
@@ -170,12 +175,30 @@ export function AssetTrendsPanel() {
   ];
   const selectedRaw = selectedDate ? history.find((point) => point.date === selectedDate) : undefined;
   const selectedDelta = selectedDate ? pointDelta(trendPoints, selectedDate) : null;
-  const markers = classifications.events
-    .map((event) => ({
+  const observationDates = useMemo(
+    () => [...history]
+      .filter((point) => point.date <= today && (!startDate || point.date >= startDate) && point.date <= endDate)
+      .map((point) => point.date)
+      .sort((a, b) => a.localeCompare(b)),
+    [endDate, history, startDate, today],
+  );
+  const observationComparison = useMemo(() => {
+    if (!routeCompareFrom || !routeCompareTo) return null;
+    try {
+      return { value: compareHistoryObservations(history, routeCompareFrom, routeCompareTo), error: null };
+    } catch (cause) {
+      return { value: null, error: cause instanceof Error ? cause.message : '无法比较观察点' };
+    }
+  }, [history, routeCompareFrom, routeCompareTo]);
+  const markers = [
+    ...classifications.events.map((event) => ({
       date: event.classifiedAt.slice(0, 10),
       label: event.kind === 'holding-reclassify' ? '分类调整' : event.kind === 'channel-rename' ? '渠道更名' : '分类事件',
       color: event.kind === 'channel-rename' ? '#7c3aed' : '#d97706',
-    }))
+    })),
+    ...(routeCompareFrom ? [{ date: routeCompareFrom, label: '比较起点', color: '#157f52' }] : []),
+    ...(routeCompareTo ? [{ date: routeCompareTo, label: '比较终点', color: '#157f52' }] : []),
+  ]
     .filter((marker) => (!startDate || marker.date >= startDate) && marker.date <= endDate);
   const parents = channels.filter((channel) => channel.children?.length);
 
@@ -231,6 +254,35 @@ export function AssetTrendsPanel() {
         {invalidRange && <p role="alert" className="mt-3 text-sm text-red-600">起始日期不能晚于结束日期。</p>}
       </Card>
 
+      <SavedViewBar
+        page="analysis"
+        tab="analysis"
+        filters={{
+          view,
+          level,
+          compositionMode,
+          topN,
+          labelMode,
+          startDate: startDate ?? '',
+          endDate,
+          compareFrom: routeCompareFrom,
+          compareTo: routeCompareTo,
+        }}
+        onApply={(filters) => {
+          if (filters.view === 'total' || filters.view === 'composition' || filters.view === 'changes') setView(filters.view);
+          if (filters.level === 'parent' || filters.level === 'leaf') setLevel(filters.level);
+          if (filters.compositionMode === 'absolute' || filters.compositionMode === 'percent') setCompositionMode(filters.compositionMode);
+          if (typeof filters.topN === 'number') setTopN(filters.topN);
+          if (filters.labelMode === 'as-recorded' || filters.labelMode === 'current') setLabelMode(filters.labelMode);
+        }}
+        routeForFilters={(filters) => ({
+          startDate: typeof filters.startDate === 'string' && filters.startDate ? filters.startDate : undefined,
+          endDate: typeof filters.endDate === 'string' && filters.endDate ? filters.endDate : undefined,
+          trendCompareFrom: typeof filters.compareFrom === 'string' && filters.compareFrom ? filters.compareFrom : undefined,
+          trendCompareTo: typeof filters.compareTo === 'string' && filters.compareTo ? filters.compareTo : undefined,
+        })}
+      />
+
       <div className="flex flex-wrap gap-1" role="tablist" aria-label="资产趋势视图">
         {([
           ['total', '总资产轨迹'],
@@ -242,6 +294,87 @@ export function AssetTrendsPanel() {
           </button>
         ))}
       </div>
+
+      <Card className="p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="font-semibold text-slate-800">两个真实观察点比较</h3>
+            <p className="mt-1 text-xs text-slate-500">只比较实际存在的历史快照；不补点、不把余额变化解释为投资收益。</p>
+          </div>
+          {(routeCompareFrom || routeCompareTo) && (
+            <Button size="sm" variant="ghost" onClick={() => navigate({ tab: 'analysis', startDate: routeStart, endDate: routeEnd })}>清除比较</Button>
+          )}
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <label className="trend-field">较早观察点
+            <select
+              value={routeCompareFrom}
+              onChange={(event) => navigate({
+                tab: 'analysis',
+                startDate: routeStart,
+                endDate: routeEnd,
+                trendCompareFrom: event.target.value || undefined,
+                trendCompareTo: routeCompareTo || undefined,
+              })}
+            >
+              <option value="">选择真实日期</option>
+              {observationDates.map((date) => <option key={date} value={date}>{date}</option>)}
+            </select>
+          </label>
+          <label className="trend-field">较晚观察点
+            <select
+              value={routeCompareTo}
+              onChange={(event) => navigate({
+                tab: 'analysis',
+                startDate: routeStart,
+                endDate: routeEnd,
+                trendCompareFrom: routeCompareFrom || undefined,
+                trendCompareTo: event.target.value || undefined,
+              })}
+            >
+              <option value="">选择真实日期</option>
+              {observationDates.map((date) => <option key={date} value={date}>{date}</option>)}
+            </select>
+          </label>
+        </div>
+        {observationComparison?.error && <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">{observationComparison.error}</p>}
+        {observationComparison?.value && (
+          <div className="mt-3 space-y-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <Kpi label="较早观察" value={money(observationComparison.value.fromValue)} detail={observationComparison.value.fromDate} />
+              <Kpi label="较晚观察" value={money(observationComparison.value.toValue)} detail={observationComparison.value.toDate} />
+              <Kpi label="资产变化" value={money(observationComparison.value.change)} detail="后减前" tone={observationComparison.value.change >= 0 ? 'up' : 'down'} />
+              <Kpi label="变化率" value={percent(observationComparison.value.changeRate)} detail="不是投资回报率" tone={(observationComparison.value.changeRate ?? 0) >= 0 ? 'up' : 'down'} />
+            </div>
+            {observationComparison.value.warnings.length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                {observationComparison.value.warnings.map((warning) => <p key={warning}>⚠ {warning}</p>)}
+              </div>
+            )}
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[620px] text-left text-sm">
+                <caption className="sr-only">两个真实历史观察点的渠道差异；缺少任一侧快照的渠道标为不可比较。</caption>
+                <thead className="bg-slate-50 text-xs text-slate-500"><tr>
+                  <th scope="col" className="px-3 py-2 font-medium">渠道</th>
+                  <th scope="col" className="px-3 py-2 text-right font-medium">{observationComparison.value.fromDate}</th>
+                  <th scope="col" className="px-3 py-2 text-right font-medium">{observationComparison.value.toDate}</th>
+                  <th scope="col" className="px-3 py-2 text-right font-medium">差异</th>
+                </tr></thead>
+                <tbody className="divide-y divide-slate-100">
+                  {observationComparison.value.channels.map((channel) => (
+                    <tr key={channel.id}>
+                      <th scope="row" className="px-3 py-2 text-left font-normal text-slate-700">{channel.name}</th>
+                      <td className="px-3 py-2 text-right tabular text-slate-600">{channel.from === null ? '无快照' : money(channel.from)}</td>
+                      <td className="px-3 py-2 text-right tabular text-slate-600">{channel.to === null ? '无快照' : money(channel.to)}</td>
+                      <td className="px-3 py-2 text-right tabular text-slate-700">{channel.comparable ? money(channel.change) : '不可比较'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Card>
 
       {view === 'total' && (
         <>
@@ -290,7 +423,7 @@ export function AssetTrendsPanel() {
             <label className="trend-field">层级
               <select value={level} onChange={(event) => setLevel(event.target.value as 'parent' | 'leaf')}>
                 <option value="parent">父渠道</option>
-                <option value="leaf">叶子渠道</option>
+                <option value="leaf">{CHANNEL_TERMS.detailLevel}</option>
               </select>
             </label>
             {level === 'leaf' && (
@@ -353,7 +486,7 @@ export function AssetTrendsPanel() {
               />
             </>
           ) : <EmptyState icon="🏦" title="渠道快照不足" description="所选区间没有可用的渠道构成记录。" />}
-          <p className="mt-3 text-xs leading-relaxed text-slate-500">缺快照不补零；父级与子级分开显示。无历史持仓证据的 A/C 分类搬移不会回填历史金额。</p>
+          <p className="mt-3 text-xs leading-relaxed text-slate-500">缺快照不补零；{CHANNEL_TERMS.parentRollup}与{CHANNEL_TERMS.subchannel}明细分开显示，{CHANNEL_TERMS.noDoubleCount}。无历史持仓证据的 A/C 分类搬移不会回填历史金额。</p>
         </Card>
       )}
 

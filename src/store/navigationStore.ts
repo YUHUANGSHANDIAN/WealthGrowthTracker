@@ -34,16 +34,31 @@ export interface Route {
   endDate?: string;
   historyDate?: string;
   healthFilter?: string;
+  healthIssueId?: string;
+  holdingId?: string;
+  reportRevisionId?: string;
+  reportRevisionFrom?: string;
+  reportRevisionTo?: string;
+  scenarioId?: string;
+  trendCompareFrom?: string;
+  trendCompareTo?: string;
+  assetView?: 'balances' | 'holdings' | 'risk';
+  reportMode?: 'read' | 'revisions' | 'edit';
+  viewId?: string;
   settingsSection?: SettingsSectionId;
   financeTaskKind?: FinanceTaskKind;
   financeTaskId?: string;
+  financeEvidenceId?: string;
 }
 
 const EMPTY: Route = {
   tab: 'overview', reportId: undefined, channelId: undefined, lotteryProjectId: undefined,
   goalId: undefined, startDate: undefined, endDate: undefined, historyDate: undefined,
-  healthFilter: undefined, settingsSection: undefined, financeTaskKind: undefined,
-  financeTaskId: undefined,
+    healthFilter: undefined, healthIssueId: undefined, holdingId: undefined,
+    reportRevisionId: undefined, reportRevisionFrom: undefined, reportRevisionTo: undefined,
+    scenarioId: undefined, trendCompareFrom: undefined, trendCompareTo: undefined, assetView: undefined,
+    reportMode: undefined, viewId: undefined, settingsSection: undefined, financeTaskKind: undefined,
+  financeTaskId: undefined, financeEvidenceId: undefined,
 };
 
 const isTab = (value: unknown): value is TabId => TAB_IDS.includes(value as TabId);
@@ -111,6 +126,20 @@ export function parseHash(hash = typeof window === 'undefined' ? '' : window.loc
   route.historyDate = date(params.get('historyDate'));
   if (route.tab === 'data') route.healthFilter = params.get('healthFilter') ?? undefined;
   if (route.tab === 'monthly') route.financeTaskId = params.get('task') ?? undefined;
+  if (route.tab === 'monthly') route.financeEvidenceId = params.get('evidence') ?? undefined;
+  route.healthIssueId = params.get('issue') ?? undefined;
+  route.holdingId = params.get('holding') ?? undefined;
+  route.reportRevisionId = params.get('revision') ?? undefined;
+  route.reportRevisionFrom = params.get('revisionFrom') ?? undefined;
+  route.reportRevisionTo = params.get('revisionTo') ?? undefined;
+  route.scenarioId = params.get('scenario') ?? undefined;
+  route.trendCompareFrom = date(params.get('compareFrom'));
+  route.trendCompareTo = date(params.get('compareTo'));
+  route.viewId = params.get('view') ?? undefined;
+  const assetView = params.get('assetView');
+  if (assetView === 'balances' || assetView === 'holdings' || assetView === 'risk') route.assetView = assetView;
+  const reportMode = params.get('reportMode');
+  if (reportMode === 'read' || reportMode === 'revisions' || reportMode === 'edit') route.reportMode = reportMode;
   const settingsSection = params.get('section');
   if (route.tab === 'settings' && isSettingsSection(settingsSection)) route.settingsSection = settingsSection;
   return route;
@@ -143,7 +172,17 @@ export function buildHash(route: Route): string {
   for (const key of ['startDate', 'endDate', 'historyDate', 'healthFilter'] as const) {
     if (route[key]) query.set(key, route[key]!);
   }
+  for (const key of ['healthIssueId', 'holdingId', 'reportRevisionId', 'scenarioId', 'viewId'] as const) {
+    if (route[key]) query.set(key === 'healthIssueId' ? 'issue' : key === 'holdingId' ? 'holding' : key === 'reportRevisionId' ? 'revision' : key === 'scenarioId' ? 'scenario' : 'view', route[key]!);
+  }
+  if (route.reportRevisionFrom) query.set('revisionFrom', route.reportRevisionFrom);
+  if (route.reportRevisionTo) query.set('revisionTo', route.reportRevisionTo);
+  if (route.trendCompareFrom) query.set('compareFrom', route.trendCompareFrom);
+  if (route.trendCompareTo) query.set('compareTo', route.trendCompareTo);
+  if (route.assetView) query.set('assetView', route.assetView);
+  if (route.reportMode) query.set('reportMode', route.reportMode);
   if (route.tab === 'monthly' && route.financeTaskId) query.set('task', route.financeTaskId);
+  if (route.tab === 'monthly' && route.financeEvidenceId) query.set('evidence', route.financeEvidenceId);
   if (route.tab === 'settings' && isSettingsSection(route.settingsSection)) query.set('section', route.settingsSection);
   return `#/${parts.join('/')}${query.size ? `?${query}` : ''}`;
 }

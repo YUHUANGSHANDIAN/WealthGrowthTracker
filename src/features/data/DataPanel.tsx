@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { beginLedgerMaintenance, useAppStore } from '../../store/appStore';
 import { Card, Button, Badge } from '../../components/ui/primitives';
 import { Modal, ConfirmDialog } from '../../components/ui/Modal';
-import { storageService, getDocumentsDir, getDefaultDataDir, openPathInSystem } from '../../services/storage';
+import { storageService, getDocumentsDir, getDefaultDataDir, dataRootIsLegacy, openPathInSystem } from '../../services/storage';
 import {
   readStorageConfig, writeStorageConfig, migrateDataRoot, writeFullRestoreRoot, saveFullBackupArchive,
   readFullBackupArchive,
@@ -19,7 +19,9 @@ import {
 } from '../../services/monthlyPlanning/attachmentArchive';
 import { downloadCSV } from '../../components/charts/export';
 import { buildChannelsCsv, buildHistoryCsv } from '../../utils/dataCsv';
-import { checkDataHealth, checkMonthlyHealth, checkReportHealth, checkGoalHealth, checkAchievementHealth, checkLotteryHealth, checkClassificationHealth, domainLabel, type DataIssue, type HealthDomain } from '../../utils/dataHealth';
+import { domainLabel, type DataIssue, type HealthDomain } from '../../utils/dataHealth';
+import { scanAllHealth } from '../../utils/healthScan';
+import { taskKindOf } from '../../domain/portfolio/session';
 import { previewMerge } from '../../utils/mergeData';
 import { platformCapabilities } from '../../utils/platform';
 import { useNavigationStore } from '../../store/navigationStore';
@@ -37,13 +39,17 @@ import {
 import { restoreAIConnectionMetadata } from '../../store/aiConnectionStore';
 import { bytesToBase64, verifyAttachments } from '../../services/monthlyPlanning/attachments';
 import { ClassificationMigrationCard } from './ClassificationMigrationCard';
+import { ChangePreviewPanel, PageHeader } from '../../components/ui/workspace';
+import { HealthAssistantDrawer } from './HealthAssistantDrawer';
+import { prepareHealthFix, type HealthFixProposal } from './issueFix';
+import { useHealthAssistantStore } from '../../store/healthAssistantStore';
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
 export function DataPanel() {
-  const { exportData, importData, applyDataFixes, pushToast, hydrate, runMonthlyBackfill } = useAppStore();
+  const { exportData, importData, commitHealthFix, pushToast, hydrate, runMonthlyBackfill } = useAppStore();
   const channels = useAppStore((s) => s.channels);
   const history = useAppStore((s) => s.history);
   const reports = useAppStore((s) => s.reports);
@@ -84,25 +90,29 @@ export function DataPanel() {
   const [backfillPreviewOpen, setBackfillPreviewOpen] = useState(false);
   const [backfillBaseRevision, setBackfillBaseRevision] = useState<number | null>(null);
   const [dataRootMode, setDataRootMode] = useState<'default' | 'custom'>('default');
+  const [legacyDefaultRoot, setLegacyDefaultRoot] = useState(false);
   const [storageModalOpen, setStorageModalOpen] = useState(false);
   const [attachmentStatus, setAttachmentStatus] = useState<Array<{ key: string; ok: boolean; reason?: string }>>([]);
+  const [healthFix, setHealthFix] = useState<HealthFixProposal | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantIssue, setAssistantIssue] = useState<DataIssue | null>(null);
 
   const coverageByYear = useMemo(() => monthlyCoverageByYear(reports, history), [reports, history]);
   const backfillPlan = useMemo(() => planBackfill(reports, history), [reports, history]);
   const maintenanceActions = useMemo(() => buildMaintenanceActions({ reports, history, channels, hasCustomStorage: dataRootMode === 'custom' }), [reports, history, channels, dataRootMode]);
 
   const health = useMemo(() => {
-    const base = checkDataHealth(channels, history);
-    const report = checkReportHealth(reports);
-    const goal = checkGoalHealth(goals, primaryGoalId);
-    const achievement = checkAchievementHealth(levelAchievements);
-    const lotteryHealth = checkLotteryHealth(lottery);
-    const monthly = checkMonthlyHealth(monthlyPlanning, { attachmentStatus });
-    const classification = checkClassificationHealth(channels, monthlyPlanning, assetClassification);
-    const issues = [...base.issues, ...report, ...goal, ...achievement, ...lotteryHealth, ...monthly, ...classification];
-    return { ...base, issues, ok: issues.length === 0 };
+    const issues = scanAllHealth({
+      channels, history, reports, goals, primaryGoalId, levelAchievements, lottery,
+      monthlyPlanning, assetClassification, attachmentStatus,
+    });
+    return { issues, ok: issues.length === 0 };
   }, [channels, history, reports, goals, primaryGoalId, levelAchievements, lottery, monthlyPlanning, assetClassification, attachmentStatus]);
   const sortedHistory = useMemo(() => [...history].sort((a, b) => (a.date < b.date ? -1 : 1)), [history]);
+
+  useEffect(() => {
+    void useHealthAssistantStore.getState().load();
+  }, []);
 
   useEffect(() => {
     if (!isDesktop) return;
@@ -113,6 +123,8 @@ export function DataPanel() {
         if (active && dir) setDataPath(dir);
         const cfg = await readStorageConfig();
         if (active && cfg) setDataRootMode(cfg.dataRootMode);
+        const legacy = await dataRootIsLegacy();
+        if (active) setLegacyDefaultRoot(legacy);
       } catch {
         if (active) pushToast('无法读取存储位置，请检查配置与权限', 'error');
       }
@@ -156,10 +168,12 @@ export function DataPanel() {
       release = beginLedgerMaintenance('正在生成完整备份');
       await storageService.flush();
       const state = useAppStore.getState();
+      await useHealthAssistantStore.getState().load();
       const result = await buildFullBackup({
         revision: state.dataRevision,
         monthlyPlanning: state.monthlyPlanning,
         aiMetadata: localStorage.getItem('wealth_ai_connections_v1'),
+        includeHealthAssistantConversations: useHealthAssistantStore.getState().state.includeInFullBackup,
       });
       if (isDesktop) {
         const relativePath = await saveFullBackupArchive(result.filename, bytesToBase64(result.archive), result.sha256);
@@ -252,6 +266,7 @@ export function DataPanel() {
       if (fullBackupPreview.parsed.aiMetadataText) {
         restoreAIConnectionMetadata(fullBackupPreview.parsed.aiMetadataText);
       }
+      await useHealthAssistantStore.getState().load(true);
       setDataPath(fullBackupPreview.restorePath);
       setDataRootMode('custom');
       setFullBackupPreview(null);
@@ -406,17 +421,26 @@ export function DataPanel() {
     }
   }
 
-  async function doFix(fix: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history') {
-    const labels = {
-      'sanitize-amounts': '只处理非法金额',
-      'remove-orphans': '只移除孤立子渠道',
-      'dedupe-history': '同日期只保留最新一条',
-    } as const;
-    if (!window.confirm(`确认执行“${labels[fix]}”？应用会先创建备份，并且只应用这一项修复。`)) return;
+  function openFixPreview(issue: DataIssue) {
     try {
-      const res = await applyDataFixes(useAppStore.getState().dataRevision, fix);
-      pushToast(res.fixed > 0 ? `已修复 ${res.fixed} 类问题` : '无需修复', 'success');
-    } catch (error) { pushToast(errorMessage(error, '修复失败，请检查保存状态'), 'error'); }
+      setHealthFix(prepareHealthFix({
+        channels, history, reports, goals, primaryGoalId, levelAchievements, lottery,
+        monthlyPlanning, assetClassification, attachmentStatus,
+      }, useAppStore.getState().dataRevision, issue.id, issue.fingerprint));
+    } catch (error) {
+      pushToast(errorMessage(error, '无法准备该问题的修复预览'), 'error');
+    }
+  }
+
+  async function confirmFix() {
+    if (!healthFix) return;
+    try {
+      const result = await commitHealthFix(healthFix);
+      setHealthFix(null);
+      pushToast(result.fixed ? '已应用并重新扫描该单项修复' : '无需修复', 'success');
+    } catch (error) {
+      pushToast(errorMessage(error, '修复失败，请检查保存状态'), 'error');
+    }
   }
 
   function exportCsv(kind: 'channels' | 'history') {
@@ -494,6 +518,13 @@ export function DataPanel() {
 
   return (
     <div className="space-y-4">
+      <PageHeader
+        eyebrow="设置 · 数据维护"
+        title="数据健康、备份与存储"
+        description="核对问题、导入导出、完整备份和存储位置在同一工作区管理；危险操作与实际状态分开显示。"
+        context={<><span>{channels.length} 个父渠道</span><span>·</span><span>{history.length} 条历史</span><span>·</span><span>{monthlyPlanning.sessions.length} 个理财任务</span></>}
+        primaryAction={<Button onClick={() => void handleFullBackup()}>创建完整备份</Button>}
+      />
       {/* 数据概览 */}
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-3">数据概览</h2>
@@ -512,7 +543,56 @@ export function DataPanel() {
 
       {/* 数据健康与维护中心（v1.6：动态 Maintenance Action + 问题详情） */}
       <MaintenanceActions actions={maintenanceActions} />
-      <DataHealthCenter issues={health.issues} onFix={doFix} busy={busy} />
+      <DataHealthCenter
+        issues={health.issues}
+        onPreviewFix={openFixPreview}
+        onAskAI={(issue) => { setAssistantIssue(issue); setAssistantOpen(true); }}
+        onFreeQuestion={() => { setAssistantIssue(null); setAssistantOpen(true); }}
+        busy={busy}
+      />
+      <HealthAssistantDrawer
+        open={assistantOpen}
+        issue={assistantIssue}
+        onClose={() => setAssistantOpen(false)}
+        onPreviewFix={(issue) => { setAssistantOpen(false); openFixPreview(issue); }}
+      />
+      <Modal
+        open={healthFix !== null}
+        onClose={() => setHealthFix(null)}
+        title="确认单项健康修复"
+        size="md"
+        footer={<>
+          <Button variant="ghost" onClick={() => setHealthFix(null)}>取消</Button>
+          <Button onClick={() => void confirmFix()}>确认并重新扫描</Button>
+        </>}
+      >
+        {healthFix && (
+          <div className="space-y-3 text-sm">
+            <ChangePreviewPanel
+              baseRevision={healthFix.baseRevision}
+              impacts={[{
+                kind: 'financial',
+                label: '将修改财务数据',
+                description: healthFix.summary,
+                affectedIds: [...healthFix.changedChannels, ...healthFix.changedHistoryDates],
+              }]}
+            />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 p-3">
+                <div className="text-xs text-slate-500">变更前</div>
+                <div className="mt-1 font-medium">{healthFix.before.channels.length} 个父渠道 · {healthFix.before.history.length} 条历史</div>
+              </div>
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                <div className="text-xs text-emerald-700">变更后</div>
+                <div className="mt-1 font-medium">{healthFix.after.channels.length} 个父渠道 · {healthFix.after.history.length} 条历史</div>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600">精确影响：{healthFix.changedChannels.length} 个渠道项、{healthFix.changedHistoryDates.length} 个历史日期。不会执行其它同类问题或全局规范化。</p>
+            {healthFix.warnings.map((warning) => <p key={warning} className="rounded bg-amber-50 p-2 text-xs text-amber-800">{warning}</p>)}
+            <p className="text-xs text-slate-500">确认前会再次重扫问题指纹。桌面端先创建恢复点；浏览器端使用 IndexedDB 单事务中的上一快照。</p>
+          </div>
+        )}
+      </Modal>
       <ClassificationMigrationCard />
 
       {/* 活动日志 */}
@@ -586,7 +666,8 @@ export function DataPanel() {
         <Card className="p-4">
           <h2 className="font-semibold text-slate-800 mb-2">📁 数据存放位置</h2>
           <p className="text-sm text-slate-500 mb-1 break-all">当前：<span className="font-mono text-xs text-slate-700">{dataPath || '—'}</span></p>
-          <p className="text-xs text-slate-400 mb-3">模式：{dataRootMode === 'custom' ? '自定义目录' : '默认目录'} · Storage Backend：{adapterName}</p>
+          <p className="text-xs text-slate-400 mb-3">模式：{dataRootMode === 'custom' ? '自定义目录' : legacyDefaultRoot ? '默认目录（兼容旧版）' : '默认目录'} · Storage Backend：{adapterName}</p>
+          {legacyDefaultRoot && <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">检测到升级前的默认数据目录。应用会继续原地读取；只有你主动更改位置时才会迁移。</p>}
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={() => setStorageModalOpen(true)}>📁 更改位置</Button>
             {dataRootMode === 'custom' && (
@@ -870,7 +951,7 @@ function StorageLocationModal({ open, currentRoot, onClose, onMigrate }: {
           <div className="text-xs text-slate-400 mb-1">当前数据位置</div>
           <div className="text-sm font-mono text-slate-700 break-all">{currentRoot || '—'}</div>
         </div>
-        <TextField label="新数据目录（绝对路径）" value={target} onChange={(e) => setTarget(e.target.value)} error={error} placeholder="例如：D:\\WealthData" autoFocus />
+        <TextField label="新数据目录（绝对路径）" value={target} onChange={(e) => setTarget(e.target.value)} error={error} placeholder="例如：E:\\FinancialData" autoFocus />
         <p className="text-xs text-slate-400">
           迁移会复制整个数据目录树并读回校验。旧目录保留，确认新位置可用后请手动清理。目标目录应为空或尚不存在，且父目录已存在。
         </p>
@@ -956,18 +1037,27 @@ function issueNavigateTarget(i: DataIssue): { tab: import('../../store/navigatio
 
 function DataHealthCenter({
   issues,
-  onFix,
+  onPreviewFix,
+  onAskAI,
+  onFreeQuestion,
   busy,
 }: {
   issues: DataIssue[];
-  onFix: (fix: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history') => void;
+  onPreviewFix: (issue: DataIssue) => void;
+  onAskAI: (issue: DataIssue) => void;
+  onFreeQuestion: () => void;
   busy: boolean;
 }) {
   const navigate = useNavigationStore((s) => s.navigate);
+  const routeIssueId = useNavigationStore((s) => s.healthIssueId);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [ignored, setIgnored] = useState<Set<string>>(new Set());
+  const reviews = useAppStore((s) => s.healthReviews.records);
+  const ledgerId = useAppStore((s) => s.ledgerIdentity.ledgerId);
 
-  const visible = issues.filter((i) => !ignored.has(i.id));
+  const visible = issues.filter((issue) => {
+    const review = reviews.find((item) => item.ledgerId === ledgerId && item.issueId === issue.id);
+    return !(review?.status === 'resolved' && review.fingerprint === issue.fingerprint);
+  });
   const grouped = useMemo(() => {
     const m = new Map<HealthDomain, DataIssue[]>();
     for (const i of visible) {
@@ -977,6 +1067,14 @@ function DataHealthCenter({
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [visible]);
+  useEffect(() => {
+    if (!routeIssueId) return;
+    setExpanded(routeIssueId);
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`health-issue-${routeIssueId.replace(/[^0-9A-Za-z_-]/g, '_')}`)?.scrollIntoView({ block: 'center' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [routeIssueId]);
 
   if (visible.length === 0) {
     return (
@@ -986,6 +1084,7 @@ function DataHealthCenter({
           <Badge tone="emerald">正常</Badge>
         </div>
         <p className="text-sm text-slate-500">未发现数据问题。</p>
+        <Button className="mt-3" size="sm" variant="outline" onClick={onFreeQuestion}>我有其它数据健康问题，问 AI</Button>
       </Card>
     );
   }
@@ -995,9 +1094,17 @@ function DataHealthCenter({
     <Card className="p-4">
       <div className="flex items-center justify-between mb-2">
         <h2 className="font-semibold text-slate-800">🩺 数据健康中心</h2>
-        <Badge tone={errorCount > 0 ? 'red' : 'amber'}>{visible.length} 个问题{errorCount > 0 ? `（${errorCount} 错误）` : ''}</Badge>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={onFreeQuestion}>问 AI</Button>
+          <Badge tone={errorCount > 0 ? 'red' : 'amber'}>{visible.length} 个问题{errorCount > 0 ? `（${errorCount} 错误）` : ''}</Badge>
+        </div>
       </div>
 
+      {routeIssueId && !visible.some((issue) => issue.id === routeIssueId) && (
+        <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
+          指定的问题已解决、已移除或来自另一份数据。当前显示最新健康扫描结果。
+        </div>
+      )}
       <div className="space-y-3">
         {grouped.map(([domain, list]) => (
           <div key={domain} className="border border-slate-100 rounded-lg overflow-hidden">
@@ -1007,18 +1114,29 @@ function DataHealthCenter({
             </div>
             <div className="divide-y divide-slate-50">
               {list.map((i) => (
-                <div key={i.id} className="px-3 py-2">
+                <div
+                  id={`health-issue-${i.id.replace(/[^0-9A-Za-z_-]/g, '_')}`}
+                  key={i.id}
+                  className={`px-3 py-2 ${routeIssueId === i.id ? 'bg-emerald-50/60' : ''}`}
+                >
                   <div className="flex items-start gap-2">
                     <button className="flex-1 text-left min-w-0" onClick={() => setExpanded(expanded === i.id ? null : i.id)} aria-expanded={expanded === i.id}>
                       <div className="flex items-center gap-2">
                         <span className={i.severity === 'error' ? 'text-red-500' : 'text-amber-500'} aria-hidden>{i.severity === 'error' ? '✖' : '⚠'}</span>
                         <span className="text-sm text-slate-700 font-medium">{i.title}</span>
+                        {(() => {
+                          const review = reviews.find((item) => item.ledgerId === ledgerId && item.issueId === i.id && item.fingerprint === i.fingerprint);
+                          return review ? (
+                            <Badge tone={review.status === 'resolved' ? 'emerald' : review.status === 'deferred' ? 'amber' : 'blue'}>
+                              {review.status === 'resolved' ? '已解决' : review.status === 'deferred' ? '暂缓' : '已阅未解决'}
+                            </Badge>
+                          ) : null;
+                        })()}
                       </div>
                     </button>
                     {issueNavigateTarget(i) && (
                       <button className="text-xs text-slate-400 hover:text-emerald-600" onClick={() => { const t = issueNavigateTarget(i)!; navigate({ tab: t.tab, ...(t.extra ?? {}) }); }}>定位 ›</button>
                     )}
-                    <button className="text-xs text-slate-300 hover:text-slate-500" onClick={() => setIgnored((s) => new Set(s).add(i.id))}>忽略</button>
                   </div>
                   {expanded === i.id && (
                     <div className="mt-1 pl-5 text-xs text-slate-500 space-y-1">
@@ -1028,14 +1146,30 @@ function DataHealthCenter({
                         <div key={strategy.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
                           <span>{strategy.label}：{strategy.description}</span>
                           {i.fix && (
-                            <Button size="sm" variant="outline" disabled={busy} onClick={() => onFix(i.fix!)}>
-                              仅修复此项
+                            <Button size="sm" variant="outline" disabled={busy} onClick={() => onPreviewFix(i)}>
+                              预览此问题修复
                             </Button>
                           )}
                         </div>
                       ))}
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <Button size="sm" variant="outline" onClick={() => onAskAI(i)}>问 AI</Button>
+                        {issueNavigateTarget(i) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              const target = issueNavigateTarget(i)!;
+                              navigate({ tab: target.tab, ...(target.extra ?? {}) });
+                            }}
+                          >
+                            查看证据并手动处理
+                          </Button>
+                        )}
+                      </div>
                       {i.possiblyDestructive && <p className="text-red-500">此操作可能改变数据，修复前自动备份。</p>}
                       {!i.fixable && <p className="text-slate-500">此项没有通用自动修复，请先定位来源并人工核对。</p>}
+                      <HealthReviewActions issue={i} />
                     </div>
                   )}
                 </div>
@@ -1045,6 +1179,177 @@ function DataHealthCenter({
         ))}
       </div>
     </Card>
+  );
+}
+
+function HealthReviewActions({ issue }: { issue: DataIssue }) {
+  const reviews = useAppStore((state) => state.healthReviews.records);
+  const planning = useAppStore((state) => state.monthlyPlanning);
+  const saveReview = useAppStore((state) => state.saveHealthReview);
+  const dataRevision = useAppStore((state) => state.dataRevision);
+  const ledgerId = useAppStore((state) => state.ledgerIdentity.ledgerId);
+  const navigate = useNavigationStore((state) => state.navigate);
+  const current = reviews.find((item) => item.ledgerId === ledgerId && item.issueId === issue.id);
+  const stale = current && current.fingerprint !== issue.fingerprint;
+  const [open, setOpen] = useState(false);
+  const [status, setStatus] = useState<'acknowledged' | 'deferred' | 'resolved'>(
+    current?.status === 'resolved' ? 'resolved' : current?.status ?? 'acknowledged',
+  );
+  const [reason, setReason] = useState(stale ? '' : current?.reason ?? '');
+  const firstResolution = issue.allowedResolutions[0] ?? 'evidence-accepted';
+  const [resolution, setResolution] = useState<'distinct-identity' | 'evidence-accepted' | 'data-corrected' | 'not-applicable'>(
+    current?.resolution && issue.allowedResolutions.includes(current.resolution)
+      ? current.resolution
+      : firstResolution,
+  );
+  const [reviewAfter, setReviewAfter] = useState(current?.reviewAfter ?? '');
+  const [evidenceReviewed, setEvidenceReviewed] = useState(false);
+  const [error, setError] = useState('');
+
+  async function save() {
+    if (!reason.trim()) { setError('请填写处理原因，不能只点“已阅”'); return; }
+    if (status === 'resolved' && (issue.evidenceRefs.length > 0 || (issue.evidence?.length ?? 0) > 0) && !evidenceReviewed) {
+      setError('请先查看并确认原始证据，再记录“已解决”');
+      return;
+    }
+    if (issue.severity === 'error' && status === 'resolved') {
+      setError('完整性错误不能在问题仍存在时直接标记解决；请先完成修复并重新扫描');
+      return;
+    }
+    try {
+      setError('');
+      await saveReview({
+        id: `${issue.id}@${ledgerId}`,
+        issueId: issue.id,
+        ledgerId,
+        code: issue.code,
+        ruleVersion: issue.ruleVersion,
+        status,
+        reason: reason.trim(),
+        ...(status === 'resolved' ? { resolution } : {}),
+        baseRevision: dataRevision,
+        fingerprint: issue.fingerprint,
+        actorKind: 'user',
+        sourceEventIds: issue.evidenceRefs
+          .filter((ref) => ref.kind === 'classification-event')
+          .map((ref) => ref.id),
+        operationId: crypto.randomUUID(),
+        ...(status === 'deferred' && reviewAfter ? { reviewAfter } : {}),
+        revalidatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      setOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '处理记录保存失败');
+    }
+  }
+
+  return (
+    <div className="mt-2 rounded-lg border border-slate-200 bg-white p-2.5 text-xs text-slate-600">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">核对处理</span>
+        {current ? (
+          <Badge tone={stale ? 'amber' : current.status === 'resolved' ? 'emerald' : 'blue'}>
+            {stale ? '依据已变化，需复核' : current.status === 'resolved' ? '已确认处理' : current.status === 'deferred' ? '已暂缓' : '已阅'}
+          </Badge>
+        ) : <Badge tone="slate">待处理</Badge>}
+        <button type="button" className="ml-auto text-blue-700 underline" onClick={() => setOpen((value) => !value)}>
+          {current ? '更新处理' : '记录处理结果'}
+        </button>
+      </div>
+      {current && !stale && <p className="mt-1 text-slate-500">原因：{current.reason}</p>}
+      {open && (
+        <div className="mt-2 space-y-2">
+          <ChangePreviewPanel
+            baseRevision={dataRevision}
+            impacts={[{
+              kind: issue.impact.financialDataChanged ? 'financial' : 'metadata',
+              label: issue.impact.financialDataChanged ? '会修改财务数据' : '不修改财务数据',
+              description: issue.impact.summary,
+              affectedIds: issue.impact.affectedIds,
+            }]}
+          />
+          {issue.evidenceRefs.length > 0 && (
+            <div className="rounded border border-slate-200 p-2">
+              <div className="font-medium text-slate-700">可定位证据</div>
+              <div className="mt-1 space-y-1">
+                {issue.evidenceRefs.map((reference) => (
+                  <button
+                    key={`${reference.kind}:${reference.id}`}
+                    type="button"
+                    className="block w-full rounded px-2 py-1 text-left text-blue-700 hover:bg-blue-50"
+                    onClick={() => {
+                      if (reference.kind === 'holding') {
+                        navigate({
+                          tab: 'assets',
+                          assetView: 'holdings',
+                          holdingId: reference.taskId ? `${reference.taskId}:${reference.id}` : reference.id,
+                        });
+                      } else if (reference.kind === 'report') {
+                        navigate({ tab: 'reports', reportId: reference.id, reportMode: 'read' });
+                      } else if (reference.kind === 'history') {
+                        navigate({ tab: 'history', historyDate: reference.date ?? reference.id });
+                      } else if (reference.kind === 'channel') {
+                        navigate({ tab: 'assets', channelId: reference.id });
+                      } else if (reference.taskId) {
+                        const task = planning.sessions.find((item) => item.key === reference.taskId);
+                        navigate({
+                          tab: 'monthly',
+                          financeTaskId: reference.taskId,
+                          financeTaskKind: task ? taskKindOf(task) : 'monthly-review',
+                        });
+                      }
+                    }}
+                  >
+                    {reference.kind} · {reference.label ?? reference.id}
+                    {reference.date ? ` · ${reference.date}` : ''}
+                    {reference.source ? ` · ${reference.source}` : ''} ›
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {(issue.evidenceRefs.length > 0 || (issue.evidence?.length ?? 0) > 0) && (
+            <label className="flex items-start gap-2 rounded border border-slate-200 p-2">
+              <input type="checkbox" checked={evidenceReviewed} onChange={(event) => setEvidenceReviewed(event.target.checked)} className="mt-0.5 h-4 w-4" />
+              <span>我已查看上述原始证据，并理解本次操作会修改与不会修改的内容。</span>
+            </label>
+          )}
+          <label className="block">处理结果
+            <select value={status} onChange={(event) => setStatus(event.target.value as typeof status)} className="mt-1 w-full rounded border border-slate-300 bg-white p-2">
+              <option value="acknowledged">已阅，仍需处理</option>
+              <option value="deferred">暂缓，稍后复核</option>
+              <option value="resolved" disabled={issue.severity === 'error'}>确认已处理</option>
+            </select>
+          </label>
+          {status === 'resolved' && (
+            <label className="block">确认依据
+              <select value={resolution} onChange={(event) => setResolution(event.target.value as typeof resolution)} className="mt-1 w-full rounded border border-slate-300 bg-white p-2">
+                {issue.allowedResolutions.includes('distinct-identity') && <option value="distinct-identity">已确认是不同账户、份额或批次</option>}
+                {issue.allowedResolutions.includes('evidence-accepted') && <option value="evidence-accepted">已核对并接受现有证据</option>}
+                {issue.allowedResolutions.includes('data-corrected') && <option value="data-corrected">底层数据已修正并重新校验</option>}
+                {issue.allowedResolutions.includes('not-applicable') && <option value="not-applicable">经证据确认不适用</option>}
+              </select>
+            </label>
+          )}
+          {status === 'deferred' && (
+            <label className="block">复核日期（可选）
+              <input
+                type="date"
+                value={reviewAfter}
+                onChange={(event) => setReviewAfter(event.target.value)}
+                className="mt-1 w-full rounded border border-slate-300 bg-white p-2"
+              />
+            </label>
+          )}
+          <label className="block">原因或后续动作
+            <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={2} className="mt-1 w-full rounded border border-slate-300 bg-white p-2" placeholder="例如：同代码但账户和份额类别不同，保留为独立记录" />
+          </label>
+          {error && <p role="alert" className="text-red-600">{error}</p>}
+          <button type="button" className="rounded bg-emerald-700 px-3 py-1.5 font-medium text-white" onClick={() => void save()}>保存并重新校验</button>
+        </div>
+      )}
+    </div>
   );
 }
 

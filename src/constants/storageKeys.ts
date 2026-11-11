@@ -22,7 +22,7 @@ export const STORAGE_KEYS = {
   chartSettings: 'chart_settings',
   countdownData: 'countdown_data',
   goals: 'goals',
-  /** 月度理财（WealthGrowthPlanner）状态：新域，独立键，不与旧键混用 */
+  /** 月度理财状态：新域，独立键，不与旧键混用 */
   monthlyPlanning: 'monthly_planning_state',
   /** 资产产品形态、渠道分类和风险敞口事件；不保存第二份资产余额 */
   assetClassification: 'asset_classification_state',
@@ -35,6 +35,20 @@ export const STORAGE_KEYS = {
   levelAchievements: 'level_achievements',
   lotteryState: 'lottery_state',
   activityLog: 'activity_log',
+  /** Stable identity for this canonical ledger. Drafts and named views are scoped by it. */
+  ledgerIdentity: 'ledger_identity',
+  /** Monotonic revision for protected financial/domain state; persisted across restarts. */
+  dataRevision: 'data_revision',
+  /** Non-secret recoverable editor drafts. Never contains credentials or binary attachment copies. */
+  workspaceDrafts: 'workspace_drafts',
+  /** User decisions for data-health issues. */
+  healthReviews: 'health_review_state',
+  /** Append-only immutable snapshots of financial report revisions. */
+  reportRevisions: 'report_revision_state',
+  /** Saved goal assumptions, not projected facts. */
+  goalScenarios: 'goal_scenario_state',
+  /** Named filters and safe UI preferences. */
+  workspaceUi: 'workspace_ui_state',
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];

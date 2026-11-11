@@ -3,7 +3,7 @@ name: Pull request and push checks
 on:
   pull_request:
   push:
-    branches: [main, 'feat/**', 'codex/**']
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -20,37 +20,57 @@ concurrency:
 jobs:
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
           node-version: 24.21.0
           cache: npm
       - run: npm ci
       - run: node --version
+      - run: npm run brand:check
+      - run: npm run license:check
+      - run: npm run audit:high
       - run: npm run privacy:check
       - run: npm run privacy:test
+      - run: npm run privacy:history
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npm run artifact:check -- dist
       - run: npm ci --prefix ai-runtime
       - run: npm test --prefix ai-runtime
-      - name: Verify desktop packaging scripts
-        run: |
-          node scripts/fetch-node-sidecar.mjs
-          node scripts/prepare-ai-runtime-resources.mjs
+      - run: npm run audit:high --prefix ai-runtime
+
+  visual:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run test:e2e
 
   rust:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
-          components: rustfmt, clippy
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
+          node-version: 24.21.0
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - run: rustup default stable
+      - run: npm run cargo-license:check
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets --all-features -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked

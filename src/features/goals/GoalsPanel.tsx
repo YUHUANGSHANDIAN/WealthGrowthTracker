@@ -16,6 +16,9 @@ import { SliderField } from '../../components/ui/Slider';
 import { LineChart } from '../../components/charts/LineChart';
 import { PREDICTION } from '../../components/charts/palette';
 import { AIActionButton } from '../ai/AIActionButton';
+import { goalScenarios } from '../../domain/portfolio/goalScenarios';
+import type { GoalScenarioRecord } from '../../domain/workspace/types';
+import { PageHeader } from '../../components/ui/workspace';
 
 const GOAL_ICONS = ['🎯', '💵', '🏠', '🚗', '✈️', '💎', '🎓', '💍', '🏖️', '🍼', '📱', '🎁'];
 const GOAL_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#06B6D4', '#EC4899', '#D4AF37'];
@@ -36,6 +39,9 @@ export function GoalsPanel() {
   const countdown = useAppStore((s) => s.countdown);
   const goalAchieved = useAppStore((s) => s.goalAchieved);
   const coinRainConfig = useAppStore((s) => s.coinRainConfig);
+  const dataRevision = useAppStore((s) => s.dataRevision);
+  const routeGoalId = useNavigationStore((state) => state.goalId);
+  const routeScenarioId = useNavigationStore((state) => state.scenarioId);
   const { setCoinRainConfig, triggerCoinRain, markGoalAchieved, upsertGoal, deleteGoal, setPrimaryGoal, pushToast } = useAppStore();
 
   const [editor, setEditor] = useState<{ open: boolean; goal: Goal | null }>({ open: false, goal: null });
@@ -73,9 +79,22 @@ export function GoalsPanel() {
   }, [history, countdown.targetAmount]);
 
   const activeGoals = goals.filter((g) => g.status !== 'archived');
+  useEffect(() => {
+    if (!routeGoalId) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`goal-${routeGoalId.replace(/[^0-9A-Za-z_-]/g, '_')}`)?.scrollIntoView({ block: 'center' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [routeGoalId]);
 
   return (
     <div className="space-y-4">
+      <PageHeader
+        eyebrow="目标规划"
+        title={primary ? `${primary.icon} ${primary.name}` : '财富目标'}
+        description="目标进度使用真实渠道资产；情景投入与收益率仅作为假设，不进入账本。"
+        context={<><span>主目标时区 {countdown.timezone || getDefaultTimezone()}</span><span>·</span><span>{activeGoals.length} 个进行中目标</span></>}
+      />
       {/* 主目标 Hero */}
       <Card className="p-5">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -138,7 +157,11 @@ export function GoalsPanel() {
               const pct = goalAmountProgress(total, g.targetAmount);
               const isPrimary = g.id === primaryGoalId;
               return (
-                <div key={g.id} className={`border rounded-xl p-3 ${isPrimary ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200 bg-white'}`}>
+                <div
+                  id={`goal-${g.id.replace(/[^0-9A-Za-z_-]/g, '_')}`}
+                  key={g.id}
+                  className={`border rounded-xl p-3 ${routeGoalId === g.id ? 'ring-2 ring-emerald-300' : ''} ${isPrimary ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200 bg-white'}`}
+                >
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xl" aria-hidden>{g.icon}</span>
                     <span className="font-medium text-slate-800 flex-1 min-w-0 truncate">{g.name}</span>
@@ -162,6 +185,8 @@ export function GoalsPanel() {
           </div>
         )}
       </Card>
+
+      {primary && <ScenarioPlannerCard goal={primary} activeGoalCount={activeGoals.length} baseAmount={total} dataRevision={dataRevision} highlightScenarioId={routeScenarioId} />}
 
       {/* 进度趋势 */}
       <Card className="p-4">
@@ -220,6 +245,137 @@ export function GoalsPanel() {
         onSave={(g) => { upsertGoal(g); setEditor({ open: false, goal: null }); pushToast('目标已保存', 'success'); }}
       />
     </div>
+  );
+}
+
+function ScenarioPlannerCard({
+  goal,
+  activeGoalCount,
+  baseAmount,
+  dataRevision,
+  highlightScenarioId,
+}: {
+  goal: Goal;
+  activeGoalCount: number;
+  baseAmount: number;
+  dataRevision: number;
+  highlightScenarioId?: string;
+}) {
+  const scenarios = useAppStore((state) => state.goalScenarios.scenarios);
+  const comparisonIds = useAppStore((state) => state.goalScenarios.comparisonIds);
+  const saveGoalScenario = useAppStore((state) => state.saveGoalScenario);
+  const toggleComparison = useAppStore((state) => state.toggleGoalScenarioComparison);
+  const pushToast = useAppStore((state) => state.pushToast);
+  const navigate = useNavigationStore((state) => state.navigate);
+  const [name, setName] = useState('基准情景');
+  const [months, setMonths] = useState(36);
+  const [contribution, setContribution] = useState<number | ''>(0);
+  const [annualRate, setAnnualRate] = useState<number | ''>(0.05);
+  const [error, setError] = useState('');
+  const saved = scenarios.filter((scenario) => scenario.goalId === goal.id);
+  const compared = saved.filter((scenario) => comparisonIds.includes(scenario.id));
+  useEffect(() => {
+    if (!highlightScenarioId) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`goal-scenario-${highlightScenarioId.replace(/[^0-9A-Za-z_-]/g, '_')}`)?.scrollIntoView({ block: 'center' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [highlightScenarioId]);
+
+  async function save() {
+    const trimmed = name.trim();
+    if (!trimmed) { setError('请填写情景名称'); return; }
+    if (months <= 0) { setError('期限必须大于 0'); return; }
+    const now = new Date().toISOString();
+    const scenario: GoalScenarioRecord = {
+      id: crypto.randomUUID(),
+      goalId: goal.id,
+      name: trimmed,
+      months,
+      monthlyContribution: contribution === '' ? null : Number(contribution),
+      annualRate: annualRate === '' ? null : Number(annualRate),
+      basis: 'all-assets',
+      baselineDate: todayString(),
+      baselineAmount: baseAmount,
+      baseDataRevision: dataRevision,
+      createdAt: now,
+      updatedAt: now,
+    };
+    try {
+      setError('');
+      await saveGoalScenario(scenario);
+      pushToast('情景假设已保存，真实资产未改变', 'success');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '情景保存失败');
+    }
+  }
+
+  return (
+    <Card className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-slate-800">情景比较</h2>
+          <p className="mt-1 text-xs text-slate-500">只保存期限、投入与收益率假设，结果使用当前真实资产实时计算。</p>
+        </div>
+        <Badge tone="blue">最多比较 3 个</Badge>
+      </div>
+      {activeGoalCount > 1 && (
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          当前有 {activeGoalCount} 个目标共用同一资产基数。下方结果表示同一笔资产用于该目标时的数学进度，不代表每个目标都已分别获得资金保障。
+        </p>
+      )}
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <TextField label="情景名称" value={name} onChange={(event) => setName(event.target.value)} />
+        <TextField label="期限（月）" type="number" min={1} max={1200} value={String(months)} onChange={(event) => setMonths(Number(event.target.value) || 0)} />
+        <MoneyField label="每月投入" value={contribution} onChange={setContribution} />
+        <TextField label="年化假设（0–1）" type="number" min={-1} max={1} step={0.01} value={String(annualRate)} onChange={(event) => setAnnualRate(event.target.value === '' ? '' : Number(event.target.value))} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button size="sm" onClick={() => void save()}>保存情景</Button>
+        <span className="text-xs text-slate-500">假设不是概率或收益承诺；不会修改目标或资产。</span>
+      </div>
+      {error && <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>}
+      {saved.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {saved.map((scenario) => {
+            const result = goalScenarios({
+              goalId: goal.id,
+              targetAmount: goal.targetAmount,
+              basis: scenario.basis,
+              baselineDate: scenario.baselineDate,
+              monthlyContribution: scenario.monthlyContribution,
+              targetDate: goal.targetDateTime,
+              scenarios: [{ id: scenario.id, label: scenario.name, annualRate: scenario.annualRate }],
+              quality: { source: 'computed', attribution: 'confirmed', valuation: 'observed', time: 'observed', review: 'pending' },
+            }, { months: scenario.months, baseAmount: scenario.baselineAmount ?? baseAmount })[0];
+            const selected = comparisonIds.includes(scenario.id);
+            return (
+              <div
+                id={`goal-scenario-${scenario.id.replace(/[^0-9A-Za-z_-]/g, '_')}`}
+                key={scenario.id}
+                className={`flex flex-wrap items-center gap-2 rounded-lg border p-2.5 text-sm ${highlightScenarioId === scenario.id ? 'border-emerald-300 bg-emerald-50/60' : 'border-slate-200'}`}
+              >
+                <button type="button" className="text-left font-medium text-slate-700" onClick={() => {
+                  try {
+                    toggleComparison(scenario.id);
+                    navigate({ tab: 'goals', goalId: goal.id, scenarioId: scenario.id });
+                  } catch (cause) { setError(cause instanceof Error ? cause.message : '无法加入比较'); }
+                }} aria-pressed={selected}>
+                  {selected ? '☑' : '☐'} {scenario.name}
+                </button>
+                <span className="text-xs text-slate-500">{scenario.months} 个月 · 月投入 {scenario.monthlyContribution === null ? '未设' : formatCNY(scenario.monthlyContribution)} · 年化 {scenario.annualRate === null ? '未设' : `${(scenario.annualRate * 100).toFixed(1)}%`}</span>
+                <span className="ml-auto tabular text-slate-700">{result?.finalAmount == null ? '不可外推' : formatCNY(result.finalAmount)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {compared.length > 0 && (
+        <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+          已选择 {compared.length} 个情景在同一保存基线 {formatCNY(compared[0]?.baselineAmount ?? baseAmount)} 下比较。图表中的假设结果不进入真实资产、历史或预测事实层。
+        </div>
+      )}
+    </Card>
   );
 }
 

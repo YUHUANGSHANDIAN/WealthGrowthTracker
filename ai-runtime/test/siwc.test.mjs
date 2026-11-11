@@ -51,7 +51,7 @@ function makeFixture(overrides = {}) {
     resource: "https://api.example.invalid/v1",
     authorizationClientId: "synthetic-registration-client",
     scopes: ["openid", "profile", "offline_access"],
-    authorizationParameters: { application_name: "Wealth Growth Tracker synthetic test" },
+    authorizationParameters: { application_name: "WealthGrowthTracker synthetic test" },
     acceptsIssuedClient: (clientId) => clientId === "issued-app-client",
     ...overrides.contract,
   };
@@ -113,7 +113,7 @@ test("official SIWC factory locks documented dynamic registration, resource and 
   assert.equal(contract.resource, "https://api.openai.com/v1");
   assert.deepEqual(contract.scopes, ["openid", "profile", "email", "offline_access", "resource.invoke", "chatgpt.tokens.use.direct"]);
   assert.equal(contract.authorizationParameters.ext_agent_host_id, "urn:uuid:12345678-1234-4123-8123-123456789abc");
-  assert.equal(contract.registrationParameters.agent_name_hint, "Wealth Growth Tracker");
+  assert.equal(contract.registrationParameters.agent_name_hint, "WealthGrowthTracker");
   assert.equal(contract.acceptsIssuedClient("oaiapp_synthetic-owned-id"), true);
   assert.equal(contract.acceptsIssuedClient("another-application-client"), false);
   assert.throws(() => createOpenAISiwcContract({ installationId: "copied-client-identity" }), { code: "AUTH_DISABLED" });

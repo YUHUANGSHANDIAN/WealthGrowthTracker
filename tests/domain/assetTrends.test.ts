@@ -4,6 +4,7 @@ import {
   buildAssetTrend,
   buildChangeExplanation,
   buildChannelComposition,
+  compareHistoryObservations,
   downsamplePreservingExtremes,
 } from '../../src/domain/analysis/assetTrends';
 import { emptyAssetClassificationState } from '../../src/domain/assets/classification';
@@ -28,6 +29,23 @@ const history: HistoryPoint[] = [
 ];
 
 describe('资产历史趋势计算', () => {
+  it('两个真实观察点只做精确日期比较并标出渠道不可比较项', () => {
+    const sparse = [
+      { date: '2026-01-01', totalAmount: 100 },
+      { date: '2026-02-01', totalAmount: 125, channels: [channel('a', '支付宝', 125)] },
+    ] satisfies HistoryPoint[];
+    const result = compareHistoryObservations(sparse, '2026-01-01', '2026-02-01');
+    expect(result.fromValue).toBe(100);
+    expect(result.toValue).toBe(125);
+    expect(result.change).toBe(25);
+    expect(result.comparable).toBe(false);
+    expect(result.warnings.join(' ')).toContain('缺少渠道快照');
+  });
+
+  it('不存在的观察点不会被最近记录替代', () => {
+    expect(() => compareHistoryObservations(history, '2026-01-03', '2026-02-03')).toThrow('不能补点比较');
+  });
+
   it('KPI 与曲线使用同一历史终点，不混入当前实时余额', () => {
     const trend = buildAssetTrend({
       history, channels: [channel('a', '支付宝', 999)], startDate: '2026-01-01', endDate: '2026-01-20',

@@ -130,7 +130,7 @@ class StorageService {
 }
 
 export const storageService = new StorageService();
-export { isTauri, openPathInSystem, getDocumentsDir, getDefaultDataDir } from './fs';
+export { isTauri, openPathInSystem, getDocumentsDir, getDefaultDataDir, dataRootIsLegacy } from './fs';
 export { DesktopFileStorageAdapter, DesktopDataManager, DATA_FOLDER } from './desktop';
 export { StorageRecoveryError, StorageWriteError } from './desktop';
 export type { StorageAdapter };

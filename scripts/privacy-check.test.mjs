@@ -78,6 +78,18 @@ test('个人工作区路径与退役目录名都会被拦下',()=>{
   assert.ok(checkPrivacy(cwd).some(v=>v.includes('index')&&v.includes(path)));
 });
 
+test('私人财务文件、Office/备份容器和账户尾号都会被拦下',()=>{
+  const {cwd,git}=repository();
+  writeFileSync(join(cwd,'ledger.xlsx'),'synthetic');
+  writeFileSync(join(cwd,'notes.md'),['银行卡尾号：','1234'].join(''));
+  writeFileSync(join(cwd,'old-workbook.md'),['彩票','收支统计','.xlsx'].join(''));
+  git('add','--','ledger.xlsx','notes.md','old-workbook.md');
+  const violations=checkPrivacy(cwd);
+  assert.ok(violations.some(v=>v.includes('ledger.xlsx')));
+  assert.ok(violations.some(v=>v.includes('notes.md')));
+  assert.ok(violations.some(v=>v.includes('old-workbook.md')));
+});
+
 test('去标识化表述不会误报',()=>{
   const {cwd,git}=repository();
   writeFileSync(join(cwd,'docs.md'),'开发工作区（路径写在被忽略的 .wgt-local.json 里）；规范目录名 WealthGrowthTracker。');

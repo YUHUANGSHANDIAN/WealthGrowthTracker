@@ -15,7 +15,7 @@
 
 | 能力 | Windows | macOS | Linux | Android | Web/PWA |
 |------|:---:|:---:|:---:|:---:|:---:|
-| 数据存储 | 文件（`文档\财富成长记\`） | 文件（`~/Documents/财富成长记`） | 文件（`~/Documents/财富成长记`） | App-specific 目录（scoped storage） | IndexedDB 单快照（revision CAS + 上一版本备份） |
+| 数据存储 | 文件（`文档\WealthGrowthTracker\`） | 文件（`~/Documents/WealthGrowthTracker`） | 文件（`~/Documents/WealthGrowthTracker`） | App-specific 目录（scoped storage） | IndexedDB 单快照（revision CAS + 上一版本备份） |
 | 单写入者 / 原子写 | 写入队列 + 唯一临时文件 + 原子替换 | 同左 | 同左 | 平台存储串行写入 | IndexedDB 事务 CAS |
 | 灵光环境 | — | — | — | — | 灵光 storage 适配器（串行队列 + 失败回滚） |
 | 打开数据文件夹 | ✅ | ✅ | ✅ | ❌（SAF 文件选择） | ❌ |
@@ -27,7 +27,7 @@
 
 ## 数据目录与平台细节
 
-- **Windows / macOS / Linux**：`文档/财富成长记/`（`data/`、`backups/`、`reports/`、`exports/`）；Documents 不可用时回退平台 AppData 目录。迁移使用后端持有的迁移会话，绝不接受前端传入的任意删除路径。
+- **Windows / macOS / Linux**：新安装为 `文档/WealthGrowthTracker/`（`data/`、`backups/`、`reports/`、`exports/`）；升级前默认目录仅做兼容读取。Documents 不可用时回退平台 AppData 目录。迁移使用后端持有的迁移会话，绝不接受前端传入的任意删除路径。
 - **Android**：应用专属内部数据目录（`app_data_dir`），遵守 Scoped Storage，不申请 `MANAGE_EXTERNAL_STORAGE`；备份/恢复通过系统文件选择器（SAF）。
 - **Web**：IndexedDB 业务快照；生产构建注入受限 CSP（`script-src 'self'`，无 `unsafe-eval`，联网仅本应用、HTTPS 与本地回环端点）。Service Worker 不缓存用户资产 JSON。
 

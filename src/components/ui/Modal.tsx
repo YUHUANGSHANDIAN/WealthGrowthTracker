@@ -8,16 +8,17 @@ export interface ModalProps {
   title: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
+  placement?: 'center' | 'right';
 }
 
-const SIZES = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' } as const;
+const SIZES = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-5xl' } as const;
 
 const dialogStack: HTMLElement[] = [];
 let originalOverflow = '';
 
 /** 可访问的基础模态框：portal 渲染、Escape 关闭、点击遮罩关闭、初始聚焦。 */
-export function Modal({ open, onClose, title, children, footer, size = 'md' }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, size = 'md', placement = 'center' }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -56,7 +57,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: M
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className={`fixed inset-0 z-50 flex p-4 ${placement === 'right' ? 'items-stretch justify-end' : 'items-center justify-center'}`}
       role="presentation"
     >
       <div
@@ -70,7 +71,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: M
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`relative w-full ${SIZES[size]} bg-white rounded-2xl shadow-2xl outline-none max-h-[90vh] flex flex-col`}
+        className={`relative w-full ${SIZES[size]} bg-white shadow-2xl outline-none flex flex-col ${placement === 'right' ? 'h-full max-h-dvh rounded-l-2xl rounded-r-none' : 'rounded-2xl max-h-[90vh]'}`}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
           <h2 id={titleId} className="text-lg font-semibold text-slate-800">{title}</h2>

@@ -156,7 +156,7 @@ describe('资产分类领域', () => {
     expect(channelChange?.after.displayName).toBe('我的黄金');
   });
 
-  it('同父级重复基金代码保留原持仓并进入待核对', () => {
+  it('同父渠道重复基金代码保留原持仓并进入待核对', () => {
     const plan = buildAlipayClassificationMigrationPlan({
       channels, history: [], reports: [],
       planning: planningWith([
@@ -244,7 +244,25 @@ describe('资产分类领域', () => {
     const issues = checkClassificationHealth(channels, planning, emptyAssetClassificationState());
     expect(issues.some((issue) => issue.title === '支付宝分类迁移尚未应用')).toBe(true);
     expect(issues.some((issue) => issue.title === '黄金产品缺少风险敞口')).toBe(true);
-    expect(issues.some((issue) => issue.title === '支付宝基金缺少基金叶子归属')).toBe(true);
+    expect(issues.some((issue) => issue.title === '支付宝基金缺少基金子渠道归属')).toBe(true);
     expect(issues.every((issue) => issue.fix === null)).toBe(true);
+  });
+
+  it('同代码不同份额保留独立证据，并生成可逐项处理的问题', () => {
+    const planning = planningWith([
+      { ...holding('h1', '合成基金A', '123456'), shareClass: 'A' },
+      { ...holding('h2', '合成基金C', '123456'), shareClass: 'C' },
+    ]);
+    planning.sessions[0]!.holdings[1] = {
+      ...planning.sessions[0]!.holdings[1]!,
+      childChannelId: 'alipay_fund',
+    };
+    const issues = checkClassificationHealth(channels, planning, emptyAssetClassificationState());
+    const duplicate = issues.find((issue) => issue.title === '同渠道重复基金代码');
+    expect(duplicate).toBeDefined();
+    expect(duplicate?.evidenceRefs.filter((reference) => reference.kind === 'holding')).toHaveLength(2);
+    expect(duplicate?.impact.financialDataChanged).toBe(false);
+    expect(duplicate?.allowedResolutions).toContain('distinct-identity');
+    expect(duplicate?.id).not.toBe('classification:rule-duplicate');
   });
 });

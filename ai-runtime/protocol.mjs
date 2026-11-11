@@ -9,6 +9,8 @@ export const MAX_RESEARCH_URLS = 5;
 export const MAX_INPUT_TEXT_LENGTH = 8_000;
 export const MAX_FACTS = 48;
 export const MAX_FACT_VALUE_LENGTH = 512;
+export const MAX_CONVERSATION_MESSAGES = 6;
+export const MAX_CONVERSATION_MESSAGE_LENGTH = 2_000;
 
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -17,6 +19,7 @@ const TASKS = new Set([
   "analysis-question",
   "entry-draft",
   "data-health-explanation",
+  "data-health-assistant",
   "goal-scenario",
   "document-extraction",
   "attribution-explanation",
@@ -189,9 +192,17 @@ export function parseRequest(rawLine, { allowManagement = false } = {}) {
   if (!isIdentifier(value.profileId) || !PROVIDERS.has(value.providerId) || !TASKS.has(value.task)) {
     throw new ProtocolError("INVALID_REQUEST", requestId);
   }
-  if (!exactKeys(value.input, ["text", "facts"]) || typeof value.input.text !== "string" ||
+  if (!exactKeys(value.input, ["text", "facts"], ["conversation"]) || typeof value.input.text !== "string" ||
       value.input.text.length > MAX_INPUT_TEXT_LENGTH || !Array.isArray(value.input.facts) ||
       value.input.facts.length > MAX_FACTS || !value.input.facts.every(validateFact)) {
+    throw new ProtocolError("INVALID_REQUEST", requestId);
+  }
+  if (value.input.conversation !== undefined && (!Array.isArray(value.input.conversation) ||
+      value.input.conversation.length > MAX_CONVERSATION_MESSAGES ||
+      !value.input.conversation.every((message) => exactKeys(message, ["role", "text"]) &&
+        (message.role === "user" || message.role === "assistant") &&
+        typeof message.text === "string" && message.text.trim().length > 0 &&
+        message.text.length <= MAX_CONVERSATION_MESSAGE_LENGTH))) {
     throw new ProtocolError("INVALID_REQUEST", requestId);
   }
   const factIds = value.input.facts.map((fact) => fact.factId);

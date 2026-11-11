@@ -24,7 +24,7 @@ export function normalizeChannelAmounts(channels: Channel[]): Channel[] {
   );
 }
 
-/** 扁平化所有「叶子」渠道（含无子渠道的父渠道），用于对比/报告等。 */
+/** 扁平化可比较的明细项；直接金额仍明确标记为父渠道未细分金额。 */
 export interface LeafChannel {
   id: string;
   name: string;
@@ -32,6 +32,7 @@ export interface LeafChannel {
   amount: number;
   parentId: string | null;
   parentName: string | null;
+  kind: 'subchannel' | 'parent-direct';
 }
 
 export function leafChannels(channels: Channel[]): LeafChannel[] {
@@ -46,6 +47,7 @@ export function leafChannels(channels: Channel[]): LeafChannel[] {
           amount: s.amount,
           parentId: c.id,
           parentName: c.name,
+          kind: 'subchannel',
         });
       }
     } else {
@@ -56,6 +58,7 @@ export function leafChannels(channels: Channel[]): LeafChannel[] {
         amount: c.amount,
         parentId: null,
         parentName: null,
+        kind: 'parent-direct',
       });
     }
   }
@@ -320,7 +323,7 @@ export function collapseParentToDirectAmount(
 }
 
 /**
- * 设置「叶子」金额：无子渠道的父渠道直接设置自身金额；有子渠道的父渠道设置其指定子渠道金额。
+ * 设置明细金额：无子渠道的父渠道直接设置未细分金额；有子渠道的父渠道设置其指定子渠道金额。
  * 统一入口，供金额编辑表单使用。
  */
 export function setLeafAmount(

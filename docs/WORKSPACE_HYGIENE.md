@@ -40,7 +40,7 @@
 ./scripts/build-local.ps1 -NoBundle
 
 # 显式指定外部缓存根（覆盖 .wgt-local.json / 环境变量）
-./scripts/build-local.ps1 -CacheRoot <外部缓存根>\wealth-growth-tracker
+./scripts/build-local.ps1 -CacheRoot <外部缓存根>\WealthGrowthTracker
 ```
 
 包装脚本的行为约定：

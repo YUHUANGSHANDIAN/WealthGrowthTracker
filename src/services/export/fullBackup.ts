@@ -9,6 +9,18 @@ import { getAttachment } from '../monthlyPlanning/attachments';
 import { attachmentFileName } from '../monthlyPlanning/attachmentCodec';
 import { parseMonthlyPlanningState } from '../monthlyPlanning/storage';
 import { inspectRecoveryCandidate } from '../storage/recoveryCandidate';
+import {
+  parseGoalScenarioState,
+  parseHealthReviewState,
+  parseLedgerIdentity,
+  parseReportRevisionState,
+  parseWorkspaceDraftState,
+  parseWorkspaceViewState,
+} from '../../domain/workspace/state';
+import {
+  HEALTH_ASSISTANT_STORAGE_KEY,
+  parseHealthAssistantState,
+} from '../../domain/healthAssistant/state';
 
 export const FULL_BACKUP_FORMAT = 'wealth-growth-tracker-full-backup';
 export const FULL_BACKUP_FORMAT_VERSION = 1;
@@ -31,6 +43,8 @@ export interface FullBackupManifest {
   storageSchemaVersion: 1;
   monthlySchemaVersion: 2;
   classificationSchemaVersion?: 1;
+  workspaceSchemaVersion?: 1;
+  healthAssistantSchemaVersion?: 1;
   fileCount: number;
   totalBytes: number;
   files: FullBackupFile[];
@@ -228,10 +242,12 @@ function timestamp(date: Date): string {
   return date.toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '_');
 }
 
-async function captureStateEnvelope(revision: number): Promise<string> {
+async function captureStateEnvelope(revision: number, includeHealthAssistantConversations: boolean): Promise<string> {
   const keys = new Set<string>([STORAGE_VERSION_KEY, ...Object.values(STORAGE_KEYS)]);
   const listed = await storageService.listRawKeys('');
   for (const key of listed ?? []) keys.add(key);
+  if (includeHealthAssistantConversations) keys.add(HEALTH_ASSISTANT_STORAGE_KEY);
+  else keys.delete(HEALTH_ASSISTANT_STORAGE_KEY);
   const payload: Record<string, string> = {};
   for (const key of [...keys].sort()) {
     const value = await storageService.getRaw(key);
@@ -263,10 +279,12 @@ export async function buildFullBackup(input: {
   revision: number;
   monthlyPlanning: MonthlyPlanningState;
   aiMetadata?: string | null;
+  includeHealthAssistantConversations?: boolean;
   now?: Date;
 }): Promise<FullBackupBuildResult> {
   const now = input.now ?? new Date();
-  const stateText = await captureStateEnvelope(input.revision);
+  const includeHealthAssistantConversations = input.includeHealthAssistantConversations === true;
+  const stateText = await captureStateEnvelope(input.revision, includeHealthAssistantConversations);
   const aiMetadataText = sanitizeAiMetadata(input.aiMetadata ?? null);
   const files: Array<{ path: string; data: Uint8Array }> = [
     { path: 'data/app-state.json', data: new TextEncoder().encode(stateText) },
@@ -288,6 +306,8 @@ export async function buildFullBackup(input: {
     storageSchemaVersion: 1,
     monthlySchemaVersion: 2,
     classificationSchemaVersion: 1,
+    workspaceSchemaVersion: 1,
+    ...(includeHealthAssistantConversations ? { healthAssistantSchemaVersion: 1 as const } : {}),
     fileCount: manifestFiles.length,
     totalBytes: manifestFiles.reduce((sum, file) => sum + file.bytes, 0),
     files: manifestFiles,
@@ -320,7 +340,9 @@ export async function parseFullBackup(bytes: Uint8Array): Promise<ParsedFullBack
     throw new Error('完整备份格式或版本不受支持');
   }
   if (manifest.storageSchemaVersion > 1 || manifest.monthlySchemaVersion > 2
-    || (manifest.classificationSchemaVersion !== undefined && manifest.classificationSchemaVersion > 1)) {
+    || (manifest.classificationSchemaVersion !== undefined && manifest.classificationSchemaVersion > 1)
+    || (manifest.workspaceSchemaVersion !== undefined && manifest.workspaceSchemaVersion > 1)
+    || (manifest.healthAssistantSchemaVersion !== undefined && manifest.healthAssistantSchemaVersion > 1)) {
     throw new Error('完整备份来自更新版本，当前版本禁止恢复');
   }
   if (!Array.isArray(manifest.files) || manifest.files.length + 1 !== entries.size
@@ -349,6 +371,29 @@ export async function parseFullBackup(bytes: Uint8Array): Promise<ParsedFullBack
       ? JSON.parse(envelope.payload.monthly_planning_state)
       : envelope.payload.monthly_planning_state;
     parseMonthlyPlanningState(raw);
+  }
+  const payload = envelope.payload ?? {};
+  const parseStored = (key: string): unknown => {
+    const raw = payload[key];
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    if (typeof raw !== 'string') throw new Error(`完整备份工作区字段无效：${key}`);
+    try {
+      return JSON.parse(raw) as unknown;
+    } catch {
+      throw new Error(`完整备份工作区字段不是有效 JSON：${key}`);
+    }
+  };
+  parseLedgerIdentity(parseStored(STORAGE_KEYS.ledgerIdentity));
+  parseWorkspaceDraftState(parseStored(STORAGE_KEYS.workspaceDrafts));
+  parseHealthReviewState(parseStored(STORAGE_KEYS.healthReviews));
+  parseReportRevisionState(parseStored(STORAGE_KEYS.reportRevisions));
+  parseGoalScenarioState(parseStored(STORAGE_KEYS.goalScenarios));
+  parseWorkspaceViewState(parseStored(STORAGE_KEYS.workspaceUi));
+  parseHealthAssistantState(parseStored(HEALTH_ASSISTANT_STORAGE_KEY));
+  const storedDataRevision = parseStored(STORAGE_KEYS.dataRevision);
+  if (storedDataRevision !== undefined
+    && (typeof storedDataRevision !== 'number' || !Number.isSafeInteger(storedDataRevision) || storedDataRevision < 0)) {
+    throw new Error('完整备份数据 revision 无效');
   }
   const aiBytes = entries.get('client-meta/ai-connections.json');
   const aiMetadataText = aiBytes ? new TextDecoder('utf-8', { fatal: true }).decode(aiBytes) : null;

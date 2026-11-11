@@ -91,6 +91,12 @@ import { detectCelebrations, type CelebrationEvent } from '../utils/celebrate';
 import { DEFAULT_SMART_CONFIG } from '../utils/smartSort';
 import { mergeData } from '../utils/mergeData';
 import { checkDataHealth, applyHealthFixes } from '../utils/dataHealth';
+import {
+  assertHealthFixProposal,
+  consumeHealthFixProposal,
+  type HealthFixProposal,
+} from '../features/data/issueFix';
+import type { HealthScanInput } from '../utils/healthScan';
 import { createAuthRecord, verifySecret, type AuthRecord } from '../utils/auth';
 import {
   crossedLevelAchievements,
@@ -105,6 +111,41 @@ import {
   type AmountBatchChange,
   type AmountBatchProposal,
 } from '../features/assets/amountBatch';
+import type {
+  GoalScenarioRecord,
+  GoalScenarioState,
+  HealthReviewRecord,
+  HealthReviewState,
+  LedgerIdentityState,
+  NamedView,
+  ReportRevisionState,
+  WorkspaceDraft,
+  WorkspaceDraftState,
+  WorkspaceViewState,
+} from '../domain/workspace/types';
+import {
+  emptyGoalScenarioState,
+  emptyHealthReviewState,
+  emptyReportRevisionState,
+  emptyWorkspaceDraftState,
+  emptyWorkspaceViewState,
+  parseGoalScenarioState,
+  parseHealthReviewState,
+  parseLedgerIdentity,
+  parseReportRevisionState,
+  parseWorkspaceDraftState,
+  parseWorkspaceViewState,
+  removeWorkspaceDraft as removeDraftRecord,
+  toggleScenarioComparison,
+  upsertGoalScenario,
+  upsertHealthReview,
+  upsertWorkspaceDraft,
+} from '../domain/workspace/state';
+import {
+  appendReportSnapshot,
+  ensureReportBaseSnapshot,
+  verifyReportRevisionIntegrity,
+} from '../features/reports/revisions';
 
 export type ToastKind = 'success' | 'error' | 'info';
 export interface Toast {
@@ -163,9 +204,15 @@ interface AppState {
   lottery: LotteryState;
   activityLog: ActivityLogEntry[];
 
-  // ---- 月度理财（WealthGrowthPlanner） ----
+  // ---- 月度理财 ----
   monthlyPlanning: MonthlyPlanningState;
   assetClassification: AssetClassificationState;
+  ledgerIdentity: LedgerIdentityState;
+  workspaceDrafts: WorkspaceDraftState;
+  healthReviews: HealthReviewState;
+  reportRevisions: ReportRevisionState;
+  goalScenarios: GoalScenarioState;
+  workspaceViews: WorkspaceViewState;
   /** 事务式写入月度会话：维护租约 + 备份 + 单次 rawSet + persist + flush */
   upsertMonthlySession: (session: MonthlyReview, label?: string) => Promise<void>;
   saveMonthlyPolicy: (policy: InvestmentPolicy) => Promise<void>;
@@ -173,6 +220,14 @@ interface AppState {
   setMonthlySettings: (patch: Partial<MonthlyPlanningState['settings']>) => Promise<void>;
   deleteMonthlySession: (key: string) => Promise<void>;
   applyAssetClassification: (state: AssetClassificationState, label?: string) => Promise<void>;
+  saveWorkspaceDraft: (draft: WorkspaceDraft) => Promise<void>;
+  removeWorkspaceDraft: (draftId: string, ledgerId?: string) => Promise<void>;
+  saveHealthReview: (review: HealthReviewRecord) => Promise<void>;
+  saveGoalScenario: (scenario: GoalScenarioRecord) => Promise<void>;
+  toggleGoalScenarioComparison: (id: string) => void;
+  saveNamedView: (view: NamedView) => void;
+  deleteNamedView: (id: string) => void;
+  setOverviewHiddenModules: (ids: string[]) => void;
 
   // 数据管理弹窗状态
   importModalOpen: boolean;
@@ -189,6 +244,7 @@ interface AppState {
   // ---- 渠道 ----
   addParentChannel: (name: string, emoji: string, color: string) => void;
   updateParentChannel: (id: string, patch: Partial<Pick<Channel, 'name' | 'emoji' | 'color'>>) => void;
+  setChannelArchived: (id: string, archived: boolean) => void;
   deleteParentChannel: (id: string) => void;
   toggleChannel: (id: string) => void;
   addSubChannel: (parentId: string, name: string, emoji: string, color: string, strategy?: FirstChildStrategy) => void;
@@ -281,6 +337,7 @@ interface AppState {
   exportData: () => Promise<void>;
   importData: (jsonText: string, mode?: 'replace' | 'merge', baseRevision?: number) => Promise<{ ok: boolean; message: string }>;
   applyDataFixes: (baseRevision?: number, fix?: 'sanitize-amounts' | 'remove-orphans' | 'dedupe-history') => Promise<{ fixed: number }>;
+  commitHealthFix: (proposal: HealthFixProposal) => Promise<{ fixed: number }>;
 }
 
 const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
@@ -313,11 +370,19 @@ const PERSIST_KEYS: Array<{ key: string; pick: (s: AppState) => unknown }> = [
   { key: STORAGE_KEYS.activityLog, pick: (s) => s.activityLog },
   { key: STORAGE_KEYS.monthlyPlanning, pick: (s) => s.monthlyPlanning },
   { key: STORAGE_KEYS.assetClassification, pick: (s) => s.assetClassification },
+  { key: STORAGE_KEYS.ledgerIdentity, pick: (s) => s.ledgerIdentity },
+  { key: STORAGE_KEYS.dataRevision, pick: (s) => s.dataRevision },
+  { key: STORAGE_KEYS.workspaceDrafts, pick: (s) => s.workspaceDrafts },
+  { key: STORAGE_KEYS.healthReviews, pick: (s) => s.healthReviews },
+  { key: STORAGE_KEYS.reportRevisions, pick: (s) => s.reportRevisions },
+  { key: STORAGE_KEYS.goalScenarios, pick: (s) => s.goalScenarios },
+  { key: STORAGE_KEYS.workspaceUi, pick: (s) => s.workspaceViews },
 ];
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let persistQueue: Promise<void> = Promise.resolve();
 let persistDirty = false;
+let pendingPersistKeys = new Set<string>();
 
 async function persistNow(get: () => AppState): Promise<void> {
   if (persistTimer) clearTimeout(persistTimer);
@@ -325,7 +390,13 @@ async function persistNow(get: () => AppState): Promise<void> {
   if (!get().hydrated) return;
   if (!persistDirty) { await persistQueue; return; }
   persistDirty = false;
-  const values = PERSIST_KEYS.map(({ key, pick }) => ({ key, raw: JSON.stringify(pick(get())) }));
+  const keys = pendingPersistKeys.size
+    ? new Set(pendingPersistKeys)
+    : new Set(PERSIST_KEYS.map((item) => item.key));
+  pendingPersistKeys = new Set();
+  const values = PERSIST_KEYS
+    .filter(({ key }) => keys.has(key))
+    .map(({ key, pick }) => ({ key, raw: JSON.stringify(pick(get())) }));
   useAppStore.setState({ saveStatus: 'saving', saveError: null });
   const write = persistQueue.catch(() => {}).then(async () => {
     await storageService.setBatch(values.map(({ key, raw }) => ({ key, value: raw })));
@@ -337,13 +408,16 @@ async function persistNow(get: () => AppState): Promise<void> {
     useAppStore.setState({ saveStatus: persistDirty ? 'pending' : 'saved' });
   } catch (error) {
     persistDirty = true;
+    for (const key of keys) pendingPersistKeys.add(key);
     useAppStore.setState({ saveStatus: 'error', saveError: error instanceof Error ? error.message : '保存失败' });
     throw error;
   }
 }
 
-function schedulePersist(get: () => AppState): void {
+function schedulePersist(get: () => AppState, keys?: readonly string[]): void {
   persistDirty = true;
+  if (keys?.length) keys.forEach((key) => pendingPersistKeys.add(key));
+  else PERSIST_KEYS.forEach(({ key }) => pendingPersistKeys.add(key));
   useAppStore.setState({ saveStatus: 'pending' });
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
@@ -392,6 +466,12 @@ const persistentFields: ReadonlyArray<keyof AppState> = [
   'levelAchievements', 'lottery', 'activityLog',
   'monthlyPlanning',
   'assetClassification',
+  'ledgerIdentity',
+  'workspaceDrafts',
+  'healthReviews',
+  'reportRevisions',
+  'goalScenarios',
+  'workspaceViews',
 ];
 
 export const useAppStore = create<AppState>()((rawSet, get) => {
@@ -405,7 +485,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
     rawSet(next, replace);
   };
   let hydration: Promise<void> | null = null;
-  const persist = () => schedulePersist(get);
+  const persist = (keys?: readonly string[]) => schedulePersist(get, keys);
   let projectionInFlight: Promise<void> | null = null;
   const drainReportProjection = (): Promise<void> => {
     if (projectionInFlight) return projectionInFlight;
@@ -448,8 +528,31 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
       const mgr = storageService.getDesktopManager();
       if (mgr && !(await mgr.backupNow(true))) throw new Error('操作前备份不可用');
       if (get().dataRevision !== baseRevision) throw new Error('数据已变化，请重新打开并确认');
-      rawSet({ reports });
-      persist();
+      const previousReports = new Map(get().reports.map((report) => [report.id, report]));
+      const nextReports = new Map(reports.map((report) => [report.id, report]));
+      const action: 'deleted' | 'archived' | 'metadata' | 'edited' = label.includes('删除')
+        ? 'deleted'
+        : label.includes('归档')
+          ? 'archived'
+          : label.includes('备注')
+            ? 'metadata'
+            : 'edited';
+      let reportRevisions = get().reportRevisions;
+      for (const previous of previousReports.values()) {
+        const next = nextReports.get(previous.id);
+        if (!next) reportRevisions = await appendReportSnapshot(reportRevisions, previous, 'deleted', baseRevision);
+        else if (JSON.stringify(next) !== JSON.stringify(previous)) {
+          reportRevisions = await ensureReportBaseSnapshot(reportRevisions, previous, baseRevision);
+        }
+      }
+      for (const [id, next] of nextReports) {
+        const previous = previousReports.get(id);
+        if (!previous || JSON.stringify(next) !== JSON.stringify(previous)) {
+          reportRevisions = await appendReportSnapshot(reportRevisions, next, action === 'deleted' ? 'edited' : action, baseRevision);
+        }
+      }
+      rawSet({ reports, reportRevisions });
+      persist([STORAGE_KEYS.financialReports, STORAGE_KEYS.reportRevisions]);
       await storageService.flush();
       if (mgr) await drainReportProjection();
     } finally { release(); }
@@ -501,7 +604,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
     reportSortSpec: DEFAULT_REPORT_SORT,
     smartSortConfig: DEFAULT_SMART_CONFIG,
     profile: { defaultCurrency: 'CNY' },
-    appearance: { themeMode: 'system', followWealthTheme: true, animationIntensity: 'normal', backgroundOpacity: 30, reduceMotion: 'system' },
+    appearance: { themeMode: 'system', followWealthTheme: true, density: 'comfortable', animationIntensity: 'normal', backgroundOpacity: 30, reduceMotion: 'system' },
     account: null,
     authRecord: null,
     locked: false,
@@ -523,6 +626,12 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
     importModalOpen: false,
     monthlyPlanning: emptyMonthlyPlanningState(),
     assetClassification: emptyAssetClassificationState(),
+    ledgerIdentity: { schemaVersion: 1, ledgerId: 'pending-hydration', createdAt: new Date().toISOString() },
+    workspaceDrafts: emptyWorkspaceDraftState(),
+    healthReviews: emptyHealthReviewState(),
+    reportRevisions: emptyReportRevisionState(),
+    goalScenarios: emptyGoalScenarioState(),
+    workspaceViews: emptyWorkspaceViewState(),
     async upsertMonthlySession(session, label = '正在保存月度会话') {
       const release = beginLedgerMaintenance(label);
       try {
@@ -605,6 +714,61 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         release();
       }
     },
+    async saveWorkspaceDraft(draft) {
+      if (draft.ledgerId !== get().ledgerIdentity.ledgerId) throw new Error('草稿属于另一份账本，已拒绝写入');
+      rawSet({ workspaceDrafts: upsertWorkspaceDraft(get().workspaceDrafts, draft) });
+      persist([STORAGE_KEYS.workspaceDrafts]);
+      await storageService.flush();
+    },
+    async removeWorkspaceDraft(draftId, ledgerId) {
+      const current = get().workspaceDrafts;
+      const owned = current.drafts.find((draft) => draft.draftId === draftId && (!ledgerId || draft.ledgerId === ledgerId));
+      if (!owned) return;
+      rawSet({ workspaceDrafts: removeDraftRecord(current, draftId) });
+      persist([STORAGE_KEYS.workspaceDrafts]);
+      await storageService.flush();
+    },
+    async saveHealthReview(review) {
+      if (review.ledgerId !== get().ledgerIdentity.ledgerId) throw new Error('核对记录属于另一份账本，已拒绝写入');
+      rawSet({ healthReviews: upsertHealthReview(get().healthReviews, review) });
+      persist([STORAGE_KEYS.healthReviews]);
+      await storageService.flush();
+    },
+    async saveGoalScenario(scenario) {
+      rawSet({ goalScenarios: upsertGoalScenario(get().goalScenarios, scenario) });
+      persist([STORAGE_KEYS.goalScenarios]);
+      await storageService.flush();
+    },
+    toggleGoalScenarioComparison(id) {
+      rawSet({ goalScenarios: toggleScenarioComparison(get().goalScenarios, id) });
+      persist([STORAGE_KEYS.goalScenarios]);
+    },
+    saveNamedView(view) {
+      const namedViews = [
+        ...get().workspaceViews.namedViews.filter((item) => item.id !== view.id && `${item.page}:${item.name}` !== `${view.page}:${view.name}`),
+        view,
+      ];
+      rawSet({ workspaceViews: { ...get().workspaceViews, namedViews } });
+      persist([STORAGE_KEYS.workspaceUi]);
+    },
+    deleteNamedView(id) {
+      rawSet({
+        workspaceViews: {
+          ...get().workspaceViews,
+          namedViews: get().workspaceViews.namedViews.filter((item) => item.id !== id),
+        },
+      });
+      persist([STORAGE_KEYS.workspaceUi]);
+    },
+    setOverviewHiddenModules(ids) {
+      rawSet({
+        workspaceViews: {
+          ...get().workspaceViews,
+          overviewHiddenModules: [...new Set(ids.filter((id) => ['trend', 'work', 'reports'].includes(id)))],
+        },
+      });
+      persist([STORAGE_KEYS.workspaceUi]);
+    },
 
     // ---------------------------------------------------------------------
     hydrate() {
@@ -639,6 +803,13 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         projectionData,
         monthlyData,
         classificationData,
+        ledgerData,
+        storedDataRevision,
+        draftData,
+        healthReviewData,
+        reportRevisionData,
+        goalScenarioData,
+        workspaceViewData,
       ] = await Promise.all([
         storageService.getJSON<{ channels: Channel[]; history: HistoryPoint[] }>(STORAGE_KEYS.wealthTrackerData),
         storageService.getJSON<FinancialReport[]>(STORAGE_KEYS.financialReports),
@@ -666,6 +837,13 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         storageService.getJSON<ReportProjectionQueue>(STORAGE_KEYS.reportProjectionQueue),
         storageService.getJSON<unknown>(STORAGE_KEYS.monthlyPlanning),
         storageService.getJSON<unknown>(STORAGE_KEYS.assetClassification),
+        storageService.getJSON<unknown>(STORAGE_KEYS.ledgerIdentity),
+        storageService.getJSON<unknown>(STORAGE_KEYS.dataRevision),
+        storageService.getJSON<unknown>(STORAGE_KEYS.workspaceDrafts),
+        storageService.getJSON<unknown>(STORAGE_KEYS.healthReviews),
+        storageService.getJSON<unknown>(STORAGE_KEYS.reportRevisions),
+        storageService.getJSON<unknown>(STORAGE_KEYS.goalScenarios),
+        storageService.getJSON<unknown>(STORAGE_KEYS.workspaceUi),
       ]);
       const parsedMonthlyPlanning = parseMonthlyPlanningState(monthlyData);
       const revisionIntegrity = await ensureTaskRevisionIntegrity(parsedMonthlyPlanning);
@@ -673,6 +851,17 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
       const parsedAssetClassification = parseAssetClassificationState(classificationData);
       const classificationIntegrity = await verifyAssetClassificationIntegrity(parsedAssetClassification);
       const assetClassification = classificationIntegrity.state;
+      const ledgerIdentityCreated = ledgerData === null || ledgerData === undefined;
+      const ledgerIdentity = parseLedgerIdentity(ledgerData);
+      const dataRevision = typeof storedDataRevision === 'number' && Number.isSafeInteger(storedDataRevision) && storedDataRevision >= 0
+        ? storedDataRevision
+        : 0;
+      const workspaceDrafts = parseWorkspaceDraftState(draftData);
+      const healthReviews = parseHealthReviewState(healthReviewData);
+      const reportRevisions = parseReportRevisionState(reportRevisionData);
+      await verifyReportRevisionIntegrity(reportRevisions);
+      const goalScenarios = parseGoalScenarioState(goalScenarioData);
+      const workspaceViews = parseWorkspaceViewState(workspaceViewData);
 
       validateLedgerShape(wtd, reports);
       validateFinancialExtensions({ countdown_data: countdown, goal_achievement_status: goal,
@@ -754,7 +943,7 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         reportSortSpec: reportSortSettings ?? DEFAULT_REPORT_SORT,
         smartSortConfig: smartSortConfig ?? DEFAULT_SMART_CONFIG,
         profile: profile ?? { defaultCurrency: 'CNY' },
-        appearance: appearance ?? { themeMode: 'system', followWealthTheme: true, animationIntensity: 'normal', backgroundOpacity: 30, reduceMotion: 'system' },
+        appearance: { themeMode: 'system', followWealthTheme: true, density: 'comfortable', animationIntensity: 'normal', backgroundOpacity: 30, reduceMotion: 'system', ...(appearance ?? {}) },
         account: authData?.account ?? null,
         authRecord: authData?.authRecord ?? null,
         locked: authData?.account?.requireOnLaunch && authData?.authRecord ? true : false,
@@ -774,13 +963,20 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         activityLog: activityLogData ?? [],
         monthlyPlanning,
         assetClassification,
+        ledgerIdentity,
+        dataRevision,
+        workspaceDrafts,
+        healthReviews,
+        reportRevisions,
+        goalScenarios,
+        workspaceViews,
         hydrated: false,
       });
 
       // The version and migrated ledger are one batch. A crash must never leave
       // a version-only "existing installation" with its canonical data missing.
       if (isFirstRun || storedVersion !== APP_VERSION || reportMigration.changed > 0
-        || revisionIntegrity.changed || classificationIntegrity.changed) {
+        || revisionIntegrity.changed || classificationIntegrity.changed || ledgerIdentityCreated) {
         const mgr = storageService.getDesktopManager();
         if (!isFirstRun && mgr && !(await mgr.backupNow(true))) throw new Error('升级前备份不可用');
         const state = get();
@@ -845,6 +1041,15 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
     },
     updateParentChannel(id, patch) {
       set((s) => ({ channels: updateChannel(s.channels, id, patch) }));
+      persist();
+    },
+    setChannelArchived(id, archived) {
+      set((s) => ({
+        channels: s.channels.map((channel) => channel.id === id
+          ? { ...channel, archived, updatedAt: new Date().toISOString() }
+          : channel),
+      }));
+      get().logActivity('channel-archive', archived ? '归档渠道（余额继续计入总资产）' : '恢复归档渠道', 'channel', id);
       persist();
     },
     deleteParentChannel(id) {
@@ -1073,8 +1278,12 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         if (mgr && !(await mgr.backupNow(true))) throw new Error('操作前备份不可用');
         const result = confirmReportProposal({ ...get(), baseRevision: get().dataRevision }, proposal, approval);
         if (result.changed) {
-          rawSet({ history: result.history, reports: result.reports });
-          persist();
+          const previous = get().reports.find((report) => report.id === result.report.id);
+          let reportRevisions = get().reportRevisions;
+          if (previous) reportRevisions = await ensureReportBaseSnapshot(reportRevisions, previous, get().dataRevision);
+          reportRevisions = await appendReportSnapshot(reportRevisions, result.report, 'generated', get().dataRevision);
+          rawSet({ history: result.history, reports: result.reports, reportRevisions });
+          persist([STORAGE_KEYS.wealthTrackerData, STORAGE_KEYS.financialReports, STORAGE_KEYS.reportRevisions]);
           await storageService.flush();
           if (mgr) await drainReportProjection();
         }
@@ -1112,8 +1321,10 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         const original = get().reports.find(r => r.id === id)!;
         const report = { ...result.report, repairAudit: [...(original.repairAudit ?? []), ...audit],
           fieldProvenance: { ...original.fieldProvenance, ...Object.fromEntries(audit.map(a => [a.field, 'manual-repair' as const])) } };
-        rawSet({ reports: result.reports.map(r => r.id === id ? report : r), history: result.history });
-        persist();
+        let reportRevisions = await ensureReportBaseSnapshot(get().reportRevisions, original, get().dataRevision);
+        reportRevisions = await appendReportSnapshot(reportRevisions, report, 'edited', get().dataRevision);
+        rawSet({ reports: result.reports.map(r => r.id === id ? report : r), history: result.history, reportRevisions });
+        persist([STORAGE_KEYS.wealthTrackerData, STORAGE_KEYS.financialReports, STORAGE_KEYS.reportRevisions]);
         await storageService.flush();
         if (mgr) await drainReportProjection();
         return report;
@@ -1515,6 +1726,54 @@ export const useAppStore = create<AppState>()((rawSet, get) => {
         return { fixed };
       } finally { release(); }
     },
+    async commitHealthFix(proposal) {
+      const snapshot = (): HealthScanInput => {
+        const state = get();
+        return {
+          channels: state.channels,
+          history: state.history,
+          reports: state.reports,
+          goals: state.goals,
+          primaryGoalId: state.primaryGoalId,
+          levelAchievements: state.levelAchievements,
+          lottery: state.lottery,
+          monthlyPlanning: state.monthlyPlanning,
+          assetClassification: state.assetClassification,
+        };
+      };
+      const initial = get();
+      assertHealthFixProposal(snapshot(), initial.dataRevision, proposal);
+      const release = beginLedgerMaintenance('正在应用单项健康修复');
+      try {
+        await storageService.flush();
+        const manager = storageService.getDesktopManager();
+        if (manager && !(await manager.backupNow(true))) throw new Error('操作前备份不可用');
+        const current = get();
+        assertHealthFixProposal(snapshot(), current.dataRevision, proposal);
+        const audit: ActivityLogEntry = {
+          id: crypto.randomUUID(),
+          type: 'health-fix',
+          timestamp: new Date().toISOString(),
+          entityType: 'health-issue',
+          entityId: proposal.issueId,
+          description: `${proposal.summary}；操作 ${proposal.operationId}`,
+        };
+        rawSet({
+          channels: proposal.after.channels,
+          history: proposal.after.history,
+          activityLog: [audit, ...current.activityLog].slice(0, 200),
+        });
+        persist([STORAGE_KEYS.wealthTrackerData, STORAGE_KEYS.activityLog]);
+        await storageService.flush();
+        const issueStillExists = checkDataHealth(get().channels, get().history).issues
+          .some((issue) => issue.id === proposal.issueId && issue.fingerprint === proposal.issueFingerprint);
+        if (issueStillExists) throw new Error('修复已写入，但重新扫描仍发现同一问题；请立即核对备份');
+        consumeHealthFixProposal(proposal);
+        return { fixed: 1 };
+      } finally {
+        release();
+      }
+    },
   };
 });
 
@@ -1535,8 +1794,17 @@ export function beginLedgerMaintenance(label: string): () => void {
 }
 
 useAppStore.subscribe((state, previous) => {
-  if (state.channels !== previous.channels || state.history !== previous.history || state.reports !== previous.reports) {
+  const protectedDataChanged = state.channels !== previous.channels
+    || state.history !== previous.history
+    || state.reports !== previous.reports
+    || state.monthlyPlanning !== previous.monthlyPlanning
+    || state.assetClassification !== previous.assetClassification
+    || state.goals !== previous.goals
+    || state.primaryGoalId !== previous.primaryGoalId
+    || state.lottery !== previous.lottery;
+  if (state.hydrated && previous.hydrated && protectedDataChanged) {
     useAppStore.setState({ dataRevision: state.dataRevision + 1 });
+    schedulePersist(useAppStore.getState, [STORAGE_KEYS.dataRevision]);
   }
   if (state.hydrated && state.reports !== previous.reports && storageService.getDesktopManager()) {
     const queue = enqueueReportProjection(useAppStore.getState().reportProjectionQueue, previous.reports, state.reports);

@@ -29,7 +29,9 @@ import {
 } from './reportSort';
 import { getLevelByAmount } from '../../constants/levels';
 import { ReportAIAnnotations } from '../ai/ReportAIAnnotations';
+import { ReportRevisionViewer } from './ReportRevisionViewer';
 import { classificationForChannel, type AssetClassificationState } from '../../domain/assets/classification';
+import { PageHeader, SavedViewBar } from '../../components/ui/workspace';
 
 const TYPE_META: Record<ReportType, { label: string; icon: string; tone: 'emerald' | 'blue' | 'purple' }> = {
   weekly: { label: '周报', icon: '📅', tone: 'emerald' },
@@ -64,7 +66,6 @@ export function ReportsPanel() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
   const [customYear, setCustomYear] = useState(String(new Date().getFullYear()));
-  const [detail, setDetail] = useState<FinancialReport | null>(null);
   const [proposal, setProposal] = useState<ReportProposal | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [editMeta, setEditMeta] = useState<FinancialReport | null>(null);
@@ -74,9 +75,31 @@ export function ReportsPanel() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [sortEditorOpen, setSortEditorOpen] = useState(false);
   const hidden = useWorkspaceStore(s => s.amountsHidden);
+  const navigate = useNavigationStore((s) => s.navigate);
+  const routeReportId = useNavigationStore((s) => s.reportId);
+  const reportMode = useNavigationStore((s) => s.reportMode ?? 'read');
+  const reportRevisionId = useNavigationStore((s) => s.reportRevisionId);
+  const reportRevisionFrom = useNavigationStore((s) => s.reportRevisionFrom);
+  const reportRevisionTo = useNavigationStore((s) => s.reportRevisionTo);
+  const detail = useMemo(
+    () => reports.find((report) => report.id === routeReportId) ?? null,
+    [reports, routeReportId],
+  );
   useEffect(() => {
-    if (hidden) { setDetail(null); setEditFull(null); setRepairTarget(null); setEditMeta(null); setProposal(null); }
-  }, [hidden]);
+    if (hidden) {
+      if (routeReportId) navigate({ tab: 'reports' });
+      setEditFull(null); setRepairTarget(null); setEditMeta(null); setProposal(null);
+    }
+  }, [hidden, navigate, routeReportId]);
+  useEffect(() => {
+    if (!routeReportId || detail) return;
+    pushToast('报告不存在或已被删除，已返回报告列表', 'info');
+    navigate({ tab: 'reports' });
+  }, [detail, navigate, pushToast, routeReportId]);
+  useEffect(() => {
+    if (!detail || reportMode !== 'edit' || editFull) return;
+    setEditFull(detail);
+  }, [detail, editFull, reportMode]);
   const reportAction = async (action: () => Promise<void>) => {
     try { await action(); } catch (error) { pushToast(error instanceof Error ? error.message : '报告操作失败，请重试', 'error'); }
   };
@@ -188,6 +211,18 @@ export function ReportsPanel() {
 
   return (
     <div className="space-y-4">
+      <PageHeader
+        eyebrow="周期复盘"
+        title="财务报告"
+        description="周报、月报与年报按周期唯一归档。阅读、修订与编辑使用同一份真实历史。"
+        context={<><span>{reports.length} 份报告</span><span>·</span><span>屏幕与导出共用口径</span></>}
+        primaryAction={<Button onClick={generate}>生成 / 更新当前周期</Button>}
+        secondaryActions={(['weekly', 'monthly', 'yearly'] as ReportType[]).map((type) => (
+          <Button key={type} size="sm" variant={reportType === type ? 'primary' : 'outline'} onClick={() => setReportType(type)}>
+            {TYPE_META[type].label}
+          </Button>
+        ))}
+      />
       {/* Dashboard 头部 */}
       <Card className="p-4">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -197,25 +232,6 @@ export function ReportsPanel() {
           <Kpi label="本年变化" value={kpis.yearChange === null ? '未知' : formatCNY(kpis.yearChange)} tone={kpis.yearChange === null ? undefined : kpis.yearChange >= 0 ? 'up' : 'down'} />
           <Kpi label="最近生成" value={kpis.lastGenerated} />
           <Kpi label="数据完整度" value={kpis.avgCompleteness != null ? `${kpis.avgCompleteness}%` : '—'} />
-        </div>
-      </Card>
-
-      {/* 快速生成 */}
-      <Card className="p-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex-1 min-w-[160px]">
-            <SelectField
-              label="生成报告"
-              value={reportType}
-              onChange={(e) => setReportType(e.target.value as ReportType)}
-              options={[
-                { value: 'weekly', label: '周度财务报告' },
-                { value: 'monthly', label: '月度财务报告' },
-                { value: 'yearly', label: '年度财务报告' },
-              ]}
-            />
-          </div>
-          <Button onClick={generate}>生成 / 更新当前周期</Button>
         </div>
       </Card>
 
@@ -278,6 +294,19 @@ export function ReportsPanel() {
           ))}
         </select>
         <Button variant="outline" size="sm" onClick={() => setSortEditorOpen(true)}>⇶ 多维排序</Button>
+        <SavedViewBar
+          page="reports"
+          tab="reports"
+          filters={{ search, typeFilter, timeFilter, customYear }}
+          onApply={(filters) => {
+            setSearch(typeof filters.search === 'string' ? filters.search : '');
+            const nextType = filters.typeFilter;
+            setTypeFilter(nextType === 'weekly' || nextType === 'monthly' || nextType === 'yearly' || nextType === 'archived' ? nextType : 'all');
+            const nextTime = filters.timeFilter;
+            setTimeFilter(nextTime === 'this-year' || nextTime === 'last-year' || nextTime === '12m' || nextTime === 'custom' ? nextTime : 'all');
+            setCustomYear(typeof filters.customYear === 'string' ? filters.customYear : String(new Date().getFullYear()));
+          }}
+        />
         {selected.size > 0 && (
           <>
             <Button variant="outline" size="sm" onClick={() => exportSelected('json')}>⬇ JSON</Button>
@@ -301,7 +330,7 @@ export function ReportsPanel() {
               report={r}
               selected={selected.has(r.id)}
               onToggle={() => toggleSelect(r.id)}
-              onOpen={() => { if (!hidden) setDetail(r); }}
+              onOpen={() => { if (!hidden) navigate({ tab: 'reports', reportId: r.id, reportMode: 'read' }); }}
               onArchive={() => void reportAction(() => archiveReport(r.id))}
               onDelete={() => { setSelected(new Set([r.id])); setConfirmDelete(true); }}
             />
@@ -314,21 +343,36 @@ export function ReportsPanel() {
           report={detail}
           reports={reports}
           history={history}
-          onClose={() => setDetail(null)}
-          onEditMetadata={(r) => { setDetail(null); setEditMeta(r); }}
-          onRepair={(r) => { setDetail(null); setRepairTarget(r); }}
-          onEditFull={(r) => { setDetail(null); setEditFull(r); }}
+          mode={reportMode}
+          revisionFrom={reportRevisionFrom ?? reportRevisionId}
+          revisionTo={reportRevisionTo}
+          onModeChange={(mode) => navigate({ tab: 'reports', reportId: detail.id, reportMode: mode })}
+          onRevisionSelection={(from, to) => navigate({
+            tab: 'reports',
+            reportId: detail.id,
+            reportMode: 'revisions',
+            reportRevisionFrom: from,
+            reportRevisionTo: to,
+          })}
+          onClose={() => navigate({ tab: 'reports' })}
+          onEditMetadata={(r) => { navigate({ tab: 'reports' }); setEditMeta(r); }}
+          onRepair={(r) => { navigate({ tab: 'reports' }); setRepairTarget(r); }}
+          onEditFull={(r) => { navigate({ tab: 'reports', reportId: r.id, reportMode: 'edit' }); setEditFull(r); }}
         />
       )}
 
       {editFull && (
         <ReportEditorModal
           report={editFull}
-          onClose={() => setEditFull(null)}
+          onClose={() => {
+            setEditFull(null);
+            navigate({ tab: 'reports', reportId: editFull.id, reportMode: 'read' });
+          }}
           onSave={async (edited, audit, opts) => {
             await commitReportEdit(editFull.id, edited, audit, opts);
             setEditFull(null);
             pushToast('报告已保存（修改已写入审计）', 'success');
+            navigate({ tab: 'reports', reportId: editFull.id, reportMode: 'read' });
           }}
         />
       )}
@@ -474,10 +518,28 @@ function ReportRow({ report, selected, onToggle, onOpen, onArchive, onDelete }: 
   );
 }
 
-function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, onRepair, onEditFull }: {
+function ReportDetailModal({
+  report,
+  reports,
+  history,
+  mode,
+  revisionFrom,
+  revisionTo,
+  onModeChange,
+  onRevisionSelection,
+  onClose,
+  onEditMetadata,
+  onRepair,
+  onEditFull,
+}: {
   report: FinancialReport;
   reports: FinancialReport[];
   history: import('../../types').HistoryPoint[];
+  mode: 'read' | 'revisions' | 'edit';
+  revisionFrom?: string;
+  revisionTo?: string;
+  onModeChange: (mode: 'read' | 'revisions') => void;
+  onRevisionSelection: (from: string, to: string) => void;
   onClose: () => void;
   onEditMetadata: (r: FinancialReport) => void;
   onRepair: (r: FinancialReport) => void;
@@ -488,6 +550,13 @@ function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, 
   const navigate = useNavigationStore((s) => s.navigate);
   const positive = report.changeAmount >= 0;
   const level = getLevelByAmount(report.totalAmount);
+  useEffect(() => {
+    if (mode !== 'revisions') return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById('report-detail-revisions')?.scrollIntoView({ block: 'start' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [mode]);
 
   const max = report.reportType === 'weekly' ? report.weeklyMax : report.reportType === 'monthly' ? report.monthlyMax : report.yearlyMax;
   const min = report.reportType === 'weekly' ? report.weeklyMin : report.reportType === 'monthly' ? report.monthlyMin : report.yearlyMin;
@@ -519,6 +588,23 @@ function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, 
   return (
     <Modal open onClose={onClose} title={displayTitle(report)} size="lg">
       <div className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+          <div className="flex gap-1" role="tablist" aria-label="报告视图">
+            {([['read', '阅读'], ['revisions', '比较修订']] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={mode === value}
+                className={`rounded-md px-3 py-2 text-sm ${mode === value ? 'bg-white font-medium text-emerald-700 shadow-sm' : 'text-slate-500'}`}
+                onClick={() => onModeChange(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <Button size="sm" variant="outline" onClick={() => onEditFull(report)}>编辑原始数据</Button>
+        </div>
         {/* Overview */}
         <section>
           <SectionTitle>概览</SectionTitle>
@@ -634,6 +720,15 @@ function ReportDetailModal({ report, reports, history, onClose, onEditMetadata, 
         )}
 
         <ReportAIAnnotations reportId={report.id} />
+
+        <div id="report-detail-revisions">
+          <ReportRevisionViewer
+            report={report}
+            initialFromId={revisionFrom}
+            initialToId={revisionTo}
+            onSelectionChange={onRevisionSelection}
+          />
+        </div>
 
         <div className="text-xs text-slate-400">
           生成时间：{report.createdAt ? new Date(report.createdAt).toLocaleString('zh-CN') : '—'}

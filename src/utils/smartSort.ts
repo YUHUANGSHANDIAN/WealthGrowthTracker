@@ -2,7 +2,7 @@ import type { Channel, ChannelGrowth, HistoryPoint, SmartSortConfig } from '../t
 import { channelAmount } from './channels';
 import { addDays, todayString } from './date';
 
-/** 在历史快照中查找叶子渠道（子渠道或无子渠道的父渠道）的金额。 */
+/** 在历史快照中查找可比较明细（子渠道或父渠道直接金额）的余额。 */
 function amountInSnapshot(snapshot: Channel[], id: string): number | null {
   for (const c of snapshot) {
     if (c.id === id) return channelAmount(c);
@@ -28,7 +28,7 @@ function latestAtOrBefore(history: HistoryPoint[], date: string): HistoryPoint |
 const WINDOWS = [7, 30, 90, 365] as const;
 
 /**
- * 计算每个叶子渠道在 7/30/90/365 天的增长（基于历史 channels 快照）。
+ * 计算每个可比较明细项在 7/30/90/365 天的增长（基于历史 channels 快照）。
  * 旧历史无快照时返回 null（不把缺失当 0%）。
  */
 export function computeChannelGrowths(history: HistoryPoint[], channels: Channel[]): Map<string, ChannelGrowth> {

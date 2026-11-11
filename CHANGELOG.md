@@ -1,6 +1,37 @@
 # Changelog
 
-本文件记录「财富成长记 / 财富梦想实现家」各版本的变更。
+本文件记录 WealthGrowthTracker 各版本的变更。旧名称只可能出现在兼容说明和历史记录中。
+
+## [1.11.0-preview.1] - 2026-11-11
+
+### 品牌与 Windows 交付
+- npm、AI Runtime 和 Rust 包名统一为合法的无横线形式；用户可见品牌统一为 `WealthGrowthTracker`。
+- Tauri `mainBinaryName` 固定为 `WealthGrowthTracker`，Windows 实际生成 `WealthGrowthTracker.exe`，同时保留已发布 identifier。
+- 新安装默认使用 `Documents/WealthGrowthTracker`；升级前默认目录只做原地兼容读取。
+- 本地 DevCache 活跃根迁移到 `DevCache/WealthGrowthTracker`，私人备份和 Release bundle 保持完整。
+- NSIS 覆盖安装精确清理旧主程序文件名并修复已有快捷方式，用户诊断备份保持不变。
+
+### 渠道术语与 AI 数据健康助手
+- 用户可见“叶子渠道”统一为“子渠道”，并区分“父渠道汇总金额”和“父渠道直接金额（未细分）”。
+- 渠道 CSV 保留原机器列，新增 `channelPath` 和 `channelKind`；历史报告与财务 schema 不重写。
+- 数据健康中心支持从具体问题或自由提问开始的多轮 AI 对话；默认不发送金额、业务名称或原始证据。
+- AI 回复必须引用授权事实，只能提出导航或白名单修复草案；真实写入仍须本地重扫、差异预览、用户确认、备份、审计和再次扫描。
+- 健康助手会话默认本地保存 30 天，默认不进入完整备份，不增加财务数据 revision。
+
+### 隐私与供应链
+- 当前树隐私门增加私人路径、财务容器、账户尾号、凭据和构建产物扫描。
+- 全历史隐私门改为 291 条精确指纹、8 个唯一内容组的限定接受；历史公开残余保持可见，不重写历史。
+- 新增凭据永远阻断、旧内容在新提交复用仍阻断、规则变化和 shallow clone 失败关闭。
+- PR 与 Release 按待构建 HEAD 的祖先历史审计；无关开放分支单独审计，不混入当前 Release。
+- Release 流程拆分为 Draft 构建、人工确认和 Pre-release 发布，缺少任一平台资产即阻断。
+- Actions 固定完整 commit SHA；权限默认只读；启用 Secret Scanning、Push Protection 和 Dependabot。
+- Vite、Vitest 与 GitHub Copilot SDK 升级到安全修复版；新增许可证和 Cargo 依赖审计门。
+- 发布质量门增加全历史审计和 Playwright；只使用标准 GitHub-hosted Runner。
+
+### 已知边界
+- 历史公开残余仍可从 Git 历史访问；本次接受不代表内容已删除。
+- Windows、macOS、Linux、Android 包未代码签名；macOS/Linux/Android 仅记录 GitHub CI 构建与验收证据。
+- 两类 AI 订阅路径的真实认证、推理和撤销仍需用合法授权连接单独验收。
 
 ## [1.10.0-preview.1] - 2026-11-04
 
@@ -76,7 +107,7 @@
 - 用户可见名称统一为 **WealthGrowthTracker**（窗口标题、HTML 标题、PWA manifest、关于页、锁屏、导出与备份元数据、README）；`identifier`、旧 storage key、IndexedDB 库名与 Service Worker 缓存前缀保持不变，旧安装与旧数据可原地升级。
 - 品牌字符串收敛到单一来源 `src/constants/brand.ts`；更新检查先请求新仓库名，失败后回退旧仓库名，迁移期间两条路径都可用。
 
-### 月度理财工作台（WealthGrowthPlanner）
+### 月度理财工作台
 - 新增独立域 `src/domain/portfolio/`：金额按分、份额与净值用十进制字符串、比例在域内统一为 0–1；四类总额口径、现金流语义、对账、止盈与再平衡候选、目标情景。
 - 结转可追溯：每个跨月项目携带来源会话、revision、条目与快照日期；只从已确认或已归档会话结转，来源 revision 变化后标记为过期且不自动解决。
 - 文档入库：DOCX/XLSX/图片按 SHA256 幂等入库，解析在本地完成；附件按内容寻址单独存放，状态只保存哈希引用，读取时逐次校验哈希。

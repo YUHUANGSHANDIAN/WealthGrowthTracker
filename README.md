@@ -1,4 +1,4 @@
-# WealthGrowthTracker（财富成长记）
+# WealthGrowthTracker
 
 一个**本地优先**的个人财富管理应用：通过可视化资产、成长等级、目标倒计时和游戏化反馈（金币雨），让个人财富积累过程更有动力、更有仪式感。
 
@@ -22,7 +22,7 @@
   - 手动增删改、批量管理、日期范围筛选、趋势图
 - **财务报告**
   - 周报 / 月报 / 年报，自动计算期初/期末、变化量、变化率、极值/均值（过去周期用历史快照）
-  - **层级资产构成（Report Schema v3）**：父渠道 rollup + 子渠道 breakdown，点击父渠道展开子渠道明细（占父渠道 / 占总资产），绝不父子 double-count
+  - **层级资产构成（Report Schema v3）**：父渠道汇总金额 + 子渠道明细；点击父渠道展开子渠道明细（占父渠道 / 占总资产），父渠道汇总与子渠道明细不重复计入
   - **Data As Of**：报告记录数据快照截止日期（该周期最后有效记录），不虚构真正月末值
   - 报告搜索、类型筛选、归档、批量管理、JSON 批量导出
   - **报告分享**：PNG/JPEG/WebP 图片、复制到剪贴板、微信分享、邮件、系统分享（分享图展示父子层级）
@@ -37,9 +37,10 @@
   - 百万财富目标、**时区感知倒计时**（起始/目标日期时间、多种显示格式、时间+金额双进度）
   - 达成目标自动触发金币雨 + 升级庆祝（遵循 `prefers-reduced-motion`）
 - **数据管理**
-  - **自定义数据目录**：桌面端可更改数据根目录（跨磁盘安全迁移，失败自动回滚），配置保存在系统 App Config 目录，默认仍用「文档\财富成长记」
+  - **自定义数据目录**：桌面端可更改数据根目录（跨磁盘安全迁移，失败自动回滚），配置保存在系统 App Config 目录；新安装默认使用「文档\WealthGrowthTracker」，旧默认目录只做兼容读取
   - JSON 全量导出 / 导入（**合并/覆盖两种模式** + 预览），**兼容灵光旧版备份 JSON**
   - **数据健康检查**（可安全修复，含周报 ISO 周期完整性检查）、渠道/历史 CSV 导出、自动备份 + 从备份恢复
+  - **AI 数据健康助手**：可从具体问题或自由提问开始多轮分析；默认只发送脱敏规则摘要，精确证据需逐次授权，修复必须经过本地重扫、差异预览、确认和审计
   - **报告覆盖情况** + 缺失月报补生成（使用当月最后有效记录，绝不重复生成、绝不虚构月末值）
   - **匿名诊断导出**（只含版本 / schema / 各域数量 / 健康问题类型，不含任何敏感数据）
   - **历史报告导入器**（TXT / 图片配对解析 + 与现有数据 reconciliation）
@@ -104,7 +105,8 @@ npm run typecheck     # 仅类型检查
 npm run lint          # ESLint
 npm test              # 运行单元测试（Vitest）
 npm run privacy:check # 发布前隐私检查（阻止用户数据/备份/Excel/历史报告进入 Git）
-npm run privacy:test  # 隐私检查脚本自身的回归测试
+npm run privacy:history # 精确历史指纹审计；仅接受人工核验过的既有内容
+npm run privacy:test  # 当前树与历史风险门自身的回归测试
 cd ai-runtime && npm test # AI 运行时（Node 内置 test runner，无网络、无凭据）
 ```
 
@@ -118,7 +120,7 @@ Windows 开发与桌面打包请优先使用 `scripts/dev-local.ps1` 和
 
 所有资产数据**默认只保存在你自己的电脑本地**，不会上传到任何服务器：
 
-- **Windows 桌面版**：`C:\Users\<用户名>\Documents\财富成长记\`（即「我的文档」下的 `财富成长记` 文件夹）
+- **Windows 桌面版**：`C:\Users\<用户名>\Documents\WealthGrowthTracker\`（即「我的文档」下的 `WealthGrowthTracker` 文件夹）
   - `data/app-state.json` —— 全部业务数据
   - `backups/` —— 自动/手动备份
   - `reports/{weekly,monthly,yearly}/` —— 报告（JSON + HTML）
@@ -128,7 +130,7 @@ Windows 开发与桌面打包请优先使用 `scripts/dev-local.ps1` 和
 
 存储键与灵光旧版逐字对齐（`wealth_tracker_data`、`financial_reports`、`countdown_data` 等），是数据兼容的核心契约。
 
-> 提示：复制整个 `财富成长记` 文件夹即可完成完整人工备份。桌面版每天首次保存时自动备份一次。
+> 提示：复制整个 `WealthGrowthTracker` 文件夹即可完成完整人工备份。桌面版每天首次保存时自动备份一次。
 
 ---
 
@@ -206,7 +208,7 @@ npm run build        # 产物在 dist/
 
 - `WealthGrowthTracker_*_x64-setup.exe`（NSIS，按用户安装、无需管理员权限，推荐）
 - `WealthGrowthTracker_*_x64.msi`
-- 数据目录：`文档\财富成长记\`。卸载**不会**删除该目录。
+- 数据目录：新安装为 `文档\WealthGrowthTracker\`；旧版默认目录仅作为兼容根继续读取。卸载**不会**删除该目录。
 - 首次安装 SmartScreen 可能提示「未知发布者」：点击「更多信息 → 仍要运行」即可（当前未商业代码签名）。
 
 ### macOS（Stable build，未签名）
@@ -241,6 +243,7 @@ npm run build        # 产物在 dist/
 
 - 所有个人资产数据**仅存储在你自己的电脑本地**，默认不上传任何服务器。
 - AI 默认关闭且每次启动重置：关闭时**不启动运行时、不联网、不读取任何凭据**。启用后可在「AI 连接中心」配置你自有的连接（订阅授权、API Key、本地模型或自建 HTTPS 网关），业务数据只在你逐次确认的 ContextManifest 范围内发送。
+- 健康助手会话默认只保存在本地、默认 30 天到期，默认不进入完整备份；设置页可选择保留期，只有显式开启后完整备份才会包含会话。会话不增加财务数据版本。
 - 应用不读取 Codex、Claude、GitHub CLI 等其它程序的登录令牌，不嵌入 OAuth 客户端密钥。
 - 桌面端凭据写入系统安全存储（Windows Credential Manager / macOS Keychain / Linux Secret Service，失败或不可用时仅提供当前会话临时凭据，绝不落明文），Web 端只保留内存；二类合法订阅（OpenAI 开源应用订阅、GitHub Copilot 订阅）的真实认证/推理/撤销验收尚未完成，界面保持“待资格验证”。API Key、本地模型与 mock 都不代表订阅权益。
 - 桌面包内置官方 Node 24.21.0 运行时（Tauri sidecar，按官方 SHA256 校验）与私有 AI 运行时资源，无需另装 Node；Web 端不含 Node 运行时，只支持显式配置的 HTTPS 网关或本地端点。
@@ -282,4 +285,5 @@ npm run build        # 产物在 dist/
 
 ## 📄 License
 
-MIT（可自行补充许可信息）。
+项目源码采用 [MIT License](LICENSE)。随应用分发的第三方组件和 Node.js sidecar
+见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

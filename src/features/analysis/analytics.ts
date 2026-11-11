@@ -3,6 +3,7 @@ import { channelAmount, leafChannels, totalAssets } from '../../utils/channels';
 import { round2, diffMoney } from '../../utils/money';
 import { addDays, todayString } from '../../utils/date';
 import { assetAtDate } from '../reports/generate';
+import { parentDirectLabel } from '../../constants/channelTerms';
 
 /** 分析 KPI（注意：变化率是资产变化率，不是证券回报率）。 */
 export interface AnalyticsKpis {
@@ -102,7 +103,7 @@ export function channelChange(history: HistoryPoint[], channels: Channel[], days
     const change = past === null ? null : diffMoney(leaf.amount, past);
     out.push({
       id: leaf.id,
-      name: leaf.parentName ? `${leaf.parentName} · ${leaf.name}` : leaf.name,
+      name: leaf.kind === 'parent-direct' ? parentDirectLabel(leaf.name) : leaf.parentName ? `${leaf.parentName} · ${leaf.name}` : leaf.name,
       emoji: leaf.emoji,
       amount: leaf.amount,
       change,
@@ -203,7 +204,7 @@ export function channelStructureChange(startChannels: Channel[] | undefined, end
 export function historicalChannelComposition(history: HistoryPoint[], opts: CompositionOptions = { level: 'leaf', topN: 5, mode: 'absolute' }): CompositionPoint[] {
   const sorted = [...history].sort((a, b) => (a.date < b.date ? -1 : 1));
   const extract = (channels: Channel[]) => opts.level === 'parent' ? parentChannels(channels) : leafChannels(channels).map(l => ({
-    id: `leaf:${l.id}`, name: l.parentName ? `${l.parentName} · ${l.name}` : l.name, amount: l.amount,
+    id: `leaf:${l.id}`, name: l.kind === 'parent-direct' ? parentDirectLabel(l.name) : l.parentName ? `${l.parentName} · ${l.name}` : l.name, amount: l.amount,
   }));
   const identities = new Map<string, { name: string; weight: number }>();
   for (const point of sorted) for (const item of extract(point.channels ?? [])) {

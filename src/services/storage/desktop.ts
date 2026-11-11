@@ -6,7 +6,7 @@ import { inspectRecoveryCandidate } from './recoveryCandidate';
 import { REPORT_SCHEMA_VERSION } from '../../features/reports/normalize';
 
 /** 数据目录名（用户可在资源管理器中直接找到）。 */
-export const DATA_FOLDER = '财富成长记';
+export const DATA_FOLDER = 'WealthGrowthTracker';
 export const STATE_PATH = 'data/app-state.json';
 export const BACKUPS_DIR = 'backups';
 export const REPORTS_DIR = 'reports';
