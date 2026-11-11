@@ -64,14 +64,14 @@ jobs:
           echo "RELEASE_ID=$release_id" >> "$GITHUB_ENV"
           jq -r '.assets[].name' "$RUNNER_TEMP/release.json" > "$RUNNER_TEMP/assets.txt"
           for pattern in \
-            'WealthGrowthTracker_*_x64-setup.exe' \
-            'WealthGrowthTracker_*_universal.dmg' \
-            'WealthGrowthTracker_*_amd64.AppImage' \
-            'WealthGrowthTracker_*_amd64.deb' \
-            'WealthGrowthTracker-*.x86_64.rpm' \
-            'WealthGrowthTracker_*_android-preview.apk' \
-            'WealthGrowthTracker_*_web.zip' \
-            'SHA256SUMS.txt'; do
+            '^WealthGrowthTracker_.*_x64-setup\.exe$' \
+            '^WealthGrowthTracker_.*_universal\.dmg$' \
+            '^WealthGrowthTracker_.*_amd64\.AppImage$' \
+            '^WealthGrowthTracker_.*_amd64\.deb$' \
+            '^WealthGrowthTracker-.*\.x86_64\.rpm$' \
+            '^WealthGrowthTracker_.*_android-preview\.apk$' \
+            '^WealthGrowthTracker_.*_web\.zip$' \
+            '^SHA256SUMS\.txt$'; do
             if ! grep -Eq "$pattern" "$RUNNER_TEMP/assets.txt"; then
               echo "::error::Draft 缺少必需资产：$pattern"
               exit 1
