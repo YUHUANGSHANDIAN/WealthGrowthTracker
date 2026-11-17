@@ -12,6 +12,6 @@
   },
   "dependencies": {
     "@earendil-works/pi-ai": "1.2.0",
-    "@github/copilot-sdk": "1.0.30"
+    "@github/copilot-sdk": "1.0.34"
   }
 }
