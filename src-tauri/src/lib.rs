@@ -67,7 +67,7 @@ fn validate_config(cfg: &StorageConfig) -> Result<(), String> {
 /// 数据根目录：
 /// - 移动端（Android/iOS）：App-specific 数据目录（scoped storage）。
 /// - 桌面端：优先读取 storage-config.json 的 customDataRoot，否则
-///   `Documents/WealthGrowthTracker`；新目录尚不存在但旧目录存在时兼容旧目录。
+///   在规范目录与旧目录之间选择含有主数据的一份。
 fn base_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
@@ -102,11 +102,19 @@ fn base_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn select_default_data_root(preferred: PathBuf, legacy: PathBuf) -> PathBuf {
-    if preferred.exists() || !legacy.exists() {
+    if has_primary_state(&preferred) || !has_primary_state(&legacy) {
         preferred
     } else {
         legacy
     }
+}
+
+fn has_primary_state(root: &Path) -> bool {
+    root.join("data").join("app-state.json").is_file()
+}
+
+fn canonical_default_data_dir(documents: &Path) -> PathBuf {
+    documents.join(DEFAULT_DATA_DIR_NAME)
 }
 
 /// 把相对路径安全地拼到数据根目录下（阻止目录穿越）。
@@ -448,12 +456,9 @@ fn default_data_dir() -> Result<String, String> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let doc = dirs::document_dir().ok_or("无法获取系统「文档」目录")?;
-        Ok(select_default_data_root(
-            doc.join(DEFAULT_DATA_DIR_NAME),
-            doc.join(LEGACY_DATA_DIR_NAME),
-        )
-        .to_string_lossy()
-        .to_string())
+        Ok(canonical_default_data_dir(&doc)
+            .to_string_lossy()
+            .to_string())
     }
 }
 
@@ -1333,8 +1338,43 @@ mod data_root_name_tests {
         ));
         let preferred = root.join(DEFAULT_DATA_DIR_NAME);
         let legacy = root.join(LEGACY_DATA_DIR_NAME);
-        fs::create_dir_all(&legacy).unwrap();
+        fs::create_dir_all(legacy.join("data")).unwrap();
+        fs::write(legacy.join("data/app-state.json"), b"{}").unwrap();
         assert_eq!(select_default_data_root(preferred, legacy.clone()), legacy);
+    }
+
+    #[test]
+    fn legacy_primary_state_beats_an_empty_preferred_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "wgt-root-safe-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let preferred = root.join(DEFAULT_DATA_DIR_NAME);
+        let legacy = root.join(LEGACY_DATA_DIR_NAME);
+        fs::create_dir_all(preferred.join("data")).unwrap();
+        fs::create_dir_all(legacy.join("data")).unwrap();
+        fs::write(legacy.join("data/app-state.json"), b"{}").unwrap();
+        assert_eq!(select_default_data_root(preferred, legacy.clone()), legacy);
+    }
+
+    #[test]
+    fn canonical_default_target_ignores_legacy_fallback() {
+        let root = std::env::temp_dir().join(format!(
+            "wgt-default-target-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        assert_eq!(
+            canonical_default_data_dir(&root),
+            root.join(DEFAULT_DATA_DIR_NAME)
+        );
     }
 }
 

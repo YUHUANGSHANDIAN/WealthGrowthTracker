@@ -19,6 +19,15 @@ function fileTimestamp(d = new Date()): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+function backupSortKey(name: string): string {
+  const match = /^wealth-backup(?:_manual)?_(\d{4}-\d{2}-\d{2}_\d{6}|\d{8}_\d{6})/.exec(name);
+  if (!match) return '';
+  const stamp = match[1]!;
+  return stamp.includes('-')
+    ? stamp
+    : `${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6, 8)}_${stamp.slice(9)}`;
+}
+
 /** 原子写入：先写临时文件，再 rename 覆盖，降低断电/崩溃造成 JSON 损坏的风险。 */
 async function atomicWrite(fs: FileSystem, relPath: string, content: string): Promise<void> {
   const dir = relPath.split('/').slice(0, -1).join('/');
@@ -91,7 +100,10 @@ export class DesktopDataManager {
   async listBackups(): Promise<string[]> {
     try {
       const entries = await this.fs.readDir(BACKUPS_DIR);
-      return entries.filter((n) => n.endsWith('.json')).sort().reverse();
+      return entries
+        .filter((name) => /^wealth-backup(?:_manual)?_[\w-]+\.json$/.test(name))
+        .sort((left, right) =>
+          backupSortKey(right).localeCompare(backupSortKey(left)) || right.localeCompare(left));
     } catch (cause) {
       throw new StorageWriteError('无法读取备份列表', cause);
     }

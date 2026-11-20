@@ -45,7 +45,7 @@ export interface Route {
   assetView?: 'balances' | 'holdings' | 'risk';
   reportMode?: 'read' | 'revisions' | 'edit';
   viewId?: string;
-  settingsSection?: SettingsSectionId;
+  settingsSection?: SettingsSectionId | 'storage';
   financeTaskKind?: FinanceTaskKind;
   financeTaskId?: string;
   financeEvidenceId?: string;
@@ -142,6 +142,10 @@ export function parseHash(hash = typeof window === 'undefined' ? '' : window.loc
   if (reportMode === 'read' || reportMode === 'revisions' || reportMode === 'edit') route.reportMode = reportMode;
   const settingsSection = params.get('section');
   if (route.tab === 'settings' && isSettingsSection(settingsSection)) route.settingsSection = settingsSection;
+  if (route.tab === 'settings' && (settingsSection === 'storage' || settingsSection === 'data')) {
+    route.tab = 'data';
+    route.settingsSection = 'storage';
+  }
   return route;
 }
 

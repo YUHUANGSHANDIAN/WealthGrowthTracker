@@ -6,6 +6,7 @@ import { SETTINGS_SECTIONS } from '../../src/constants/settings';
 import { useNavigationStore } from '../../src/store/navigationStore';
 import { useAppStore } from '../../src/store/appStore';
 import { checkForUpdate } from '../../src/utils/updateCheck';
+import { SECONDARY_NAV_ITEMS } from '../../src/constants/navigation';
 
 vi.mock('../../src/utils/updateCheck', () => ({
   checkForUpdate: vi.fn().mockResolvedValue({ latest: '1.7.0', isNewer: false, url: '', assets: [] }),
@@ -65,12 +66,13 @@ describe('SettingsPage', () => {
     expect(useNavigationStore.getState().tab).toBe('ai');
   });
 
-  it('links storage operations to the data center without fake toggles', () => {
-    useNavigationStore.getState().navigate({ tab: 'settings', settingsSection: 'storage' });
-    render(<SettingsPage />);
-    expect(screen.getByText(/未提供云端账户或自动云同步/)).toBeInTheDocument();
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '打开数据中心' }));
+  it('exposes one settings entry for the unified data maintenance page', () => {
+    expect(SETTINGS_SECTIONS.map((item) => item.id as string)).not.toContain('storage');
+    expect(SETTINGS_SECTIONS.map((item) => item.label as string)).not.toContain('数据维护');
+    expect(SECONDARY_NAV_ITEMS.settings.filter((item) => item.label === '数据维护')).toEqual([
+      expect.objectContaining({ tab: 'data', settingsSection: 'storage' }),
+    ]);
+    expect(useNavigationStore.getState().navigate({ tab: 'data' })).toBeUndefined();
     expect(useNavigationStore.getState().tab).toBe('data');
   });
 

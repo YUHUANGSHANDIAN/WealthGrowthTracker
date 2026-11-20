@@ -60,7 +60,6 @@ export function SettingsContent({ section, onSectionChange }: { section: Setting
         {section === 'appearance' && <AppearanceSection />}
         {section === 'records' && <RecordsSection />}
         {section === 'ai' && <AISection />}
-        {section === 'storage' && <StorageSection />}
         {section === 'account' && <AccountSection />}
         {section === 'update' && <UpdateSection />}
         {section === 'privacy' && <PrivacySection />}
@@ -106,25 +105,6 @@ function AISection() {
         <h3>订阅与发布边界</h3>
         <p>合成测试通过只证明端点与凭据当前可用。正式发布要求至少两类厂商许可的订阅路径完成真实认证、推理与撤销验收；API Key、本地模型和 mock 都不计入该发布门。</p>
       </div>
-    </div>
-  );
-}
-
-function StorageSection() {
-  const navigate = useNavigationStore((state) => state.navigate);
-  const isDesktop = storageService.getAdapterName() === 'desktop';
-  return (
-    <div className="space-y-5">
-      <div className="settings-note">
-        <h3>当前存储</h3>
-        <p>存储后端：{storageService.getAdapterName()}。核心数据在当前设备本地保存，未提供云端账户或自动云同步。</p>
-      </div>
-      <div className="settings-note">
-        <h3>导入、备份与恢复</h3>
-        <p>在数据中心检查数据健康、导入备份和导出数据。{isDesktop ? '桌面备份与存储位置也在数据中心管理。' : '当前平台可通过文件导出保留备份；桌面目录管理在此平台不可用。'}</p>
-      </div>
-      <Button variant="outline" onClick={() => navigate({ tab: 'data' })}>打开数据中心</Button>
-      <p className="text-sm text-slate-600">普通备份是数据文件，不等于加密备份。请自行保管备份文件，并在分享前检查其内容。</p>
     </div>
   );
 }

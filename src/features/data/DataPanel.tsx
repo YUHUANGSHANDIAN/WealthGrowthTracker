@@ -43,6 +43,7 @@ import { ChangePreviewPanel, PageHeader } from '../../components/ui/workspace';
 import { HealthAssistantDrawer } from './HealthAssistantDrawer';
 import { prepareHealthFix, type HealthFixProposal } from './issueFix';
 import { useHealthAssistantStore } from '../../store/healthAssistantStore';
+import { DATA_MAINTENANCE_TITLE, healthReviewBadge } from './dataMaintenance';
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -99,7 +100,6 @@ export function DataPanel() {
 
   const coverageByYear = useMemo(() => monthlyCoverageByYear(reports, history), [reports, history]);
   const backfillPlan = useMemo(() => planBackfill(reports, history), [reports, history]);
-  const maintenanceActions = useMemo(() => buildMaintenanceActions({ reports, history, channels, hasCustomStorage: dataRootMode === 'custom' }), [reports, history, channels, dataRootMode]);
 
   const health = useMemo(() => {
     const issues = scanAllHealth({
@@ -108,6 +108,13 @@ export function DataPanel() {
     });
     return { issues, ok: issues.length === 0 };
   }, [channels, history, reports, goals, primaryGoalId, levelAchievements, lottery, monthlyPlanning, assetClassification, attachmentStatus]);
+  const maintenanceActions = useMemo(() => buildMaintenanceActions({
+    reports,
+    history,
+    channels,
+    hasCustomStorage: dataRootMode === 'custom',
+    issues: health.issues,
+  }), [reports, history, channels, dataRootMode, health.issues]);
   const sortedHistory = useMemo(() => [...history].sort((a, b) => (a.date < b.date ? -1 : 1)), [history]);
 
   useEffect(() => {
@@ -125,6 +132,8 @@ export function DataPanel() {
         if (active && cfg) setDataRootMode(cfg.dataRootMode);
         const legacy = await dataRootIsLegacy();
         if (active) setLegacyDefaultRoot(legacy);
+        const mgr = storageService.getDesktopManager();
+        if (active && mgr) setBackups(await mgr.listBackups());
       } catch {
         if (active) pushToast('无法读取存储位置，请检查配置与权限', 'error');
       }
@@ -520,7 +529,7 @@ export function DataPanel() {
     <div className="space-y-4">
       <PageHeader
         eyebrow="设置 · 数据维护"
-        title="数据健康、备份与存储"
+        title={DATA_MAINTENANCE_TITLE}
         description="核对问题、导入导出、完整备份和存储位置在同一工作区管理；危险操作与实际状态分开显示。"
         context={<><span>{channels.length} 个父渠道</span><span>·</span><span>{history.length} 条历史</span><span>·</span><span>{monthlyPlanning.sessions.length} 个理财任务</span></>}
         primaryAction={<Button onClick={() => void handleFullBackup()}>创建完整备份</Button>}
@@ -541,13 +550,19 @@ export function DataPanel() {
         {isDesktop && dataPath && <p className="mt-3 text-xs text-slate-500 font-mono break-all">数据目录：{dataPath}</p>}
       </Card>
 
-      {/* 数据健康与维护中心（v1.6：动态 Maintenance Action + 问题详情） */}
-      <MaintenanceActions actions={maintenanceActions} />
-      <DataHealthCenter
+      {/* 唯一数据维护入口：动态维护任务与健康问题共享同一次扫描。 */}
+      <DataMaintenanceCenter
+        actions={maintenanceActions}
         issues={health.issues}
+        coverage={coverageByYear}
         onPreviewFix={openFixPreview}
         onAskAI={(issue) => { setAssistantIssue(issue); setAssistantOpen(true); }}
         onFreeQuestion={() => { setAssistantIssue(null); setAssistantOpen(true); }}
+        onOpenBackfill={() => {
+          setBackfillBaseRevision(useAppStore.getState().dataRevision);
+          setBackfillPreviewOpen(true);
+        }}
+        onExportDiagnostic={() => void exportAnonymousDiagnostic()}
         busy={busy}
       />
       <HealthAssistantDrawer
@@ -597,33 +612,6 @@ export function DataPanel() {
 
       {/* 活动日志 */}
       <ActivityLogCard />
-
-      {/* 数据维护：报告覆盖 + 历史补月报 + 匿名诊断 */}
-      <Card className="p-4">
-        <h2 className="font-semibold text-slate-800 mb-2">🧰 数据维护</h2>
-        <div className="space-y-3">
-          <div>
-            <div className="text-sm text-slate-600 mb-1">报告覆盖情况</div>
-            {coverageByYear.length === 0 ? (
-              <p className="text-xs text-slate-400">暂无历史数据可统计。</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {coverageByYear.map((y) => (
-                  <span key={y.year} className="text-xs bg-slate-50 rounded-lg px-2 py-1">
-                    {y.year}：月报 {y.covered} / {y.total}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => { setBackfillBaseRevision(useAppStore.getState().dataRevision); setBackfillPreviewOpen(true); }}>📅 预览补生成缺失月报</Button>
-            <AIActionButton task="data-health-explanation">AI 解释覆盖指标</AIActionButton>
-            <Button size="sm" variant="outline" onClick={() => void exportAnonymousDiagnostic()}>🩺 导出匿名诊断</Button>
-          </div>
-        </div>
-      </Card>
-
 
       <Card className="p-4">
         <h2 className="font-semibold text-slate-800 mb-2">导出数据</h2>
@@ -981,39 +969,6 @@ function ClickableStat({ label, value, onClick }: { label: string; value: string
   );
 }
 
-function MaintenanceActions({ actions }: { actions: MaintenanceAction[] }) {
-  if (actions.length === 0) {
-    return (
-      <Card className="p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="font-semibold text-slate-800">🩺 数据健康与维护中心</h2>
-          <Badge tone="emerald">✅ 无需处理</Badge>
-        </div>
-        <p className="text-sm text-slate-500">当前没有需要执行的数据维护任务。</p>
-      </Card>
-    );
-  }
-  return (
-    <Card className="p-4">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="font-semibold text-slate-800">🩺 数据健康与维护中心</h2>
-        <Badge tone="amber">{actions.length} 项待处理</Badge>
-      </div>
-      <div className="space-y-2">
-        {actions.map((a) => (
-          <div key={a.id} className="flex items-start gap-2 px-3 py-2 rounded-lg border border-slate-100">
-            <span className={a.severity === 'error' ? 'text-red-500' : a.severity === 'warning' ? 'text-amber-500' : 'text-slate-400'} aria-hidden>{a.severity === 'error' ? '✖' : '⚠'}</span>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-slate-700">{a.title}</div>
-              <div className="text-xs text-slate-400">{a.description}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
 const DOMAIN_ICONS: Record<HealthDomain, string> = {
   assets: '💰', history: '🕰️', reports: '📑', goals: '🎯', levels: '🏅', lottery: '🎟️', storage: '🗄️', settings: '⚙️',
   monthly: '📅', classification: '🧭',
@@ -1035,17 +990,25 @@ function issueNavigateTarget(i: DataIssue): { tab: import('../../store/navigatio
   }
 }
 
-function DataHealthCenter({
+function DataMaintenanceCenter({
+  actions,
   issues,
+  coverage,
   onPreviewFix,
   onAskAI,
   onFreeQuestion,
+  onOpenBackfill,
+  onExportDiagnostic,
   busy,
 }: {
+  actions: MaintenanceAction[];
   issues: DataIssue[];
+  coverage: Array<{ year: number; covered: number; total: number }>;
   onPreviewFix: (issue: DataIssue) => void;
   onAskAI: (issue: DataIssue) => void;
   onFreeQuestion: () => void;
+  onOpenBackfill: () => void;
+  onExportDiagnostic: () => void;
   busy: boolean;
 }) {
   const navigate = useNavigationStore((s) => s.navigate);
@@ -1054,10 +1017,15 @@ function DataHealthCenter({
   const reviews = useAppStore((s) => s.healthReviews.records);
   const ledgerId = useAppStore((s) => s.ledgerIdentity.ledgerId);
 
-  const visible = issues.filter((issue) => {
-    const review = reviews.find((item) => item.ledgerId === ledgerId && item.issueId === issue.id);
+  const reviewByIssue = useMemo(() => new Map(
+    reviews
+      .filter((item) => item.ledgerId === ledgerId)
+      .map((item) => [item.issueId, item]),
+  ), [reviews, ledgerId]);
+  const visible = useMemo(() => issues.filter((issue) => {
+    const review = reviewByIssue.get(issue.id);
     return !(review?.status === 'resolved' && review.fingerprint === issue.fingerprint);
-  });
+  }), [issues, reviewByIssue]);
   const grouped = useMemo(() => {
     const m = new Map<HealthDomain, DataIssue[]>();
     for (const i of visible) {
@@ -1076,30 +1044,57 @@ function DataHealthCenter({
     return () => window.cancelAnimationFrame(frame);
   }, [routeIssueId]);
 
-  if (visible.length === 0) {
-    return (
-      <Card className="p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="font-semibold text-slate-800">🩺 数据健康中心</h2>
-          <Badge tone="emerald">正常</Badge>
-        </div>
-        <p className="text-sm text-slate-500">未发现数据问题。</p>
-        <Button className="mt-3" size="sm" variant="outline" onClick={onFreeQuestion}>我有其它数据健康问题，问 AI</Button>
-      </Card>
-    );
-  }
-
   const errorCount = visible.filter((i) => i.severity === 'error').length;
+  const allClear = visible.length === 0 && actions.length === 0;
   return (
     <Card className="p-4">
       <div className="flex items-center justify-between mb-2">
-        <h2 className="font-semibold text-slate-800">🩺 数据健康中心</h2>
+        <h2 className="font-semibold text-slate-800">🩺 {DATA_MAINTENANCE_TITLE}</h2>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={onFreeQuestion}>问 AI</Button>
-          <Badge tone={errorCount > 0 ? 'red' : 'amber'}>{visible.length} 个问题{errorCount > 0 ? `（${errorCount} 错误）` : ''}</Badge>
+          {allClear && <Badge tone="emerald">✅ 无需处理</Badge>}
+          {actions.length > 0 && <Badge tone="amber">{actions.length} 项维护任务</Badge>}
+          {visible.length > 0 && <Badge tone={errorCount > 0 ? 'red' : 'amber'}>{visible.length} 个问题{errorCount > 0 ? `（${errorCount} 错误）` : ''}</Badge>}
         </div>
       </div>
 
+      {actions.length > 0 && (
+        <div className="mb-3 space-y-2" aria-label="待处理维护任务">
+          {actions.map((action) => (
+            <div key={action.id} className="flex items-start gap-2 rounded-lg border border-slate-100 px-3 py-2">
+              <span className={action.severity === 'error' ? 'text-red-500' : action.severity === 'warning' ? 'text-amber-500' : 'text-slate-400'} aria-hidden>
+                {action.severity === 'error' ? '✖' : '⚠'}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-slate-700">{action.title}</div>
+                <div className="text-xs text-slate-400">{action.description}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mb-3 rounded-lg border border-slate-200 p-3" aria-label="维护工具与报告覆盖">
+        <div className="text-xs font-medium text-slate-600">报告覆盖情况</div>
+        {coverage.length === 0 ? (
+          <p className="mt-1 text-xs text-slate-400">暂无历史数据可统计。</p>
+        ) : (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {coverage.map((item) => (
+              <span key={item.year} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600">
+                {item.year}：月报 {item.covered} / {item.total}
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={onOpenBackfill}>📅 预览补生成缺失月报</Button>
+          <AIActionButton task="data-health-explanation">AI 解释覆盖指标</AIActionButton>
+          <Button size="sm" variant="outline" onClick={onExportDiagnostic}>🩺 导出匿名诊断</Button>
+        </div>
+      </div>
+      {visible.length === 0 && (
+        <p className="mb-3 text-sm text-slate-500">当前没有需要执行的数据维护任务，也未发现数据问题。</p>
+      )}
       {routeIssueId && !visible.some((issue) => issue.id === routeIssueId) && (
         <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">
           指定的问题已解决、已移除或来自另一份数据。当前显示最新健康扫描结果。
@@ -1125,12 +1120,8 @@ function DataHealthCenter({
                         <span className={i.severity === 'error' ? 'text-red-500' : 'text-amber-500'} aria-hidden>{i.severity === 'error' ? '✖' : '⚠'}</span>
                         <span className="text-sm text-slate-700 font-medium">{i.title}</span>
                         {(() => {
-                          const review = reviews.find((item) => item.ledgerId === ledgerId && item.issueId === i.id && item.fingerprint === i.fingerprint);
-                          return review ? (
-                            <Badge tone={review.status === 'resolved' ? 'emerald' : review.status === 'deferred' ? 'amber' : 'blue'}>
-                              {review.status === 'resolved' ? '已解决' : review.status === 'deferred' ? '暂缓' : '已阅未解决'}
-                            </Badge>
-                          ) : null;
+                          const badge = healthReviewBadge(i, reviewByIssue.get(i.id));
+                          return badge ? <Badge tone={badge.tone}>{badge.label}</Badge> : null;
                         })()}
                       </div>
                     </button>

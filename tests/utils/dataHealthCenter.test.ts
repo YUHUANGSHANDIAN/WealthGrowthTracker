@@ -92,4 +92,13 @@ describe('Navigation', () => {
       assetView: 'holdings',
     });
   });
+
+  it.each([
+    '#/data',
+    '#/settings/storage',
+    '#/settings/data',
+    '#/settings?section=storage',
+  ])('旧数据维护链接 %s 仍落到唯一数据页', (hash) => {
+    expect(parseHash(hash).tab).toBe('data');
+  });
 });
