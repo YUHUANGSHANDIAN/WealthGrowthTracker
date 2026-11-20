@@ -43,7 +43,7 @@ import { ChangePreviewPanel, PageHeader } from '../../components/ui/workspace';
 import { HealthAssistantDrawer } from './HealthAssistantDrawer';
 import { prepareHealthFix, type HealthFixProposal } from './issueFix';
 import { useHealthAssistantStore } from '../../store/healthAssistantStore';
-import { DATA_MAINTENANCE_TITLE } from './dataMaintenance';
+import { DATA_MAINTENANCE_TITLE, healthReviewBadge } from './dataMaintenance';
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -1120,12 +1120,8 @@ function DataMaintenanceCenter({
                         <span className={i.severity === 'error' ? 'text-red-500' : 'text-amber-500'} aria-hidden>{i.severity === 'error' ? '✖' : '⚠'}</span>
                         <span className="text-sm text-slate-700 font-medium">{i.title}</span>
                         {(() => {
-                          const review = reviewByIssue.get(i.id);
-                          return review ? (
-                            <Badge tone={review.status === 'resolved' ? 'emerald' : review.status === 'deferred' ? 'amber' : 'blue'}>
-                              {review.status === 'resolved' ? '已解决' : review.status === 'deferred' ? '暂缓' : '已阅未解决'}
-                            </Badge>
-                          ) : null;
+                          const badge = healthReviewBadge(i, reviewByIssue.get(i.id));
+                          return badge ? <Badge tone={badge.tone}>{badge.label}</Badge> : null;
                         })()}
                       </div>
                     </button>

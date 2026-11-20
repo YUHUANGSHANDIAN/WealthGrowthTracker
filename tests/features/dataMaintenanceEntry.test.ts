@@ -6,7 +6,11 @@ import {
 } from '../../src/features/workspace/commandPaletteItems';
 import { buildMaintenanceActionsFromIssues } from '../../src/utils/maintenance';
 import type { DataIssue } from '../../src/utils/dataHealth';
-import { DATA_MAINTENANCE_TITLE } from '../../src/features/data/dataMaintenance';
+import {
+  DATA_MAINTENANCE_TITLE,
+  healthReviewBadge,
+} from '../../src/features/data/dataMaintenance';
+import type { HealthReviewRecord } from '../../src/domain/workspace/types';
 
 describe('数据维护唯一入口', () => {
   it('统一页面标题保持一个公开名称', () => {
@@ -41,5 +45,37 @@ describe('数据维护唯一入口', () => {
     });
     expect(actions.map((action) => action.id)).toEqual(['dup-period']);
     expect(actions[0]).toMatchObject({ severity: 'error' });
+  });
+
+  it('证据指纹变化后不再显示旧的已解决状态', () => {
+    const issue = {
+      id: 'classification:duplicate',
+      fingerprint: 'new-fingerprint',
+    } as DataIssue;
+    const review = {
+      issueId: issue.id,
+      fingerprint: 'old-fingerprint',
+      status: 'resolved',
+    } as HealthReviewRecord;
+    expect(healthReviewBadge(issue, review)).toEqual({
+      label: '证据已变化',
+      tone: 'amber',
+    });
+  });
+
+  it('指纹一致时才显示现有处理状态', () => {
+    const issue = {
+      id: 'classification:duplicate',
+      fingerprint: 'same-fingerprint',
+    } as DataIssue;
+    const review = {
+      issueId: issue.id,
+      fingerprint: issue.fingerprint,
+      status: 'resolved',
+    } as HealthReviewRecord;
+    expect(healthReviewBadge(issue, review)).toEqual({
+      label: '已解决',
+      tone: 'emerald',
+    });
   });
 });
