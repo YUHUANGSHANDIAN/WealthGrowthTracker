@@ -86,6 +86,18 @@ describe('桌面文件存储', () => {
     expect(await adapter.getItem('wealth_tracker_data')).toBeNull();
   });
 
+  it('备份列表只接受可恢复的备份文件名，不把无关 JSON 计为备份', async () => {
+    fs.files.set(`${BACKUPS_DIR}/wealth-backup_2026-01-04_000000.json`, '{}');
+    fs.files.set(`${BACKUPS_DIR}/wealth-backup_manual_2026-01-02_000000.json`, '{}');
+    fs.files.set(`${BACKUPS_DIR}/notes.json`, '{}');
+    fs.files.set(`${BACKUPS_DIR}/wealth-backup_2026-01-03_000000.json.bak`, '{}');
+
+    expect(await new DesktopDataManager(fs).listBackups()).toEqual([
+      'wealth-backup_2026-01-04_000000.json',
+      'wealth-backup_manual_2026-01-02_000000.json',
+    ]);
+  });
+
   it('保存 → 落盘 → 重新读取一致', async () => {
     const a1 = new DesktopFileStorageAdapter(fs);
     await a1.setItem('foo', JSON.stringify({ x: 1 }));

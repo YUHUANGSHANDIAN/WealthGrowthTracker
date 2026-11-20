@@ -1,5 +1,5 @@
 import type { Channel, FinancialReport, HistoryPoint } from '../types';
-import { checkReportHealth } from './dataHealth';
+import { checkReportHealth, type DataIssue } from './dataHealth';
 import { duplicateHistoryDates } from './history';
 import { reportCoverage } from '../features/reports/backfill';
 
@@ -21,16 +21,18 @@ export interface MaintenanceInput {
   history: HistoryPoint[];
   channels: Channel[];
   hasCustomStorage?: boolean;
+  issues?: DataIssue[];
 }
 
-export function buildMaintenanceActions(input: MaintenanceInput): MaintenanceAction[] {
+export function buildMaintenanceActionsFromIssues(input: MaintenanceInput & { issues: DataIssue[] }): MaintenanceAction[] {
   const actions: MaintenanceAction[] = [];
-  const reportIssues = checkReportHealth(input.reports);
-  const dupHistory = duplicateHistoryDates(input.history);
+  const reportIssues = input.issues.filter((issue) => issue.domain === 'reports');
+  const dupHistory = input.issues.filter((issue) =>
+    issue.domain === 'history' && issue.title.includes('重复日期'));
 
   // 周报 ISO 周期错误
   const isoErrors = reportIssues.filter((i) =>
-    i.title.includes('周期') || i.title.includes('isoWeek') || i.title.includes('weekNumber') || i.title.includes('标准标题'),
+    i.title.includes('周报周期非法') || i.title.includes('isoWeek') || i.title.includes('weekNumber') || i.title.includes('标准标题'),
   );
   if (isoErrors.length > 0) {
     actions.push({
@@ -79,4 +81,20 @@ export function buildMaintenanceActions(input: MaintenanceInput): MaintenanceAct
   }
 
   return actions;
+}
+
+export function buildMaintenanceActions(input: MaintenanceInput): MaintenanceAction[] {
+  if (input.issues) return buildMaintenanceActionsFromIssues({ ...input, issues: input.issues });
+  const reportIssues = checkReportHealth(input.reports);
+  const dupHistory = duplicateHistoryDates(input.history);
+  const inferredIssues: DataIssue[] = [
+    ...reportIssues,
+    ...(dupHistory.length ? [{
+      id: 'history:duplicate-dates',
+      domain: 'history',
+      title: '存在重复日期的历史记录',
+      severity: 'warning',
+    } as DataIssue] : []),
+  ];
+  return buildMaintenanceActionsFromIssues({ ...input, issues: inferredIssues });
 }

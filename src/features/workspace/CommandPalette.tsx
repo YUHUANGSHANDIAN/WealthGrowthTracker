@@ -5,6 +5,7 @@ import { Modal } from '../../components/ui/Modal';
 import { TextField } from '../../components/ui/form';
 import { SETTINGS_SECTIONS } from '../../constants/settings';
 import { FINANCE_TASK_KIND_LABELS, taskKindOf } from '../../domain/portfolio/session';
+import { buildMaintenanceCommands } from './commandPaletteItems';
 const PAGES: Array<{ id: TabId; label: string; description: string }> = [
   { id: 'overview', label: '总览', description: '资产近况与下一步' },
   { id: 'assets', label: '资产', description: '账户、持仓与金额更新' },
@@ -15,7 +16,6 @@ const PAGES: Array<{ id: TabId; label: string; description: string }> = [
   { id: 'goals', label: '目标管理', description: '进度、期限与里程碑' },
   { id: 'prediction', label: '情景预测', description: '本地情景与假设' },
   { id: 'lottery', label: '彩票', description: '独立资金池与历史表现' },
-  { id: 'data', label: '数据维护', description: '健康、导入与备份' },
   { id: 'ai', label: '模型连接', description: '连接、切换与授权状态' },
   { id: 'settings', label: '偏好设置', description: '资料、外观、安全与隐私' },
 ];
@@ -46,6 +46,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         route: { tab: 'settings', settingsSection: section.id },
       });
     }
+    all.push(...buildMaintenanceCommands());
     for (const channel of channels) {
       all.push({ key: `channel:${channel.id}`, label: channel.name, detail: '资产渠道', route: { tab: 'assets', channelId: channel.id } });
       for (const child of channel.children ?? []) {
